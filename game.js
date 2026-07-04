@@ -1557,6 +1557,9 @@ const PHYS=(typeof ZPhys!=='undefined')?{
 if(PHYS.enabled){ PHYS.engine.g.set(0,-9.81,0); PHYS.engine.substeps=6; PHYS.engine.iters=3; }
 
 
+const ZAN_VERSION='v20-strip';
+console.log('%c斬 ZAN '+ZAN_VERSION,'font-size:16px');
+
 /* =========================================================================
    GLB CHARACTER PIPELINE — load any Mixamo-rigged model (models/samurai.glb
    if you provide one, bundled Xbot/Soldier otherwise) and retarget it live:
