@@ -1584,12 +1584,22 @@ const MODELPIPE=(()=>{
     }
   }
   /* bone-name resolution: mixamorig:X, mixamorigX, or bare X */
+  /* robust bone resolution: strip punctuation, lowercase, suffix-match.
+     handles mixamorig:Hips, mixamorigHips (FBXLoader strips colons),
+     mixamorig1_Hips, bare Hips — and rigs whose joints load as plain
+     Object3D rather than THREE.Bone. */
   function findBone(root,name){
-    let b=null;
-    const rx=new RegExp('(^|[:_])'+name+'$');
-    root.traverse(o=>{ if(b)return;
-      if(o.isBone&&rx.test(o.name))b=o; });
-    return b;
+    const want=name.toLowerCase();
+    const clean=s=>s.toLowerCase().replace(/[^a-z0-9]/g,'');
+    let bone=null,node=null;
+    root.traverse(o=>{
+      if(!o.name)return;
+      if(clean(o.name).endsWith(want.replace(/[^a-z0-9]/g,''))){
+        if(o.isBone){ if(!bone)bone=o; }
+        else if(!o.isMesh&&!node)node=o;
+      }
+    });
+    return bone||node;
   }
   const CORE=['Hips','Spine','Spine1','Spine2','Neck','Head',
     'RightShoulder','RightArm','RightForeArm','RightHand',
@@ -1612,12 +1622,20 @@ const MODELPIPE=(()=>{
     let found=0;
     for(const n of CORE){ bones[n]=findBone(root,n); if(bones[n])found++; }
     if(!bones.Hips){
-      log('model loaded but has NO Mixamo rig ('+found+'/'+CORE.length+
-        ' bones) — run it through Mixamo auto-rigger, re-export, retry',false);
+      /* show what the file actually contains, so the fix is obvious */
+      const names=[];
+      root.traverse(o=>{ if(names.length<10&&o.name&&!o.isMesh&&
+        /hip|spine|arm|leg|head|neck|bone|joint/i.test(o.name))names.push(o.name); });
+      if(!names.length)root.traverse(o=>{ if(names.length<8&&o.name)names.push(o.name); });
+      log('no rig resolved ('+found+'/'+CORE.length+'). nodes seen: '+
+        (names.join(', ')||'none'),false);
       return null;
     }
     if(found<CORE.length)
       log('model rig partial: '+found+'/'+CORE.length+' bones resolved',false);
+    let skinned=0; root.traverse(o=>{ if(o.isSkinnedMesh)skinned++; });
+    if(!skinned)
+      log('rig found but NO skinned mesh — on Mixamo download choose Skin: WITH SKIN',false);
     scene.add(root);
     return {root,bones,scale:s,worldQ:{}};
   }
