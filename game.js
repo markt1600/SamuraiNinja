@@ -2073,9 +2073,31 @@ Fighter.prototype.renderJoints=function(_dj){
     this.katana.quaternion.setFromUnitVectors(UPY,TMP1);
   }
 };
+Fighter.prototype.sleepCorpse=function(){
+  if(this._asleep)return; this._asleep=true;
+  for(const k in this.phys.B){ const b=this.phys.B[k];
+    b._wakeInv=b.invMass; b.invMass=0;
+    b.vel.set(0,0,0); b.angVel&&b.angVel.set(0,0,0);
+  }
+};
+Fighter.prototype.wakeCorpse=function(){
+  if(!this._asleep)return; this._asleep=false; this._calm=0;
+  for(const k in this.phys.B){ const b=this.phys.B[k];
+    if(b._wakeInv!==undefined)b.invMass=b._wakeInv;
+  }
+};
 Fighter.prototype.updateDeadPhys=function(dt){
   const {B}=this.phys, P=this.parts;
-  this.physTargets(this._K,dt);          // continues the brown-out fade
+  if(!this._asleep){
+    this.physTargets(this._K,dt);        // continues the brown-out fade
+    /* a corpse that has settled goes truly still — no solver jitter,
+       no twitching under the victor's feet */
+    let v2=0;
+    for(const k in B){ const b=B[k];
+      v2=Math.max(v2,b.vel.lengthSq()); }
+    this._calm=(v2<.09)?(this._calm||0)+dt:0;
+    if(this._calm>.8&&!this._deathClip)this.sleepCorpse();
+  }
   /* procedural performance: puppet drives the joints over the sim */
   if(!this.model&&this._deathClip){
     if(MODELPIPE.tickPuppet(this,dt,_pj2)){
@@ -2143,8 +2165,10 @@ Fighter.prototype.physJoint=function(k,out){
   if(!j)return null;
   return j.body.toWorld(j.l,out);
 };
+Fighter.prototype._preImpulseWake=function(){ if(this._asleep)this.wakeCorpse(); };
 Fighter.prototype.physImpulse=function(partKey,dir,J){
   if(!this.phys)return;
+  this._preImpulseWake&&this._preImpulseWake();
   const map={head:'chest',neck:'chest',chest:'chest',abdomen:'pelvis',pelvis:'pelvis',
     upperArmR:'uaR',forearmR:'faR',upperArmL:'uaL',forearmL:'faL',
     thighR:'thR',shinR:'shR',thighL:'thL',shinL:'shL'};
@@ -3897,6 +3921,7 @@ function disposeFighter(f){
   if(f.skin)scene.remove(f.skin.mesh);
   if(f.glint)scene.remove(f.glint);
   if(f.blobs)for(const b of f.blobs)scene.remove(b);
+  f._asleep=false; f._calm=0;
   f.disposePhys&&f.disposePhys();
   if(f.model){ scene.remove(f.model.root); f.model=null; }
   for(const k in f.parts)scene.remove(f.parts[k]);
