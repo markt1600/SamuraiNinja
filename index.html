@@ -69,9 +69,15 @@
   /* cinematic vignette */
   #vignette{position:fixed;inset:0;pointer-events:none;z-index:4;
     background:radial-gradient(ellipse at 50% 46%, transparent 52%, rgba(6,8,12,.62) 100%);}
+  .cine-bar{position:fixed;left:0;width:100%;height:0;background:#000;z-index:40;
+    transition:height 1.1s cubic-bezier(.4,0,.2,1);pointer-events:none}
+  #cine-top{top:0} #cine-bot{bottom:0}
+  body.cine #cine-top,body.cine #cine-bot{height:7vh}
 </style>
 </head>
 <body>
+<div class="cine-bar" id="cine-top"></div>
+<div class="cine-bar" id="cine-bot"></div>
 <div id="vignette"></div>
 
 <div id="hud">
@@ -103,12 +109,13 @@
 <div class="screen" id="menu">
   <div class="kanji">斬</div>
   <div class="title-sub">Z A N</div>
-  <div class="title-tag">three duelists wait in the snow · one cut decides · nowhere to run</div>
+  <div class="title-tag">the road provides duelists without end · your wounds follow you · one cut decides</div>
   <div class="rule"></div>
   <div class="controls">
     <b>mouse</b><span>your blade has mass — swing hard to cut, slow taps glance off</span>
     <b>edge</b><span>a turning blade lands flat; commit through the line of the cut</span>
-    <b>RMB</b><span>guard — raised at the last instant, it becomes a parry</span>
+    <b>RMB</b><span>guard — raised at the last instant, it becomes a parry</span></div>
+    <div class="ctl"><b>BIND</b><span>when blades lock: press W to drive through, S to break away</span>
     <b>shift</b><span>thrust posture — the point beats armor and ribs</span>
     <b>W A S D</b><span>footwork — distance is life</span>
   </div>

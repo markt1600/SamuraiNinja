@@ -106,6 +106,43 @@ Kill all three: **三人斬り**.
   Kiyomasa waits in jodan, Gennosuke in seigan, Shizuka in waki: you can
   read each duelist's school from their silhouette.
 
+## v5 — the duel becomes a life
+
+- **The bind** — sustained blade contact locks into a pressure contest:
+  drive with the mouse and W, or pull S to disengage. Win it and his blade
+  flies wide; lose it and he counters. Gennosuke deliberately *yields* to
+  whirl into a cut. Steel scrapes; the camera leans in.
+- **A mind and a heart** — the AI remembers your cut heights and your
+  retreat-then-attack habit; once read (4+ observations), he parries and
+  pre-positions his guard at your favorite line. Fear (blood, pain) makes
+  his technique brittle and finally desperate; your passivity makes him
+  bold. He tells you, in the log, when either happens.
+- **Kinetic-chain power** — cut energy is gated by body mechanics:
+  off-balance −35%, mid-step −12%, hips driving +16%. A knee-drop
+  knockdown triggers when stagger (heavy hits, lost binds, being parried)
+  overwhelms; he fights on one knee, sword slow, until he rises.
+- **Perceptual death** — as blood falls: color desaturates, the vignette
+  closes, the world's sound sinks under your heartbeat, your sword grows
+  heavy (spring constant scales with consciousness). First blood grants
+  22s of adrenaline: warm, sharp, faster hands.
+- **A living ring** — snow is deeper near the rope (drag + stamina cost +
+  high-stepping); most nights an ice patch waits somewhere: poor grip,
+  slips under hard turns, no footprints. Raised steel catches the moon —
+  telegraphs literally flash. Breath vapor quickens with exhaustion and
+  stops with death.
+- **Film grammar** — hard cut to the reverse angle on severe wounds;
+  patient wide framing when both duelists wait; letterbox bars close in
+  for the kill.
+- **The endless life** — beyond the named three, procedurally generated
+  challengers arrive forever, harder each time. **Wounds follow you**,
+  60% unhealed: the limp from duel four is still there in duel nine.
+  Death shows the career — duels survived, men cut down — and keeps a
+  best-run record.
+- **Better bodies** — UV-mapped woven kimono and pleated hakama textures
+  (palette-tinted per duelist), a contoured torso with shoulder yoke and
+  waist, deltoid swell into the sleeve flare, and a geometric face: eyes,
+  brows, nose, mouth.
+
 ## Headless tests
 
 `node test_harness.js` — jsdom + real three.js math, stubbed GPU/audio.

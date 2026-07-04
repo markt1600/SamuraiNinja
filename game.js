@@ -43,8 +43,18 @@ function segSegClosest(p1,q1,p2,q2,out1,out2){
 
 /* ------------------------------ audio --------------------------------- */
 const Sound=(()=>{
-  let ctx=null;
+  let ctx=null,busG=null,busF=null;
   const ac=()=>ctx||(ctx=new (window.AudioContext||window.webkitAudioContext)());
+  const bus=()=>{ const c=ac();
+    if(!busG){ try{
+      busF=c.createBiquadFilter(); busF.type='lowpass'; busF.frequency.value=18000;
+      busG=c.createGain(); busG.gain.value=1;
+      busG.connect(busF); busF.connect(bus());
+    }catch(e){ busG=null; return c.destination; } }
+    return busG||c.destination; };
+  function setMuffle(m){ try{ if(busF)
+    busF.frequency.setTargetAtTime(lerp(16000,760,clamp(m,0,1)),ac().currentTime,.25);
+  }catch(e){} }
   function noiseBuf(len){ const b=ac().createBuffer(1,ac().sampleRate*len,ac().sampleRate);
     const d=b.getChannelData(0); for(let i=0;i<d.length;i++)d[i]=Math.random()*2-1; return b; }
   function whoosh(speed){ // blade cutting air — filtered noise sweep
@@ -55,6 +65,18 @@ const Sound=(()=>{
     g.gain.setValueAtTime(0,t); g.gain.linearRampToValueAtTime(vol,t+.05); g.gain.exponentialRampToValueAtTime(.001,t+.32);
     s.connect(f).connect(g).connect(ctx.destination); s.start(t);
   }
+  function scrape(){ // steel grinding on steel, low and mean
+    try{
+      const c=ac(), t=c.currentTime;
+      const s=c.createBufferSource(); s.buffer=noiseBuf(.22);
+      const f=c.createBiquadFilter(); f.type='bandpass'; f.Q.value=9;
+      f.frequency.setValueAtTime(1900+Math.random()*900,t);
+      f.frequency.exponentialRampToValueAtTime(900+Math.random()*400,t+.2);
+      const g=c.createGain(); g.gain.setValueAtTime(.05,t);
+      g.gain.exponentialRampToValueAtTime(.0001,t+.22);
+      s.connect(f); f.connect(g); g.connect(bus()); s.start(t);
+    }catch(e){}
+  }
   function step(speed){ // snow crunch, weight-scaled
     try{
       const c=ac(), t=c.currentTime;
@@ -64,7 +86,7 @@ const Sound=(()=>{
       const g=c.createGain();
       g.gain.setValueAtTime(.028+clamp(speed,0,3)*.012,t);
       g.gain.exponentialRampToValueAtTime(.0001,t+.09);
-      s.connect(f); f.connect(g); g.connect(c.destination); s.start(t);
+      s.connect(f); f.connect(g); g.connect(bus()); s.start(t);
     }catch(e){}
   }
   /* ---- ambience: wind that breathes, ducked at the kill ---- */
@@ -76,7 +98,7 @@ const Sound=(()=>{
       const f=c.createBiquadFilter(); f.type='bandpass'; f.frequency.value=280; f.Q.value=.7;
       const f2=c.createBiquadFilter(); f2.type='lowpass'; f2.frequency.value=900;
       windGain=c.createGain(); windGain.gain.setValueAtTime(0,t);
-      s.connect(f); f.connect(f2); f2.connect(windGain); windGain.connect(c.destination);
+      s.connect(f); f.connect(f2); f2.connect(windGain); windGain.connect(bus());
       s.start();
     }catch(e){}
   }
@@ -107,7 +129,7 @@ const Sound=(()=>{
           o.frequency.exponentialRampToValueAtTime(38,t+.09);
           f.type='lowpass'; f.frequency.value=140;
           g.gain.setValueAtTime(vol,t); g.gain.exponentialRampToValueAtTime(.0001,t+.16);
-          o.connect(f); f.connect(g); g.connect(c.destination);
+          o.connect(f); f.connect(g); g.connect(bus());
           o.start(t); o.stop(t+.2);
         };
         const v=.05+urgency*.14;
@@ -123,12 +145,12 @@ const Sound=(()=>{
       o.type='sine'; o.frequency.setValueAtTime(96,t);
       o.frequency.exponentialRampToValueAtTime(44,t+.4);
       g.gain.setValueAtTime(.5,t); g.gain.exponentialRampToValueAtTime(.0001,t+.9);
-      o.connect(g); g.connect(c.destination); o.start(t); o.stop(t+1);
+      o.connect(g); g.connect(bus()); o.start(t); o.stop(t+1);
       const s=c.createBufferSource(); s.buffer=noiseBuf(.12);
       const f=c.createBiquadFilter(); f.type='lowpass'; f.frequency.value=500;
       const g2=c.createGain(); g2.gain.setValueAtTime(.22,t);
       g2.gain.exponentialRampToValueAtTime(.0001,t+.14);
-      s.connect(f); f.connect(g2); g2.connect(c.destination); s.start(t);
+      s.connect(f); f.connect(g2); g2.connect(bus()); s.start(t);
     }catch(e){}
   }
   /* ---- the kill: sub boom, wind holds its breath ---- */
@@ -139,7 +161,7 @@ const Sound=(()=>{
       o.type='sine'; o.frequency.setValueAtTime(52,t);
       o.frequency.exponentialRampToValueAtTime(26,t+1.1);
       g.gain.setValueAtTime(.4,t); g.gain.exponentialRampToValueAtTime(.0001,t+1.6);
-      o.connect(g); g.connect(c.destination); o.start(t); o.stop(t+1.8);
+      o.connect(g); g.connect(bus()); o.start(t); o.stop(t+1.8);
       duckWind();
     }catch(e){}
   }
@@ -151,7 +173,7 @@ const Sound=(()=>{
         o.type='triangle'; o.frequency.value=f0*(1+Math.random()*.02);
         g.gain.setValueAtTime(.14/(i+1),t);
         g.gain.exponentialRampToValueAtTime(.0001,t+.5+i*.1);
-        o.connect(g); g.connect(c.destination);
+        o.connect(g); g.connect(bus());
         o.start(t+i*.028); o.stop(t+.8);
       });
     }catch(e){}
@@ -185,7 +207,7 @@ const Sound=(()=>{
     const g=ctx.createGain(); g.gain.setValueAtTime(.5,t); g.gain.exponentialRampToValueAtTime(.001,t+.3);
     o.connect(g).connect(ctx.destination); o.start(t); o.stop(t+.35);
   }
-  return {ac,whoosh,clang,cut,thump,parry,startWind,tickWind,tickHeart,taiko,killMoment,step};
+  return {ac,whoosh,clang,cut,thump,parry,startWind,tickWind,tickHeart,taiko,killMoment,step,setMuffle,scrape};
 })();
 
 
@@ -244,10 +266,17 @@ const POST=(()=>{
     const blurV=mat(blurFS,{tex:{value:rtB.texture},dir:{value:new THREE.Vector2(0,1/(H>>1))}});
     const comp=mat(
       'uniform sampler2D scene; uniform sampler2D bloom; varying vec2 vUv;'+
+      'uniform float uDesat; uniform float uVig; uniform float uAdren;'+
       'void main(){ vec3 c=texture2D(scene,vUv).rgb+texture2D(bloom,vUv).rgb*1.15;'+
-      ' c=pow(clamp(c,0.,1.),vec3(1./2.2));'+   // manual sRGB out
+      ' float l=dot(c,vec3(.2126,.7152,.0722));'+
+      ' c=mix(c,vec3(l),uDesat);'+                              // life drains the colour
+      ' c=mix(c,c*vec3(1.06,1.0,.94)*1.05,uAdren);'+            // adrenaline warmth
+      ' float d=distance(vUv,vec2(.5));'+
+      ' c*=1.-smoothstep(.62-uVig*.42,.98-uVig*.3,d)*(.55+uVig*.45);'+ // the world closes in
+      ' c=pow(clamp(c,0.,1.),vec3(1./2.2));'+
       ' gl_FragColor=vec4(c,1.);}',
-      {scene:{value:rtScene.texture},bloom:{value:rtA.texture}});
+      {scene:{value:rtScene.texture},bloom:{value:rtA.texture},
+       uDesat:{value:0},uVig:{value:0},uAdren:{value:0}});
     const quadScene=new THREE.Scene();
     const quad=new THREE.Mesh(quadGeo,bright); quad.frustumCulled=false;
     quadScene.add(quad);
@@ -255,6 +284,7 @@ const POST=(()=>{
     const pass=(m,target)=>{ quad.material=m;
       renderer.setRenderTarget(target); renderer.render(quadScene,oCam); };
     return {
+      comp,
       render(){
         renderer.setRenderTarget(rtScene); renderer.render(scene,camera);
         pass(bright,rtA);
@@ -726,19 +756,21 @@ function buildSkinnedBody(kimonoMat,hakamaMat){
   for(const k of order){ const b=new THREE.Bone();
     b.position.fromArray(bindPos[k]); root.add(b); bones.push(b); }
 
-  const pos=[],nrm=[],sIdx=[],sWgt=[],idx=[],groups=[];
-  const SEG=14;
+  const pos=[],nrm=[],sIdx=[],sWgt=[],uvs=[],idx=[],groups=[];
+  const SEG=18;
   let ringStart=0, vBase=0;
   /* a vertical tube in bind pose; rings: {c:[x,y,z],r,sz,skin:[b0,w0,b1,w1]} */
   function tube(rings,matIndex){
     const triStart=idx.length;
     const first=vBase;
+    const y0=rings[0].c[1], y1=rings[rings.length-1].c[1];
     for(let ri=0;ri<rings.length;ri++){
       const R=rings[ri];
       for(let s=0;s<=SEG;s++){
         const a=s/SEG*Math.PI*2, cx=Math.cos(a), sz=Math.sin(a);
         pos.push(R.c[0]+cx*R.r, R.c[1], R.c[2]+sz*R.r*(R.sz||1));
         nrm.push(cx,0,sz*(R.sz||1));
+        uvs.push(s/SEG,(R.c[1]-y0)/((y1-y0)||1));
         sIdx.push(R.skin[0],R.skin[2],0,0);
         sWgt.push(R.skin[1],R.skin[3],0,0);
       }
@@ -758,10 +790,11 @@ function buildSkinnedBody(kimonoMat,hakamaMat){
   };
   /* ---- torso (kimono) ---- */
   { const P=BONES.pelvis,S=BONES.spine,Ch=BONES.chest;
-    const prof=[ // y, radius, depth-scale
-      [.78,.150,.82],[ .86,.153,.84],[ .94,.150,.84],[1.00,.138,.82],
-      [1.07,.128,.80],[1.14,.130,.80],[1.22,.138,.80],[1.30,.150,.82],
-      [1.38,.158,.84],[1.44,.150,.86],[1.47,.128,.86]];
+    const prof=[ // y, radius, depth-scale — a torso, not a pipe
+      [.78,.150,.82],[ .84,.154,.85],[ .90,.155,.86],[ .96,.146,.84],
+      [1.02,.134,.81],[1.07,.127,.79],[1.12,.128,.79],[1.18,.134,.79],
+      [1.24,.143,.80],[1.30,.152,.82],[1.36,.160,.85],[1.41,.161,.87],
+      [1.45,.148,.88],[1.475,.120,.88]];
     const rings=prof.map(([y,r,szz])=>{
       let skin;
       if(y<.97)skin=[P,1,S,0];
@@ -777,9 +810,10 @@ function buildSkinnedBody(kimonoMat,hakamaMat){
     const UA=side>0?BONES.uaR:BONES.uaL, Ch=BONES.chest;
     const x=.185*side, top=1.335, bot=1.045;
     const rings=[];
-    for(let i=0;i<=6;i++){
-      const t=i/6, y=lerp(top,bot,t);
-      const r=lerp(.055,.075,Math.pow(t,1.3));       // sleeve widens down
+    for(let i=0;i<=8;i++){
+      const t=i/8, y=lerp(top,bot,t);
+      const deltoid=.012*minJerkBell(clamp(t/.5,0,1));  // shoulder muscle
+      const r=lerp(.054,.078,Math.pow(t,1.35))+deltoid;
       const skin=t<.18?blend(t,0,.3,Ch,UA):(t<.3?blend(t,0,.3,Ch,UA):[UA,1,Ch,0]);
       rings.push({c:[x,y,0],r,sz:1,skin});
     }
@@ -805,13 +839,17 @@ function buildSkinnedBody(kimonoMat,hakamaMat){
   const geo=new THREE.BufferGeometry();
   geo.setAttribute('position',new THREE.Float32BufferAttribute(pos,3));
   geo.setAttribute('normal',new THREE.Float32BufferAttribute(nrm,3));
+  geo.setAttribute('uv',new THREE.Float32BufferAttribute(uvs,2));
   geo.setAttribute('skinIndex',new THREE.Uint16BufferAttribute(sIdx,4));
   geo.setAttribute('skinWeight',new THREE.Float32BufferAttribute(sWgt,4));
   geo.setIndex(idx);
   for(const g of groups)geo.addGroup(g.start,g.count,g.materialIndex);
 
   const km=kimonoMat.clone(); km.skinning=true;
+  if(kimonoTex)km.map=kimonoTex;
   const hm=hakamaMat.clone(); hm.skinning=true;
+  if(hakamaTex)hm.map=hakamaTex;
+  km.roughness=.94; hm.roughness=.96;
   const mesh=new THREE.SkinnedMesh(geo,[km,hm]);
   mesh.castShadow=true; mesh.frustumCulled=false;
   mesh.add(root);
@@ -909,9 +947,9 @@ class Fighter{
     this.atRope=false;
 
     /* materials */
-    const kimono=stdMat(palette.kimono,{roughness:.88});
-    const hakama=stdMat(palette.hakama,{roughness:.92});
-    const skin=stdMat(palette.skin,{roughness:.65});
+    const kimono=stdMat(palette.kimono,{roughness:.9,map:kimonoTex||null});
+    const hakama=stdMat(palette.hakama,{roughness:.94,map:hakamaTex||null});
+    const skin=stdMat(palette.skin,{roughness:.62});
     const hairM=stdMat(0x14110d,{roughness:.9});
     const obiM=stdMat(palette.obi,{roughness:.8});
     const accentM=stdMat(palette.accent,{roughness:.75});
@@ -971,7 +1009,20 @@ class Fighter{
       hairC.scale.set(.94,1.06,1); hairC.rotation.x=-.5;
       const mage=new THREE.Mesh(new THREE.CylinderGeometry(.015,.02,.09,8),hairM);
       mage.position.set(0,.095,-.02); mage.rotation.x=1.1;
-      parts.head.add(skull,jaw,hairC,mage);
+      /* the face */
+      const darkM=stdMat(0x120e0c,{roughness:.5});
+      const mkEye=(sx)=>{ const e=new THREE.Mesh(new THREE.SphereGeometry(.014,8,6),darkM);
+        e.position.set(sx*.034,.008,D.headR*.84); e.scale.set(1.25,.75,.5); return e; };
+      const eyeR=mkEye(1), eyeL=mkEye(-1);
+      const mkBrow=(sx)=>{ const b=new THREE.Mesh(new THREE.BoxGeometry(.035,.007,.008),hairM);
+        b.position.set(sx*.035,.036,D.headR*.86); b.rotation.z=sx*-.18; return b; };
+      const browR=mkBrow(1), browL=mkBrow(-1);
+      const nose=new THREE.Mesh(new THREE.ConeGeometry(.011,.03,6),skin);
+      nose.position.set(0,-.016,D.headR*.94); nose.rotation.x=Math.PI/2+.35;
+      const mouth=new THREE.Mesh(new THREE.BoxGeometry(.03,.005,.006),
+        stdMat(0x5e3a34,{roughness:.7}));
+      mouth.position.set(0,-.062,D.headR*.86);
+      parts.head.add(skull,jaw,hairC,mage,eyeR,eyeL,browR,browL,nose,mouth);
       if(isPlayer){
         const hachi=new THREE.Mesh(new THREE.TorusGeometry(D.headR*.94,.014,6,16),accentM);
         hachi.rotation.x=Math.PI/2+.12; hachi.position.y=.028;
@@ -1224,6 +1275,7 @@ class Fighter{
 
   /* mobility multiplier from legs + blood + stamina */
   get mobility(){
+    if(this.downT>0)return .12;
     let m=1;
     if(this.disabled.legR)m*=.25;
     if(this.disabled.legL)m*=.25;
@@ -1369,7 +1421,7 @@ Fighter.prototype.stepFoot=function(f,target,dt,otherPlanted,disabled,speed2d,ur
     f.swing=Math.min(1,f.swing+dt/f.dur);
     const t=f.swing, ss=minJerk(t);
     f.p.lerpVectors(f.from,f.to,ss);
-    f.lift=disabled?0:minJerkBell(t)*clamp(.05+speed2d*.02,.05,.09)*(1-dmg*.55);
+    f.lift=disabled?0:minJerkBell(t)*(clamp(.05+speed2d*.02,.05,.09)+(this.snowDepth||0)*.6)*(1-dmg*.55);
     f.yaw=lerpAngle(f.yawFrom,this.bodyYaw,ss);   // foot re-aims only in flight
     /* toe-off then heel-first: rotation profile over the swing */
     f.roll= t<.25 ? .38*minJerk(t/.25)
@@ -1379,7 +1431,7 @@ Fighter.prototype.stepFoot=function(f,target,dt,otherPlanted,disabled,speed2d,ur
       groundMark.drag(f.from.x,f.from.z,f.p.x,f.p.z);
     if(f.swing>=1){ f.swing=0; f.lift=0; f.settle=.09;
       Sound.step&&Sound.step(speed2d);
-      if(!disabled&&groundMark)groundMark.foot(f.p.x,f.p.z,f.yaw); }
+      if(!disabled&&groundMark&&!onIce(f.p))groundMark.foot(f.p.x,f.p.z,f.yaw); }
   } else {
     f.lift=0;
     if(f.settle>0){ f.settle-=dt; f.roll=lerp(0,-.14,clamp(f.settle/.09,0,1)); }
@@ -1389,7 +1441,7 @@ Fighter.prototype.stepFoot=function(f,target,dt,otherPlanted,disabled,speed2d,ur
     if(otherPlanted && need){
       f.swing=1e-4; f.from=f.p.clone(); f.yawFrom=f.yaw;
       f.to=target.clone(); f.to.y=0;
-      const hurt=1+dmg*.8+(disabled?1.2:0);
+      const hurt=1+dmg*.8+(disabled?1.2:0)+(this.snowDepth||0)*1.6;
       f.dur=clamp((urgent?.12:.2)-speed2d*.02,.1,.2)*hurt/Math.max(this.mobility,.35);
     }
   }
@@ -1407,7 +1459,17 @@ Fighter.prototype.updateAlive=function(dt,opponent){
 
   /* locomotion + separation + THE RING */
   this.pos.addScaledVector(this.vel,dt); this.pos.y=0;
-  this.vel.multiplyScalar(Math.pow(.0008,dt));
+  const depth=snowDepth(this.pos.x,this.pos.z);
+  const iced=onIce(this.pos);
+  this.vel.multiplyScalar(Math.pow(iced?.28:.0008,dt));   // ice barely grips
+  if(!iced)this.vel.multiplyScalar(Math.exp(-depth*2.6*dt)); // deep snow drags
+  const sp2=Math.hypot(this.vel.x,this.vel.z);
+  if(sp2>.4)this.stamina=Math.max(0,this.stamina-sp2*depth*2.0*dt);
+  if(iced&&sp2>1.5&&Math.random()<dt*.55){
+    this.stagger=(this.stagger||0)+.55;
+    if(!this._slipped){ this._slipped=true; log(this.name+' slips on the ice!',false); }
+  }
+  this.snowDepth=depth; this.iced=iced;
   const sep=this.pos.distanceTo(opponent.pos);
   if(sep<.62){ TMP1.subVectors(this.pos,opponent.pos).setY(0).normalize();
     this.pos.addScaledVector(TMP1,(.62-sep)*.5); }
@@ -1428,7 +1490,25 @@ Fighter.prototype.updateAlive=function(dt,opponent){
 
   /* hip drive: lateral sword momentum rotates the trunk */
   const latV=this.tipVel.dot(right);
+  const prevTwist=this.twist;
   this.twist=lerp(this.twist,clamp(latV*.045,-.55,.55),clamp(dt*9,0,1));
+  const twistRate=Math.abs(this.twist-prevTwist)/Math.max(dt,1e-4);
+  /* kinetic chain: cut power comes from the whole body, not the wrists.
+     off-balance = weak; mid-step = weak; hips driving = strong */
+  const planted=this.feet.R.swing===0&&this.feet.L.swing===0;
+  this.chainMul=(1-clamp((this.balanceErr||0)*1.9,0,.35))
+    *(planted?1.06:.88)
+    *(1+clamp(twistRate*.09,0,.16));
+  /* stagger: enough shock drives a man to his knee */
+  this.stagger=Math.max(0,(this.stagger||0)-dt*.9);
+  if(this.stagger>1&&!(this.downT>0)){
+    this.stagger=0; this.downT=1.5+rand(0,.5);
+    log(this.name+' is driven to a knee!',false);
+    Sound.thump&&Sound.thump(.8);
+  }
+  if(this.downT>0)this.downT-=dt;
+  const kneel=this.downT>0?clamp(this.downT>.45?1:this.downT/.45,0,1):0;
+  this.kneel=kneel;
 
   /* ---- CoM-led stepping: predict where the mass is falling, catch it ---- */
   const ft=this.feet;
@@ -1453,10 +1533,11 @@ Fighter.prototype.updateAlive=function(dt,opponent){
     TMP3.subVectors(this.pos,ax);
     const tt=clamp(TMP3.dot(TMP2)/L2,0,1);
     TMP3.addScaledVector(TMP2,-tt); TMP3.y=0;
+    this.balanceErr=Math.max(0,TMP3.length()-.06);
     if(TMP3.length()>.19){                       // outside the support strip
       if(TMP3.dot(right)>0)urgR=true; else urgL=true;
     }
-  }
+  } else this.balanceErr=(this.balanceErr||0)*.9;
   this.stepFoot(ft.R,tgtR,dt,ft.L.swing===0,this.disabled.legR,speed2d,urgR);
   this.stepFoot(ft.L,tgtL,dt,ft.R.swing===0,this.disabled.legL,speed2d,urgL);
   const stepping=ft.R.swing>0||ft.L.swing>0;
@@ -1468,6 +1549,7 @@ Fighter.prototype.updateAlive=function(dt,opponent){
   /* limp: sag when weight is on the damaged leg (other foot in flight) */
   if(ft.L.swing>0)hurtSag+=this.legDamage.R*.055;
   if(ft.R.swing>0)hurtSag+=this.legDamage.L*.055;
+  hurtSag+=(this.kneel||0)*.34;   // driven to a knee
   const pelvisY=D.pelvisY-hurtSag-(stepping?.02:0)+Math.sin(this.breath*1.6)*.007;
   const pelvis=V3(lerp(feetMid.x,this.pos.x,.55),pelvisY,lerp(feetMid.z,this.pos.z,.55));
   const pelvisYawA=this.bodyYaw+this.twist*.3;
@@ -1528,7 +1610,12 @@ Fighter.prototype.updateAlive=function(dt,opponent){
   shL.y=chestT.y-.045;
   const ctrl=this.swordControl;
   if(this.hasSword){
-    const K=this.thrust?150:110, DAMP=this.thrust?16:10.5;
+    let K=this.thrust?150:110; const DAMP=this.thrust?16:10.5;
+    if(this.isPlayer){
+      K*=lerp(.45,1,clamp(this.consciousness/100,0,1));  // dying hands are slow
+      if(game.adrenaline>0&&this.bloodFrac>.6)K*=1.08;
+    }
+    if(this.kneel)K*=1-this.kneel*.62;
     const skill=this.isPlayer?1:(this.speedMul||.85);
     const maxSpd=((this.thrust?11:14)*ctrl+2)*skill;
     TMP1.subVectors(this.tipTarget,this.tip);
@@ -1697,7 +1784,12 @@ class AI{
     this.state='circle'; this.t=rand(this.P.engage[0],this.P.engage[1]); // sizes you up first
     this.strafe=Math.random()<.5?1:-1; this.plan=null;
     this.reaction=this.P.reaction; this.alert=0;
-    this.aimErr=V3(); this.skill=this.P.skill; }                          // <1: human, not machine
+    this.aimErr=V3(); this.skill=this.P.skill;
+    /* a mind: he watches HOW you fight */
+    this.model={h:[0,0,0],n:0,retreats:0,retreatAtk:0};
+    this._foeFast=false; this._foeBack=0;
+    /* a heart: fear and boldness move the numbers */
+    this.mood={fear:0,aggr:0,saidFear:false,saidBold:false}; }                          // <1: human, not machine
   update(dt,foe){
     const f=this.f; if(!f.alive)return;
     if(game.state!=='fight'){ f.telegraph=false; return; }
@@ -1714,6 +1806,32 @@ class AI{
       if(TMP2.length()<1.6)threat=true;
     }
     if(threat)this.alert+=dt; else this.alert=Math.max(0,this.alert-dt*2);
+
+    /* ---- observation: every committed cut you throw is remembered ---- */
+    const foeFast=foe.bladeSpeed>7&&foe.hasSword;
+    if(foeFast&&!this._foeFast){
+      const y=foe.tip.y, b=y<1.0?0:y<1.55?1:2;
+      this.model.h[b]++; this.model.n++;
+      if(this._foeBack>.3)this.model.retreatAtk++;   // the retreat-then-cut habit
+    }
+    this._foeFast=foeFast;
+    TMP2.subVectors(f.pos,foe.pos).setY(0).normalize();
+    this._foeBack=foe.vel.dot(TMP2)>.6?this._foeBack+dt:0;
+    const M=this.model;
+    const modal=M.h[0]>=M.h[1]&&M.h[0]>=M.h[2]?0:(M.h[1]>=M.h[2]?1:2);
+    const readsYou=M.n>=4&&M.h[modal]/M.n>.55;
+
+    /* ---- mood: fear is blood and pain; boldness feeds on your passivity ---- */
+    const md=this.mood;
+    md.fear=clamp((1-f.bloodFrac)*1.7+f.pain/150,0,1);
+    if(foe.bladeSpeed<3.5&&dist>this.P.maai)md.aggr=clamp(md.aggr+dt*.07,0,1);
+    else md.aggr=Math.max(0,md.aggr-dt*.05);
+    if(md.fear>.6&&!md.saidFear){ md.saidFear=true;
+      log(f.name+"'s breath comes ragged — there is fear in it",false); }
+    if(md.aggr>.7&&!md.saidBold){ md.saidBold=true;
+      log(f.name+' grows bold — he presses forward',false); }
+    const desperate2=md.fear>.8;
+    this.skill=this.P.skill*(1-md.fear*.22);
 
     const m=f.mobility, acc=11*m;
     const move=V3();
@@ -1736,14 +1854,21 @@ class AI{
         f.tipTarget.y+=Math.sin(f.breath*1.3)*.045;
         f.thrust=false; f.guarding=false;
         if(threat&&this.alert>this.reaction&&Math.random()<.85){ this.state='block'; this.t=rand(.3,.55);
-          this.f.parryEnabled=Math.random()<this.P.parry; break; }
+          /* a read opponent gets parried: he knows where your cut lives */
+          this.f.parryEnabled=Math.random()<(readsYou?Math.min(.9,this.P.parry+.35):this.P.parry);
+          this._guardBias=readsYou?modal:1;
+          break; }
         if(this.t<=0){ this.strafe*=Math.random()<.4?-1:1; this.t=rand(this.P.tempo[0],this.P.tempo[1]);
-          if(!desperate&&dist<2.9&&Math.random()<this.P.atkCircle){ this.beginAttack(foe); } }
+          let pAtk=this.P.atkCircle*(1+md.aggr*.85)*(1-md.fear*.5);
+          if(desperate2)pAtk=Math.max(pAtk,.55);        // the cornered animal
+          if(!desperate&&dist<2.9&&Math.random()<pAtk){ this.beginAttack(foe); } }
         break; }
       case 'block':{
         f.guarding=true;
         if(foe.bladeA){ TMP2.addVectors(foe.bladeA,foe.bladeB).multiplyScalar(.5);
-          f.tipTarget.copy(chest).lerp(TMP2,.45); f.tipTarget.y=clamp(f.tipTarget.y,.7,1.75); }
+          f.tipTarget.copy(chest).lerp(TMP2,.45);
+          const gb=this._guardBias===0?.85:this._guardBias===2?1.6:1.2;
+          f.tipTarget.y=clamp(lerp(f.tipTarget.y,gb,.35),.7,1.75); }
         move.sub(fwd).multiplyScalar(.5);
         if(this.t<=0){ this.state='circle'; this.t=rand(.3,.8); this.f.parryEnabled=true;
           if(dist<2.6&&Math.random()<this.P.atkBlock)this.beginAttack(foe); }
@@ -1839,7 +1964,7 @@ function bladeVsBody(att,def,log){
          part in the same swing sees a much slower edge */
       const spd=att.tipVel.length()*att.swordControl;
       if(spd<2.2)break;
-      const energy=.5*BLADE_EFF_MASS*spd*spd;
+      const energy=.5*BLADE_EFF_MASS*spd*spd*(att.chainMul||1);
       const dir=TMP1.copy(att.tipVel).normalize();
       def.lastHitDir=dir.clone();
       const res=def.applyCut(key,energy,att.alignment,att.thrust,hitTmpB.clone(),dir.clone(),log);
@@ -1871,6 +1996,10 @@ function bladeVsBlade(a,b){
   if(d<win){
     game.bladeContacts=(game.bladeContacts||0)+1;
     const rel=TMP1.copy(a.tipVel).sub(b.tipVel).length();
+    /* slow sustained steel-on-steel: the blades are BOUND */
+    if(rel<2.4&&a.hasSword&&b.hasSword&&a.alive&&b.alive&&!game.bind){
+      game._bindTouch=true; game._bindPt=(game._bindPt||V3()).copy(hitTmpA);
+    }
     if(rel<1.5)return;
     const hard=rel>7;
     Sound.clang(hard);
@@ -1889,6 +2018,7 @@ function bladeVsBlade(a,b){
       TMP3.subVectors(att.tip,def.tip).normalize();
       att.tipTarget.copy(att.tip).addScaledVector(TMP3,1.1).setY(Math.max(.6,att.tip.y-.3));
       att.softHit('shR',TMP3,2.0); att.softHit('chestT',TMP3,1.2);
+      att.stagger=(att.stagger||0)+.55;
       if(att===enemy&&typeof enemyAI!=='undefined'){ enemyAI.state='recover'; enemyAI.t=1.0; enemyAI.plan=null; att.telegraph=false; }
       Sound.parry(); sparks(hitTmpA,14);
       game.timeScale=.4; game.slowT=.28;
@@ -2001,6 +2131,96 @@ let player,enemy,enemyAI;
 function shake(v){ game.shake=Math.max(game.shake,v); }
 function slowmo(){ game.timeScale=.22; game.slowT=1.5; }
 
+/* ----------------- the ground fights too: depth and ice ---------------- */
+function snowDepth(x,z){
+  const r=Math.hypot(x,z);
+  const t=clamp((r-2.1)/(RING_R-2.1),0,1);
+  return .02+.11*t*t*(3-2*t)+Math.sin(x*3.1)*Math.cos(z*2.7)*.012;
+}
+/* a raised blade catches the moon */
+const glintTex=canTex(64,64,(ctx,w,h)=>{
+  const g=ctx.createRadialGradient(32,32,1,32,32,30);
+  g.addColorStop(0,'rgba(255,255,255,1)');
+  g.addColorStop(.25,'rgba(220,235,255,.5)');
+  g.addColorStop(1,'rgba(200,220,255,0)');
+  ctx.fillStyle=g; ctx.fillRect(0,0,w,h);
+  ctx.fillStyle='rgba(255,255,255,.85)';
+  ctx.fillRect(30,4,4,56); ctx.fillRect(4,30,56,4);
+});
+function mkGlint(){
+  const m=new THREE.SpriteMaterial({map:glintTex||null,transparent:true,
+    opacity:0,depthWrite:false,blending:THREE.AdditiveBlending});
+  const s=new THREE.Sprite(m); s.scale.set(.5,.5,1); scene.add(s); return s;
+}
+/* breath in the cold */
+const puffTex=canTex(48,48,(ctx,w,h)=>{
+  const g=ctx.createRadialGradient(24,24,2,24,24,22);
+  g.addColorStop(0,'rgba(235,240,248,.7)');
+  g.addColorStop(1,'rgba(235,240,248,0)');
+  ctx.fillStyle=g; ctx.fillRect(0,0,w,h);
+});
+const puffs=[];
+function breathe(f,foe){
+  const m=new THREE.SpriteMaterial({map:puffTex||null,transparent:true,
+    opacity:.22,depthWrite:false});
+  const s=new THREE.Sprite(m);
+  TMP1.subVectors(foe.pos,f.pos).setY(0).normalize();
+  s.position.copy(f.parts.head.position).addScaledVector(TMP1,.13); s.position.y-=.02;
+  s.scale.set(.1,.08,1);
+  s.userData={life:1.1,v:TMP1.clone().multiplyScalar(.28).setY(.22)};
+  scene.add(s); puffs.push(s);
+}
+function updatePuffs(dt){
+  for(let i=puffs.length-1;i>=0;i--){ const s=puffs[i],u=s.userData;
+    u.life-=dt;
+    if(u.life<=0){ scene.remove(s); puffs.splice(i,1); continue; }
+    s.position.addScaledVector(u.v,dt); u.v.multiplyScalar(Math.exp(-1.4*dt));
+    s.scale.x+=dt*.22; s.scale.y+=dt*.18;
+    s.material.opacity=.22*clamp(u.life/1.1,0,1);
+  }
+}
+let iceMesh=null;
+function placeIce(){
+  if(iceMesh){ scene.remove(iceMesh); iceMesh=null; }
+  if(Math.random()<.25){ game.ice=null; return; }   // some nights, no ice
+  const a=rand(0,Math.PI*2), rr=rand(1.4,RING_R-1.6);
+  game.ice={x:Math.sin(a)*rr,z:Math.cos(a)*rr,r:rand(.7,1.15)};
+  iceMesh=new THREE.Mesh(new THREE.CircleGeometry(game.ice.r,26),
+    stdMat(0x9fb9cc,{roughness:.12,metalness:.25,transparent:true,opacity:.4}));
+  iceMesh.rotation.x=-Math.PI/2; iceMesh.position.set(game.ice.x,.012,game.ice.z);
+  scene.add(iceMesh);
+}
+const onIce=(p)=>game.ice&&Math.hypot(p.x-game.ice.x,p.z-game.ice.z)<game.ice.r;
+
+/* ------------------ cloth: woven kimono, pleated hakama ---------------- */
+const kimonoTex=canTex(256,256,(ctx,w,h)=>{
+  ctx.fillStyle='#d8d8d8'; ctx.fillRect(0,0,w,h);
+  /* tsumugi weave: fine cross-hatch with slub irregularities */
+  for(let y=0;y<h;y+=2){ ctx.fillStyle='rgba(0,0,0,'+(.045+Math.random()*.05)+')';
+    ctx.fillRect(0,y,w,1); }
+  for(let x=0;x<w;x+=2){ ctx.fillStyle='rgba(255,255,255,'+(.03+Math.random()*.04)+')';
+    ctx.fillRect(x,0,1,h); }
+  for(let i=0;i<260;i++){ ctx.fillStyle=Math.random()<.5?'rgba(0,0,0,.08)':'rgba(255,255,255,.07)';
+    ctx.fillRect(Math.random()*w,Math.random()*h,1+Math.random()*3,1); }
+});
+if(kimonoTex){ kimonoTex.wrapS=kimonoTex.wrapT=THREE.RepeatWrapping; kimonoTex.repeat.set(3,3); }
+const hakamaTex=canTex(256,256,(ctx,w,h)=>{
+  ctx.fillStyle='#d2d2d2'; ctx.fillRect(0,0,w,h);
+  /* pleats: broad vertical bands, each shaded across its width */
+  const P=5, bw=w/P;
+  for(let i=0;i<P;i++){
+    const g=ctx.createLinearGradient(i*bw,0,(i+1)*bw,0);
+    g.addColorStop(0,'rgba(255,255,255,.16)');
+    g.addColorStop(.45,'rgba(0,0,0,0)');
+    g.addColorStop(.92,'rgba(0,0,0,.34)');
+    g.addColorStop(1,'rgba(0,0,0,.5)');
+    ctx.fillStyle=g; ctx.fillRect(i*bw,0,bw,h);
+  }
+  for(let y=0;y<h;y+=2){ ctx.fillStyle='rgba(0,0,0,'+(.03+Math.random()*.04)+')';
+    ctx.fillRect(0,y,w,1); }
+});
+if(hakamaTex){ hakamaTex.wrapS=hakamaTex.wrapT=THREE.RepeatWrapping; hakamaTex.repeat.set(4,1.6); }
+
 /* ---------------- kamae: the five guards, as tip targets --------------- */
 const KAMAE={
   chudan:(o,p,fwd,right)=>o.copy(p).addScaledVector(fwd,.95).setY(1.28),
@@ -2031,6 +2251,35 @@ const DUELISTS=[
        kamae:'waki'}},
 ];
 game.stage=0; game.advance=false;
+game.legacy=null;
+
+/* after the named three, the road provides — endlessly, and harder */
+const GEN={
+  syl:['Ka','Ju','Mune','Tada','Yoshi','Nobu','Hiro','Masa','Kage','Ryu','Tomo','Iku','Sada','Gen'],
+  syl2:['tsune','maru','katsu','nori','shige','taka','zane','hide','tomo','yasu','mori','oki'],
+  kanji:['刃','鬼','嵐','霜','狼','影','雷','岩','鷹','蛇'],
+  epi:['the Wolf','the Storm','of the Frost','the Unmoved','the Left-Handed',
+       'of Two Heavens','the Silent','the Ox','of the Red Sheath','the Pilgrim'],
+  kamae:['chudan','seigan','jodan','gedan','waki'],
+};
+function genDuelist(stage){
+  const name=(GEN.syl[Math.floor(Math.random()*GEN.syl.length)]
+    +GEN.syl2[Math.floor(Math.random()*GEN.syl2.length)]).toUpperCase();
+  const s=Math.min(.985,.8+stage*.018+Math.random()*.05);
+  const arch=Math.random();          // blend of the three schools
+  return {name,
+    kanji:GEN.kanji[Math.floor(Math.random()*GEN.kanji.length)],
+    epithet:GEN.epi[Math.floor(Math.random()*GEN.epi.length)],
+    palette:{kimono:[0x3a2420,0x27313d,0x352822,0x2c3527,0x3d2733][Math.floor(Math.random()*5)],
+      hakama:0x1c1712,obi:[0x8a5a1f,0xb9b3a4,0x7c1f1f,0x746c58][Math.floor(Math.random()*4)],
+      skin:0xbf9276,accent:0x101010},
+    ai:{skill:s,reaction:lerp(.2,.1,s),engage:[1.4+arch*1.4,2.4+arch*1.8],
+      atkCircle:lerp(.6,.2,arch),atkBlock:lerp(.3,.6,arch),
+      windupT:[lerp(.34,.2,s),lerp(.5,.3,s)],strikeT:[.26,.4],
+      speedMul:Math.min(1.1,.82+stage*.02+Math.random()*.06),
+      parry:lerp(.15,.55,arch),maai:1.9+arch*.7,tempo:[.5+arch*.7,1.2+arch*1.2],
+      kamae:GEN.kamae[Math.floor(Math.random()*5)]}};
+}
 
 function setup(){
   if(player){ disposeFighter(player); disposeFighter(enemy); }
@@ -2043,7 +2292,14 @@ function setup(){
   enemy=new Fighter(D.name,D.palette,1.9,-1,false);
   enemy.speedMul=D.ai.speedMul;
   const lbl=document.getElementById('name-enemy');
-  if(lbl)lbl.innerHTML='<span style="color:var(--dim)">'+D.kanji+' </span>'+D.name;
+  if(lbl)lbl.innerHTML='<span style="color:var(--dim)">'+D.kanji+' </span>'+D.name
+    +' <span style="color:var(--dim);font-size:11px">幕'+(game.stage+1)+'</span>';
+  if(game.legacy){
+    player.legDamage.R=game.legacy.legR; player.legDamage.L=game.legacy.legL;
+    player.blood=game.legacy.blood;
+    if(game.legacy.legR>.2||game.legacy.legL>.2||game.legacy.blood<4600)
+      log('the old wounds ache in the cold — they never fully leave',false);
+  }
   enemyAI=new AI(enemy,DUELISTS[game.stage].ai);
   player.yaw=Math.atan2(enemy.pos.x-player.pos.x,enemy.pos.z-player.pos.z);
   enemy.yaw=Math.atan2(player.pos.x-enemy.pos.x,player.pos.z-enemy.pos.z);
@@ -2054,12 +2310,14 @@ function setup(){
 function disposeFighter(f){
   scene.remove(f.root); scene.remove(f.katana); scene.remove(f.trailMesh);
   if(f.skin)scene.remove(f.skin.mesh);
+  if(f.glint)scene.remove(f.glint);
   for(const k in f.parts)scene.remove(f.parts[k]);
 }
 function restart(){
   if(game.advance===true)game.stage=Math.min(game.stage+1,DUELISTS.length-1);
-  else if(game.advance==='reset')game.stage=0;
   game.advance=false; killCam=null; game.firstBlood=false;
+  game.bind=null; game._bindN=0; placeIce();
+  document.body.classList.remove('cine');
   document.getElementById('verdict').classList.add('hidden');
   setup(); game.state='fight'; game.timeScale=1; game.duelTime=0;
 }
@@ -2067,19 +2325,31 @@ function endDuel(){
   game.state='over';
   Sound.killMoment();
   const won=enemy.dead;
-  const last=game.stage>=DUELISTS.length-1;
   const v=document.getElementById('verdict');
   const K=document.getElementById('verdict-kanji');
-  if(won&&last){ K.textContent='三'; K.className='kanji';
-    document.getElementById('verdict-sub').textContent='三人斬り — THREE CUT DOWN';
-    game.advance='reset';
-  } else if(won){ K.textContent='勝'; K.className='kanji';
+  if(won){
+    if(game.stage+1>=DUELISTS.length)DUELISTS.push(genDuelist(game.stage+1));
+    K.textContent=game.stage===2?'三':'勝'; K.className='kanji';
     document.getElementById('verdict-sub').textContent=
-      'YOU PREVAIL — NEXT: '+DUELISTS[game.stage+1].name+', '+DUELISTS[game.stage+1].epithet;
+      (game.stage===2?'三人斬り — AND STILL THEY COME · ':'YOU PREVAIL — ')+
+      'NEXT: '+DUELISTS[game.stage+1].name+', '+DUELISTS[game.stage+1].epithet;
     game.advance=true;
-  } else { K.textContent='死'; K.className='kanji red';
-    document.getElementById('verdict-sub').textContent='YOU FALL';
-    game.advance=false;
+    /* the body remembers: wounds follow you to the next duel, half-healed */
+    game.legacy={
+      legR:player.legDamage.R*.6, legL:player.legDamage.L*.6,
+      blood:Math.max(3600,5000-(5000-player.blood)*.4),
+      kills:(game.legacy?game.legacy.kills:0)+1,
+      woundsCarried:(game.legacy?game.legacy.woundsCarried:0)+player.wounds.length};
+  } else {
+    K.textContent='死'; K.className='kanji red';
+    const kills=game.legacy?game.legacy.kills:0;
+    let best=0; try{ best=+localStorage.getItem('zan_best')||0;
+      if(kills>best){ best=kills; localStorage.setItem('zan_best',kills); } }catch(e){}
+    document.getElementById('verdict-sub').textContent=
+      kills>0?('生涯 — FELL IN DUEL '+(game.stage+1)+' · '+kills+' CUT DOWN BEFORE HIM'
+        +(best>0?' · BEST: '+best:''))
+      :'YOU FALL';
+    game.advance=false; game.legacy=null; game.stage=0;
   }
   const dead=won?enemy:player;
   document.getElementById('cause').textContent=
@@ -2099,10 +2369,74 @@ document.getElementById('btn-begin').addEventListener('click',()=>{
 });
 document.getElementById('btn-again').addEventListener('click',restart);
 
+/* =============================== THE BIND ==============================
+   Real fencing lives in blade contact: pressure, leverage, feeling the
+   other man's intent through steel. Win the pressure and his blade flies
+   wide; yield too long and yours does. */
+function updateBind(dt){
+  /* detection: sustained quiet contact */
+  if(!game.bind){
+    game._bindN=game._bindTouch?(game._bindN||0)+1:0;
+    game._bindTouch=false;
+    if(game._bindN>=8&&game.state==='fight'){
+      game.bind={t:0,pr:0,pt:game._bindPt.clone(),scr:0,yielding:false};
+      /* the Mirror yields on purpose, to whirl and counter */
+      if(enemyAI.P.kamae==='seigan'&&Math.random()<.6)game.bind.yielding=true;
+      log('the blades bind — press, or be pressed',false);
+    }
+    return;
+  }
+  const B=game.bind; B.t+=dt;
+  const pushDir=TMP1.subVectors(enemy.pos,player.pos).setY(0).normalize();
+  /* player pressure: drive the sword (and your feet) into him */
+  const pP=clamp(TMP2.subVectors(player.tipTarget,B.pt).dot(pushDir)*1.6,-1,1.6)
+    +(input.keys&&input.keys.KeyW?.45:0);
+  /* his pressure: skill, boldness, and how afraid he is */
+  const md=enemyAI.mood;
+  let pE=enemyAI.skill*.85+md.aggr*.5-md.fear*.5+rand(-.15,.15);
+  if(B.yielding)pE*=.25;
+  B.pr+=(pP*(player.swordControl)-pE)*dt*.9;
+  /* both blades pinned to the contest */
+  player.tipTarget.copy(B.pt).addScaledVector(pushDir,clamp(B.pr,-1,1)*.28);
+  enemy.tipTarget.copy(B.pt).addScaledVector(pushDir,clamp(B.pr,-1,1)*.28);
+  player.stamina=Math.max(0,player.stamina-dt*6);
+  enemy.stamina=Math.max(0,enemy.stamina-dt*6);
+  B.scr-=dt;
+  if(B.scr<=0){ B.scr=.3+Math.random()*.25;
+    Sound.scrape&&Sound.scrape(); sparks(B.pt,3); }
+  const disengage=input.keys&&input.keys.KeyS;
+  if(B.pr>1){          // you drive through him
+    enemy.stun=Math.max(enemy.stun,.5); enemy.stagger=(enemy.stagger||0)+.6;
+    enemy.tipTarget.addScaledVector(pushDir,-1).setY(.6);
+    enemy.softHit('shR',pushDir,1.8);
+    log('you drive his blade aside — an opening!',false);
+    game.timeScale=.45; game.slowT=.25; game.bind=null;
+  } else if(B.pr<-1){  // he throws yours wide
+    player.stun=Math.max(player.stun,.5); player.stagger=(player.stagger||0)+.6;
+    player.softHit('shR',TMP2.copy(pushDir).negate(),1.8);
+    log('he throws your blade wide!',false);
+    game.bind=null;
+    if(enemyAI.state!=='attack')enemyAI.beginAttack(player);
+  } else if(B.yielding&&B.t>.9){   // the Mirror whirls away
+    game.bind=null; enemyAI.beginAttack(player);
+    log('he yields — and whirls into the cut!',false);
+  } else if(disengage&&B.t>.3){
+    game.bind=null;
+    log('you break the bind and step away',false);
+    if(Math.random()<.4)enemyAI.beginAttack(player);
+  } else if(B.t>2.6){
+    game.bind=null;
+    player.softHit('chestT',TMP2.copy(pushDir).negate(),1.1);
+    enemy.softHit('chestT',pushDir,1.1);
+    log('the bind breaks — both step back',false);
+  }
+}
+
 /* ============================== CAMERA ================================= */
 let killCam=null;
 function beginKillCam(victim,victor){
   killCam={victim,victor,t:0,ritual:0,flicked:false,orbit:rand(0,Math.PI*2)};
+  document.body.classList.add('cine');
 }
 function updateKillRitual(dt){
   if(!killCam)return;
@@ -2146,18 +2480,25 @@ function updateCamera(dt){
     camera.lookAt(camTarget);
     return;
   }
-  if(killCam&&killCam.t>=6)killCam=null;
+  if(killCam&&killCam.t>=6){ killCam=null; document.body.classList.remove('cine'); }
   const mid=TMP1.addVectors(player.pos,enemy.pos).multiplyScalar(.5); mid.y=1.15;
+  /* maai: when both wait, the camera settles into a long wide */
+  const calm=player.bladeSpeed<4&&enemy.bladeSpeed<4&&player.pos.distanceTo(enemy.pos)>3;
+  game.calmT=calm?(game.calmT||0)+dt:0;
   camTarget.lerp(mid,clamp(dt*3,0,1));
   const span=player.pos.distanceTo(enemy.pos);
   /* side-on duel framing that drifts with the player's flank */
   const axis=TMP2.subVectors(enemy.pos,player.pos).setY(0).normalize();
   const side=TMP3.set(axis.z,0,-axis.x);
-  const dist=clamp(3.2+span*.75,4,7.5);
+  const dist=clamp(3.2+span*.75,4,7.5)-(game.bind?0.9:0)
+    +Math.min((game.calmT||0)*.3,1.1);
   const desired=TMP4.copy(mid).addScaledVector(side,dist).setY(1.75+span*.12);
   desired.x+=Math.sin(performance.now()*.00013)*.25;
   desired.y+=Math.sin(performance.now()*.00021)*.1;
-  camera.position.lerp(desired,clamp(dt*2.2,0,1));
+  if(game.snapCut&&game.state==='fight'){ game.snapCut=false;
+    camera.position.copy(desired).addScaledVector(side,-dist*1.9); // hard cut: reverse angle
+    camera.position.y=1.3+Math.random()*.7;
+  } else camera.position.lerp(desired,clamp(dt*(game.calmT>1.5?.9:2.2),0,1));
   if(game.shake>0){
     camera.position.x+=rand(-1,1)*game.shake*.05;
     camera.position.y+=rand(-1,1)*game.shake*.05;
@@ -2202,6 +2543,7 @@ function frame(now){
     else if(player.alive&&!ritualHold)playerIntent(player,enemy);
     updateKillRitual(dt);
     enemyAI.update(dt,player);
+    updateBind(dt);
 
     for(const f of [player,enemy]){
       if(f.ragdoll)f.updateRagdoll(dt);
@@ -2225,7 +2567,40 @@ function frame(now){
     }
   }
 
+  for(const f of [player,enemy]){
+    if(!f)continue;
+    /* moon glint when steel rises */
+    if(!f.glint)f.glint=mkGlint();
+    const up=f.hasSword&&f.bladeB&&f.bladeB.y>1.6&&f.alive;
+    const tgt=up?(f.telegraph?.95:.45):0;
+    f.glint.material.opacity=lerp(f.glint.material.opacity,tgt,dt*8);
+    if(f.bladeA&&f.bladeB)f.glint.position.lerpVectors(f.bladeA,f.bladeB,.72);
+    const gs=.3+f.glint.material.opacity*.5+Math.sin(performance.now()*.02)*.04;
+    f.glint.scale.set(gs,gs,1);
+    /* breath: faster when spent; the dead do not breathe */
+    if(f.alive){
+      f.breathT=(f.breathT||rand(0,2))-dt;
+      if(f.breathT<=0){
+        const exert=1-clamp(f.stamina/100,0,1);
+        f.breathT=lerp(3.0,1.0,Math.max(exert,1-clamp(f.bloodFrac,0,1)));
+        breathe(f,f===player?enemy:player);
+      }
+    }
+  }
+  updatePuffs(dt);
   if(groundMark)groundMark.flush();
+  /* dying from the inside: sight narrows, colour drains, sound sinks,
+     the sword grows heavy in the hands */
+  if(player&&POST&&POST.comp){
+    const bf=clamp(player.bloodFrac,0,1), cs=clamp(player.consciousness/100,0,1);
+    const fade=clamp((0.86-bf)*2.4,0,1)*(player.dead?1.4:1);
+    const U=POST.comp.uniforms;
+    U.uDesat.value=lerp(U.uDesat.value,clamp(fade*.75+(1-cs)*.4,0,.92),dt*2);
+    U.uVig.value=lerp(U.uVig.value,clamp(fade*.8+(1-cs)*.5,0,1),dt*2);
+    game.adrenaline=Math.max(0,(game.adrenaline||0)-dt);
+    U.uAdren.value=lerp(U.uAdren.value,game.adrenaline>0?.5:0,dt*1.5);
+    Sound.setMuffle(clamp(fade*.9+(player.dead?1:0),0,1));
+  }
   Sound.tickWind(dt);
   if(player&&!player.dead&&game.state==='fight')
     Sound.tickHeart(dt,clamp((0.8-player.bloodFrac)*2.2,0,1));
