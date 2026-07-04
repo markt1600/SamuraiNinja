@@ -359,6 +359,26 @@ auto-normalized by the height fitter, and bone prefixes
 Note: any animation clips in the file are ignored by design — the
 game's IK + physics drive the skeleton live.
 
+## v16 — deep trauma
+
+- **Open wounds** — severe cuts are no longer flat decals: each is a
+  parted wound — two raised flesh lips flanking a wet dark interior over
+  the jagged gash line, parented to the body part so it rides the
+  animation and the eventual collapse.
+- **The cleft skull** — a mortal skull blow ("skull cleaved — the
+  brain") opens a bone-rimmed breach at the exact hit point, the
+  convoluted brain visible beneath, oriented outward on the head
+  wherever the cut landed.
+- **Evisceration** — a deep abdominal or liver wound opens the belly: a
+  torn wound cap and a **hanging intestinal loop** stay attached and
+  swing with the body, while two more loops and the liver **fall**,
+  bleeding as they tumble, staining the snow where they land (they use
+  the severed-piece physics, so they respect the same trajectories).
+  Bleed rate and pain spike accordingly.
+
+All harness-verified: brain exposure, three organs falling and landing,
+the hanging loop attached, alongside the existing stump/severing tests.
+
 ## Headless tests
 
 `node test_harness.js` — jsdom + real three.js math, stubbed GPU/audio.

@@ -1616,8 +1616,11 @@ const MODELPIPE=(()=>{
     const s=1.72/h;
     root.scale.setScalar(s);
     root.traverse(o=>{ if(o.isMesh){ o.castShadow=true; o.frustumCulled=false;
-      if(o.material){ o.material=o.material.clone();
-        o.material._base=o.material.color?o.material.color.clone():null; } } });
+      if(o.material){
+        const own=m=>{ const c=m.clone();
+          c._base=c.color?c.color.clone():null; return c; };
+        o.material=Array.isArray(o.material)?o.material.map(own):own(o.material);
+      } } });
     const bones={};
     let found=0;
     for(const n of CORE){ bones[n]=findBone(root,n); if(bones[n])found++; }
@@ -1694,9 +1697,12 @@ const MODELPIPE=(()=>{
     }
     /* the cloth remembers the blood */
     if(f.kimonoMat&&M.root){
-      M.root.traverse(o=>{ if(o.isMesh&&o.material&&o.material._base)
-        o.material.color.copy(o.material._base).lerp(f.bloodTint||o.material._base,
-          clamp((1-(f.bloodFrac||1))*1.4,0,.7)); });
+      const soak=clamp((1-(f.bloodFrac||1))*1.4,0,.7);
+      M.root.traverse(o=>{ if(!o.isMesh||!o.material)return;
+        const mats=Array.isArray(o.material)?o.material:[o.material];
+        for(const m of mats)if(m._base&&m.color)
+          m.color.copy(m._base).lerp(f.bloodTint||m._base,soak);
+      });
     }
   }
   /* drop a .glb anywhere on the page — it loads and fights immediately */
@@ -3003,21 +3009,115 @@ const gashTex=canTex(128,64,(x,w,h)=>{
   for(let px=10;px<=w-10;px+=9)x.lineTo(px,h*.5+(Math.random()-.5)*h*.4);
   x.stroke();
 });
+/* brain: pale pink-gray, convoluted */
+const brainTex=canTex(128,128,(x,w,h)=>{
+  x.fillStyle='#c9a3a0'; x.fillRect(0,0,w,h);
+  x.strokeStyle='rgba(120,70,74,.75)'; x.lineWidth=3; x.lineCap='round';
+  for(let i=0;i<46;i++){
+    x.beginPath();
+    let px=Math.random()*w, py=Math.random()*h, a=Math.random()*6.28;
+    x.moveTo(px,py);
+    for(let s=0;s<5;s++){ a+=(Math.random()-.5)*1.8;
+      px+=Math.cos(a)*9; py+=Math.sin(a)*9; x.lineTo(px,py); }
+    x.stroke();
+  }
+});
+/* the skull cleft: bone-rimmed breach, the brain beneath */
+Fighter.prototype.exposeBrain=function(worldPt){
+  if(this.brainOut)return; this.brainOut=true;
+  try{
+    const head=this.parts.head;
+    head.updateMatrixWorld(true);
+    const local=head.worldToLocal(worldPt.clone()).normalize()
+      .multiplyScalar(this.dims.headR*.72);
+    const g=new THREE.Group();
+    const rim=jaggedCap(.052);                       // torn scalp + bone ring
+    rim.traverse(o=>{ if(o.isMesh&&o.material&&o.material.color&&
+      o.material.color.getHex()===0xd9d2c0)o.scale&&o.scale.setScalar(1.15); });
+    const brain=new THREE.Mesh(new THREE.SphereGeometry(.042,12,10),
+      stdMat(0xffffff,{map:brainTex||null,color:brainTex?0xffffff:0xc9a3a0,
+        roughness:.25}));
+    brain.scale.set(1,.8,.9); brain.position.z=-.012;
+    g.add(rim,brain);
+    g.position.copy(local);
+    g.lookAt(local.clone().multiplyScalar(2));
+    head.add(g);
+    emitBlood(worldPt,V3(0,1,0),3,22);
+  }catch(e){}
+};
+/* evisceration: the belly opens and does not hold */
+const gutMat=()=>stdMat(0xa86868,{roughness:.28});
+function mkGutLoop(){
+  const g=new THREE.Group();
+  try{
+    for(let i=0;i<3;i++){
+      const t=new THREE.Mesh(new THREE.TorusGeometry(.042+Math.random()*.02,
+        .019,7,14,Math.PI*(1.2+Math.random()*.8)),gutMat());
+      t.rotation.set(Math.random()*3,Math.random()*3,Math.random()*3);
+      t.position.set(rand(-.02,.02),rand(-.02,.02),rand(-.02,.02));
+      g.add(t);
+    }
+  }catch(e){}
+  return g;
+}
+Fighter.prototype.eviscerate=function(worldPt,dir){
+  if(this.gutsOut)return; this.gutsOut=true;
+  try{
+    const ab=this.parts.abdomen;
+    ab.updateMatrixWorld(true);
+    /* the open wound itself: torn lips, dark interior */
+    const cap=jaggedCap(.06);
+    const local=ab.worldToLocal(worldPt.clone());
+    cap.position.copy(local); cap.lookAt(local.clone().multiplyScalar(3));
+    ab.add(cap);
+    /* a loop that stays, hanging from the wound */
+    const hang=mkGutLoop();
+    hang.position.copy(local).multiplyScalar(1.02); hang.position.y-=.05;
+    ab.add(hang);
+    /* and loops that do not stay */
+    this.severedPieces=this.severedPieces||[];
+    for(let i=0;i<2;i++){
+      const p=mkGutLoop(); p.position.copy(worldPt); scene.add(p);
+      this.severedPieces.push({mesh:p,bleed:1.2,
+        vel:V3(dir.x*.8+rand(-.5,.5),rand(.3,1),dir.z*.8+rand(-.5,.5)),
+        ang:V3(rand(-4,4),rand(-4,4),rand(-4,4))});
+    }
+    const liver=new THREE.Mesh(new THREE.SphereGeometry(.038,9,7),
+      stdMat(0x5e2028,{roughness:.32}));
+    liver.scale.set(1.3,.7,.9); liver.position.copy(worldPt); scene.add(liver);
+    this.severedPieces.push({mesh:liver,bleed:1.5,
+      vel:V3(dir.x*.6,rand(.2,.7),dir.z*.6),ang:V3(rand(-3,3),0,rand(-3,3))});
+    this.bleedRate+=14; this.pain=Math.min(100,this.pain+35);
+    emitBlood(worldPt,V3(0,-.4,0),3,26);
+    emitBlood(worldPt,dir,2,12);
+  }catch(e){}
+};
 Fighter.prototype.addGash=function(partKey,worldPt,dir){
   this._gashes=this._gashes||0;
   if(this._gashes>=12||!gashTex)return;
   const part=this.parts[partKey]; if(!part)return;
   this._gashes++;
   try{
+    const g=new THREE.Group();
     const m=new THREE.Mesh(new THREE.PlaneGeometry(.14,.06),
       new THREE.MeshBasicMaterial({map:gashTex,transparent:true,
         depthWrite:false,polygonOffset:true,polygonOffsetFactor:-2}));
+    /* parted flesh: two raised lips flanking the cut, wet interior */
+    const lipM=stdMat(0x8a4038,{roughness:.45});
+    for(const s of [1,-1]){
+      const lip=new THREE.Mesh(new THREE.CylinderGeometry(.006,.006,.11,6),lipM);
+      lip.rotation.z=Math.PI/2; lip.position.y=s*.011; lip.position.z=.004;
+      g.add(lip);
+    }
+    const wet=new THREE.Mesh(new THREE.PlaneGeometry(.11,.017),
+      stdMat(0x4a0c0c,{roughness:.15}));
+    wet.position.z=.002; g.add(wet,m);
     part.updateMatrixWorld(true);
-    m.position.copy(part.worldToLocal(worldPt.clone()));
-    m.position.multiplyScalar(.92);          // hug the surface
-    m.lookAt(m.position.clone().multiplyScalar(2));
-    m.rotation.z=Math.random()*Math.PI;
-    part.add(m);
+    g.position.copy(part.worldToLocal(worldPt.clone()));
+    g.position.multiplyScalar(.92);          // hug the surface
+    g.lookAt(g.position.clone().multiplyScalar(2));
+    g.rotation.z=Math.random()*Math.PI;
+    part.add(g);
   }catch(e){}
 };
 
