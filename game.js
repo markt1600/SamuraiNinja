@@ -1510,7 +1510,7 @@ class Fighter{
     const place=(g,a,b)=>{ aimLimb(g,J[a].p,J[b].p); };
     place(P.neck,'neck','chestT'); place(P.chest,'chestT','chestB'); place(P.abdomen,'chestB','pelvis');
     P.pelvis.position.copy(J.pelvis.p);
-    P.head.position.copy(J.head.p);
+    if(!this.severed.head)P.head.position.copy(J.head.p);
     place(P.upperArmR,'shR','elR');
     if(!this.severed.armR){ place(P.forearmR,'elR','haR'); P.handR.position.copy(J.haR.p); }
     place(P.upperArmL,'shL','elL');
@@ -2005,8 +2005,8 @@ Fighter.prototype.renderJoints=function(_dj){
   aimLimb(P.abdomen,_dj.chestB,_dj.pelvis);
   aimLimb(P.chest,_dj.chestT,_dj.chestB);
   aimLimb(P.neck,_dj.neckT,_dj.chestT);
-  P.head.position.copy(_dj.neckT).y+=this.dims.headR*.7;
-  P.head.position.copy(_dj.neckT); P.head.position.y+=this.dims.headR*.7;
+  if(!this.severed.head){
+    P.head.position.copy(_dj.neckT); P.head.position.y+=this.dims.headR*.7; }
   aimLimb(P.upperArmR,_dj.shR,_dj.elR); aimLimb(P.forearmR,_dj.elR,_dj.haR);
   aimLimb(P.upperArmL,_dj.shL,_dj.elL); aimLimb(P.forearmL,_dj.elL,_dj.haL);
   P.handR.position.copy(_dj.haR); P.handL.position.copy(_dj.haL);
@@ -2351,7 +2351,7 @@ Fighter.prototype.updateAlive=function(dt,opponent){
   const headPos=neckT.clone().addScaledVector(fwdC,.028)
     .addScaledVector(this.flinch,1.25);
   headPos.y=neckT.y+.085+this.flinch.y*1.25;
-  P.head.position.copy(headPos);
+  if(!this.severed.head)P.head.position.copy(headPos);
   TMP3.copy(opponent.parts.head?opponent.parts.head.position:opponent.pos);
   if(TMP3.distanceToSquared(headPos)>.04){
     P.head.lookAt(TMP3);
@@ -2976,6 +2976,17 @@ function updateLoose(f,dt){
       addStain(p.mesh.position.x,p.mesh.position.z,.2);
       addStain(p.mesh.position.x+rand(-.1,.1),p.mesh.position.z+rand(-.1,.1),.1); }
   }
+  /* the gutted keep losing what should stay in */
+  if(f.gutsOut&&f.alive&&(f._gutDrip=(f._gutDrip||0)-dt)<0&&
+     Math.hypot(f.vel.x,f.vel.z)>.6){
+    f._gutDrip=2.2+Math.random()*1.5;
+    const p=mkGutLoop(); p.scale.setScalar(.7);
+    p.position.copy(f.pos).setY(.95); scene.add(p);
+    f.severedPieces=f.severedPieces||[];
+    f.severedPieces.push({mesh:p,bleed:.8,
+      vel:V3(rand(-.4,.4),-.2,rand(-.4,.4)),ang:V3(rand(-3,3),0,rand(-3,3))});
+    emitBlood(p.position,V3(0,-.6,0),2,8);
+  }
   /* the fresh stump pumps in time with the heart */
   if(f.stumpBleed>0&&f.stumpAt){
     f.stumpBleed-=dt;
@@ -3203,6 +3214,44 @@ const brainTex=canTex(128,128,(x,w,h)=>{
   }
 });
 /* the skull cleft: bone-rimmed breach, the brain beneath */
+Fighter.prototype.decapitate=function(worldPt,hitDir){
+  if(this.severed.head)return; this.severed.head=true;
+  try{
+    const head=this.parts.head;
+    scene.attach(head);
+    this.severedPieces=this.severedPieces||[];
+    this.severedPieces.push({mesh:head,bleed:3,
+      vel:V3(hitDir.x*2.6+rand(-.6,.6),rand(2.8,3.8),hitDir.z*2.6+rand(-.6,.6)),
+      ang:V3(rand(-8,8),rand(-8,8),rand(-8,8))});
+    attachStump(this.parts.neck,0,.045);
+    /* the fountain */
+    addSquirt(this,'neck',worldPt,4.2,2.6);
+    emitBlood(worldPt,V3(0,1,0),6,70);
+    emitBlood(worldPt,hitDir,4,30);
+    game.timeScale=.3; game.slowT=.5; game.shake=1.2;
+  }catch(e){}
+};
+Fighter.prototype.launchHeart=function(worldPt,hitDir){
+  if(this.heartOut)return; this.heartOut=true;
+  try{
+    const heart=new THREE.Group();
+    const h=new THREE.Mesh(new THREE.SphereGeometry(.034,9,8),
+      stdMat(0x8e1420,{roughness:.25}));
+    h.scale.set(1,.85,.8);
+    const t1=new THREE.Mesh(new THREE.CylinderGeometry(.008,.011,.03,6),
+      stdMat(0x5e2028,{roughness:.4}));
+    t1.position.set(.01,.032,0); t1.rotation.z=-.4;
+    heart.add(h,t1);
+    heart.position.copy(worldPt); scene.add(heart);
+    this.severedPieces=this.severedPieces||[];
+    this.severedPieces.push({mesh:heart,bleed:2.2,
+      vel:V3(hitDir.x*2.4,rand(2,3),hitDir.z*2.4),
+      ang:V3(rand(-9,9),rand(-9,9),rand(-9,9))});
+    addSquirt(this,'chest',worldPt,3,2.2);
+    emitBlood(worldPt,hitDir,5,44);
+    game.timeScale=.3; game.slowT=.45;
+  }catch(e){}
+};
 Fighter.prototype.exposeBrain=function(worldPt){
   if(this.brainOut)return; this.brainOut=true;
   try{
@@ -3256,7 +3305,7 @@ Fighter.prototype.eviscerate=function(worldPt,dir){
     ab.add(hang);
     /* and loops that do not stay */
     this.severedPieces=this.severedPieces||[];
-    for(let i=0;i<2;i++){
+    for(let i=0;i<4;i++){
       const p=mkGutLoop(); p.position.copy(worldPt); scene.add(p);
       this.severedPieces.push({mesh:p,bleed:1.2,
         vel:V3(dir.x*.8+rand(-.5,.5),rand(.3,1),dir.z*.8+rand(-.5,.5)),
@@ -3268,8 +3317,10 @@ Fighter.prototype.eviscerate=function(worldPt,dir){
     this.severedPieces.push({mesh:liver,bleed:1.5,
       vel:V3(dir.x*.6,rand(.2,.7),dir.z*.6),ang:V3(rand(-3,3),0,rand(-3,3))});
     this.bleedRate+=14; this.pain=Math.min(100,this.pain+35);
-    emitBlood(worldPt,V3(0,-.4,0),3,26);
-    emitBlood(worldPt,dir,2,12);
+    addSquirt(this,'abdomen',worldPt,3,1.7);
+    this._gutDrip=2.4;                       // more will slip out
+    emitBlood(worldPt,V3(0,-.4,0),4,44);
+    emitBlood(worldPt,dir,3,22);
   }catch(e){}
 };
 Fighter.prototype.addGash=function(partKey,worldPt,dir){
@@ -3300,6 +3351,34 @@ Fighter.prototype.addGash=function(partKey,worldPt,dir){
     part.add(g);
   }catch(e){}
 };
+
+/* ============ PRESSURE: wounds squirt in arcs, and keep squirting ======= */
+const SQUIRTS=[];
+function addSquirt(f,partKey,worldPt,dur,power){
+  const part=f.parts[partKey]||f.parts.chest;
+  try{
+    part.updateMatrixWorld(true);
+    SQUIRTS.push({f,part,local:part.worldToLocal(worldPt.clone()),
+      t:dur,power,pulse:0});
+  }catch(e){}
+}
+const _sq=V3(), _sd=V3();
+function updateSquirts(dt){
+  for(let i=SQUIRTS.length-1;i>=0;i--){
+    const s=SQUIRTS[i];
+    s.t-=dt;
+    if(s.t<=0||!s.f.parts){ SQUIRTS.splice(i,1); continue; }
+    s.pulse-=dt;
+    if(s.pulse<=0){
+      s.pulse=.11+Math.random()*.09;              // heart-paced spurts
+      s.part.updateMatrixWorld(true);
+      _sq.copy(s.local).applyMatrix4(s.part.matrixWorld);
+      _sd.set(rand(-.6,.6),rand(.7,1.4),rand(-.6,.6)).normalize();
+      emitBlood(_sq,_sd,(3+Math.random()*3)*s.power,
+        Math.floor((7+Math.random()*7)*s.power));
+    }
+  }
+}
 
 /* contact shadows: soft dark blobs under feet and body — grounding
    that a single directional shadow can't provide */
@@ -3931,7 +4010,7 @@ function frame(now){
           TMP1.addVectors(c.a,c.b).multiplyScalar(.5);
           emitBlood(TMP1,V3(rand(-.5,.5),1,rand(-.5,.5)),2.6,5); }
       }
-      if(!f.dead&&f.pool){ f.pool.r=Math.min(1.2,f.pool.r+f.bleedRate*dt*.0009);
+      if(!f.dead&&f.pool){ f.pool.r=Math.min(1.8,f.pool.r+f.bleedRate*dt*.0016);
         f.pool.mesh.position.set(f.pos.x,.007,f.pos.z); }
     }
 
@@ -3964,6 +4043,7 @@ function frame(now){
       }
     }
   }
+  updateSquirts(dt);
   if(player){ updateBlobs(player); updateBlobs(enemy); }
   updatePuffs(dt); updateFlares(dt);
   if(groundMark)groundMark.flush();

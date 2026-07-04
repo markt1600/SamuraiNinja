@@ -391,6 +391,24 @@ collapsing underneath in parallel. Hips-position tracks are kept for
 death clips only, with automatic cm/meter unit detection per rig.
 The draw and sheath ritual clips ship alongside.
 
+## v18 — dramatic gore (the MK dial)
+
+- **Squirt emitters** — every artery, mortal, and severe wound gets a
+  pressurized emitter anchored to the body part: heart-paced arcing
+  spurts (0.11–0.2s pulses) that ride the fighter as he staggers.
+  Arteries pump 3.5s, mortal wounds 3s, severe 1.6s.
+- **Decapitation** — the through-the-spine neck kill now takes the head:
+  it flies (face, hair, and all), trailing blood, lands in the snow; a
+  bone-rimmed stump erupts a 4-second fountain; time drops to 0.3 with
+  a screen shake.
+- **The heart** — a heart strike launches the organ itself, aorta stub
+  attached, on a blood arc with slow-mo.
+- **Evisceration doubled** — four loops plus the liver fall at the
+  opening, a squirter attaches, and the gutted man **keeps shedding**:
+  every ~2–4s of movement, another loop slips out.
+- **Pools** — spread 1.8× faster and half again as wide. The floor gets
+  painted.
+
 ## Headless tests
 
 `node test_harness.js` — jsdom + real three.js math, stubbed GPU/audio.
