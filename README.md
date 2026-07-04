@@ -346,6 +346,19 @@ rim and grade above. That single file is the remaining distance.
   and every severe cut leaves a **jagged gash decal** stuck to the body
   part it opened (up to 12), riding the animation.
 
+## v15 — Mixamo FBX, straight in
+
+No Blender, no GLB conversion. On mixamo.com: pick or auto-rig a
+character → **Download → Format: FBX Binary, Skin: With Skin** → then
+either **drag the .fbx straight onto the game window**, or save it as
+`models/samurai.fbx` (auto-probed alongside the .glb names, and
+listable in `models/index.json`). The FBX loader ships in the bundle
+(fflate + FBXLoader, three.js r128, MIT). Mixamo's centimeter scale is
+auto-normalized by the height fitter, and bone prefixes
+(`mixamorig:`, `mixamorig1:`, underscores, bare) resolve fuzzily.
+Note: any animation clips in the file are ignored by design — the
+game's IK + physics drive the skeleton live.
+
 ## Headless tests
 
 `node test_harness.js` — jsdom + real three.js math, stubbed GPU/audio.

@@ -1561,8 +1561,10 @@ const MODELPIPE=(()=>{
   }
   if(typeof process!=='undefined'||typeof THREE.GLTFLoader==='undefined')
     return {enabled:false,cycle(){},drive(){},sources:[],boneQuat};
-  const sources=['models/samurai.glb','models/samurai2.glb','models/samurai3.glb',
-    'models/fighter.glb','models/Xbot.glb','models/Soldier.glb'];
+  const sources=['models/samurai.glb','models/samurai.fbx',
+    'models/samurai2.glb','models/samurai2.fbx','models/samurai3.glb',
+    'models/fighter.glb','models/fighter.fbx',
+    'models/Xbot.glb','models/Soldier.glb'];
   /* models/index.json (["file.glb",...]) prepends to the cycle */
   try{ fetch('models/index.json').then(r=>r.ok?r.json():null).then(list=>{
     if(Array.isArray(list))
@@ -1572,14 +1574,21 @@ const MODELPIPE=(()=>{
   function load(url,cb){
     if(cache[url])return cb(cache[url]);
     if(cache[url]===false)return cb(null);
-    new THREE.GLTFLoader().load(url,g=>{ cache[url]=g; cb(g); },
-      undefined,()=>{ cache[url]=false; cb(null); });
+    const done=g=>{ cache[url]=g; cb(g); };
+    const fail=()=>{ cache[url]=false; cb(null); };
+    if(/\.fbx$/i.test(url)){
+      if(typeof THREE.FBXLoader==='undefined')return fail();
+      new THREE.FBXLoader().load(url,obj=>done({scene:obj}),undefined,fail);
+    } else {
+      new THREE.GLTFLoader().load(url,done,undefined,fail);
+    }
   }
   /* bone-name resolution: mixamorig:X, mixamorigX, or bare X */
   function findBone(root,name){
     let b=null;
+    const rx=new RegExp('(^|[:_])'+name+'$');
     root.traverse(o=>{ if(b)return;
-      if(o.isBone&&(o.name==='mixamorig:'+name||o.name==='mixamorig'+name||o.name===name))b=o; });
+      if(o.isBone&&rx.test(o.name))b=o; });
     return b;
   }
   const CORE=['Hips','Spine','Spine1','Spine2','Neck','Head',
@@ -1677,18 +1686,25 @@ const MODELPIPE=(()=>{
   addEventListener('drop',e=>{
     e.preventDefault();
     const f=e.dataTransfer&&e.dataTransfer.files&&e.dataTransfer.files[0];
-    if(!f||!/\.glb$/i.test(f.name))return;
+    if(!f||!/\.(glb|fbx)$/i.test(f.name))return;
+    const isFbx=/\.fbx$/i.test(f.name);
     const rd=new FileReader();
+    const use=g=>{ cache['drop:'+f.name]=g;
+      if(typeof player!=='undefined'&&player){
+        player.setModel(g); enemy.setModel(g);
+        if(player.model)log('dropped: '+f.name+' — retargeted, fighting',false);
+      } };
     rd.onload=()=>{
       try{
-        new THREE.GLTFLoader().parse(rd.result,'',g=>{
-          cache['drop:'+f.name]=g;
-          if(typeof player!=='undefined'&&player){
-            player.setModel(g); enemy.setModel(g);
-            if(player.model)log('dropped: '+f.name+' — retargeted, fighting',false);
-          }
-        },()=>log('could not parse '+f.name,false));
-      }catch(err){ log('could not load '+f.name,false); }
+        if(isFbx){
+          if(typeof THREE.FBXLoader==='undefined')
+            return log('FBXLoader missing',false);
+          use({scene:new THREE.FBXLoader().parse(rd.result,'')});
+        } else {
+          new THREE.GLTFLoader().parse(rd.result,'',use,
+            ()=>log('could not parse '+f.name,false));
+        }
+      }catch(err){ log('could not load '+f.name+': '+err.message,false); }
     };
     rd.readAsArrayBuffer(f);
   });
