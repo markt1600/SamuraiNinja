@@ -1021,12 +1021,12 @@ class Fighter{
     this.atRope=false;
 
     /* materials */
-    const kimono=stdMat(palette.kimono,{roughness:.9,map:kimonoTex||null,
-      normalMap:kimonoNrm||null});
-    const hakama=stdMat(palette.hakama,{roughness:.94,map:hakamaTex||null,
-      normalMap:hakamaNrm||null});
-    const skin=stdMat(palette.skin,{roughness:.55,map:skinTex||null,
-      normalMap:skinNrm||null});
+    const kimono=rimify(stdMat(palette.kimono,{roughness:.9,map:kimonoTex||null,
+      normalMap:kimonoNrm||null}),.32,.42,.62,3,.5);
+    const hakama=rimify(stdMat(palette.hakama,{roughness:.94,map:hakamaTex||null,
+      normalMap:hakamaNrm||null}),.3,.38,.58,3,.42);
+    const skin=rimify(stdMat(palette.skin,{roughness:.55,map:skinTex||null,
+      normalMap:skinNrm||null}),.42,.4,.42,3,.32);
     if(skin.normalMap)skin.normalScale=new THREE.Vector2(.6,.6);
     const hairM=stdMat(0x14110d,{roughness:.9});
     const obiM=stdMat(palette.obi,{roughness:.8});
@@ -1175,6 +1175,11 @@ class Fighter{
     hideIn(parts.thighR); hideIn(parts.thighL);
     hideIn(parts.shinR); hideIn(parts.shinL);
     parts.pelvis.traverse(o=>{ if(o.isMesh&&o.userData.cover)o.visible=false; });
+    /* the silhouette: outline everything the eye reads as the fighter */
+    addOutline(this.skin.mesh,.009);
+    for(const g of [parts.head,parts.forearmR,parts.forearmL,
+        parts.handR,parts.handL,parts.footR,parts.footL,parts.pelvis])
+      g.traverse(o=>{ if(o.isMesh&&o.visible&&!o.userData.outline)addOutline(o,.006); });
 
     /* sword trail ribbon */
     this.trailN=16; this.trailSamples=[];
@@ -2137,6 +2142,7 @@ Fighter.prototype.updateAlive=function(dt,opponent){
     const bladeDir=TMP2.subVectors(this.tip,handle);
     if(bladeDir.lengthSq()<.04)bladeDir.copy(toTip); // degenerate guard
     bladeDir.normalize();
+    clampBladeDir(bladeDir,fwdC,rightC);
     /* the physical sword's momentum bends the rendered blade's line */
     if(PHYS.enabled&&this.phys&&this.phys.B.sword){
       const sw=this.phys.B.sword;
@@ -2268,6 +2274,9 @@ Fighter.prototype.hangArm=function(side,sh,right,P){
 /* ============================== INPUT ================================== */
 const input={keys:{},mx:0,my:0,rmb:false,shift:false};
 addEventListener('keydown',e=>{ input.keys[e.code]=true;
+  if(e.code==='KeyO'){ OUTLINE.on=!OUTLINE.on;
+    for(const o of OUTLINE.meshes)o.visible=OUTLINE.on;
+    log('outlines '+(OUTLINE.on?'on':'off'),false); }
   if(e.code==='KeyM'&&MODELPIPE.enabled&&player){
     MODELPIPE.mode=(MODELPIPE.mode+1)%(MODELPIPE.sources.length+1);
     if(MODELPIPE.mode===0){
@@ -2335,6 +2344,9 @@ function playerIntent(pl,en){
     .addScaledVector(right,input.mx*1.5)
     .addScaledVector(fwd,reach+(input.shift?clamp(input.my,0,1)*.6:0));
   t.y=1.25+input.my*1.25;
+  { const r=Math.max(TMP4.subVectors(t,chest).length(),.3);
+    clampBladeDir(TMP4.divideScalar(r),fwd,right);
+    t.copy(chest).addScaledVector(TMP4,r); }
   if(input.rmb){ /* guard: bring the blade between you and his */
     if(en.bladeA&&en.bladeB){
       TMP4.addVectors(en.bladeA,en.bladeB).multiplyScalar(.5);
@@ -2791,6 +2803,27 @@ const puffTex=canTex(48,48,(ctx,w,h)=>{
   g.addColorStop(1,'rgba(235,240,248,0)');
   ctx.fillStyle=g; ctx.fillRect(0,0,w,h);
 });
+const flares=[];
+function impactFlare(p,big){
+  try{
+    const m=new THREE.SpriteMaterial({map:glintTex||null,transparent:true,
+      opacity:.95,depthWrite:false,blending:THREE.AdditiveBlending,
+      color:big?0xfff2d8:0xdfe8ff});
+    const s=new THREE.Sprite(m); s.position.copy(p);
+    s.scale.setScalar(big?.28:.16);
+    s.userData={life:big?.26:.18,max:big?.26:.18,grow:big?4.5:3};
+    scene.add(s); flares.push(s);
+  }catch(e){}
+}
+function updateFlares(dt){
+  for(let i=flares.length-1;i>=0;i--){ const s=flares[i],u=s.userData;
+    u.life-=dt;
+    if(u.life<=0){ scene.remove(s); flares.splice(i,1); continue; }
+    const k=u.life/u.max;
+    s.material.opacity=.95*k;
+    s.scale.setScalar(s.scale.x+dt*u.grow*.1);
+  }
+}
 const puffs=[];
 function breathe(f,foe){
   const m=new THREE.SpriteMaterial({map:puffTex||null,transparent:true,
@@ -2898,6 +2931,51 @@ const hakamaNrm=mkNormalTex(256,(x,w,h)=>{
 },3);
 if(hakamaNrm)hakamaNrm.repeat.set(4,1.6);
 
+/* ============ FIGHTING-GAME RENDER KIT: silhouette + edge light ========
+   90s arcade readability: every fighter wears a dark inverted-hull
+   OUTLINE (normal-displaced so it deforms with the skin) and a cool
+   fresnel RIM so the silhouette pops off the night. O toggles outlines. */
+const OUTLINE={on:true,meshes:[]};
+function addOutline(mesh,thick){
+  try{
+    if(!mesh.geometry||!mesh.geometry.attributes.position)return;
+    if(mesh.geometry.attributes.position.count<60)return;   // skip face micro-parts
+    const mat=new THREE.MeshBasicMaterial({color:0x04060b,side:THREE.BackSide});
+    if(mesh.isSkinnedMesh)mat.skinning=true;
+    const t=(thick||.007).toFixed(4);
+    mat.onBeforeCompile=s=>{ s.vertexShader=s.vertexShader.replace(
+      '#include <begin_vertex>',
+      '#include <begin_vertex>\ntransformed += objectNormal*'+t+';'); };
+    let o;
+    if(mesh.isSkinnedMesh){ o=new THREE.SkinnedMesh(mesh.geometry,mat);
+      o.bind(mesh.skeleton,mesh.bindMatrix); }
+    else o=new THREE.Mesh(mesh.geometry,mat);
+    o.frustumCulled=false; o.castShadow=false; o.userData.outline=true;
+    mesh.add(o); OUTLINE.meshes.push(o);
+  }catch(e){}
+}
+function rimify(m,r,g,b,power,strength){
+  m.onBeforeCompile=s=>{ s.fragmentShader=s.fragmentShader.replace(
+    '#include <emissivemap_fragment>',
+    '#include <emissivemap_fragment>\n'+
+    '{ float f=pow(1.0-clamp(dot(normalize(vNormal),normalize(vViewPosition)),0.0,1.0),'+power.toFixed(1)+');\n'+
+    '  totalEmissiveRadiance += vec3('+r+','+g+','+b+')*f*'+strength+'; }'); };
+  return m;
+}
+
+/* THE GRIP CONE — a two-handed katana has a hard orientation envelope:
+   up to full jodan overhead (even cocked slightly back), down to a deep
+   gedan (~46° below), out to waki at the flank — but never inverted, and
+   never backward through your own chest. */
+function clampBladeDir(d,fwd,right){
+  let lx=d.dot(right), ly=clamp(d.y,-.72,.999), lz=d.dot(fwd);
+  /* backward is legal only overhead (jodan cock) or at the flank (waki) */
+  if(ly<.7&&Math.abs(lx)<.55&&lz<.06)lz=.06;
+  const h=Math.sqrt(Math.max(1-ly*ly,1e-6)), hl=Math.hypot(lx,lz)||1e-6;
+  lx*=h/hl; lz*=h/hl;
+  return d.set(0,ly,0).addScaledVector(right,lx).addScaledVector(fwd,lz).normalize();
+}
+
 /* ---------------- kamae: the five guards, as tip targets --------------- */
 const KAMAE={
   chudan:(o,p,fwd,right)=>o.copy(p).addScaledVector(fwd,.95).setY(1.28),
@@ -2912,18 +2990,18 @@ const KAMAE={
 /* ------------------------- the opponent ladder ------------------------- */
 const DUELISTS=[
   {name:'KIYOMASA', kanji:'猪', epithet:'the Boar',
-   palette:{kimono:0x3a2420,hakama:0x241611,obi:0x8a5a1f,skin:0xbf9276,accent:0x101010,
+   palette:{kimono:0x542c20,hakama:0x2a1810,obi:0xc07a20,skin:0xbf9276,accent:0x101010,
      face:{beard:true}},
    ai:{skill:.72,reaction:.24,engage:[1.2,2.0],atkCircle:.62,atkBlock:.3,
        windupT:[.36,.5],strikeT:[.3,.44],speedMul:.8,parry:.12,maai:1.95,tempo:[.5,1.2],
        kamae:'jodan'}},
   {name:'GENNOSUKE', kanji:'鏡', epithet:'the Mirror',
-   palette:{kimono:0x27313d,hakama:0x161c24,obi:0xb9b3a4,skin:0xc9a184,accent:0x0e0e0e},
+   palette:{kimono:0x2c3e52,hakama:0x18222e,obi:0xd8d0b8,skin:0xc9a184,accent:0x0e0e0e},
    ai:{skill:.86,reaction:.14,engage:[2.2,3.4],atkCircle:.16,atkBlock:.66,
        windupT:[.3,.42],strikeT:[.28,.4],speedMul:.9,parry:.5,maai:2.3,tempo:[.9,1.9],
        kamae:'seigan'}},
   {name:'SHIZUKA', kanji:'静', epithet:'First Draw',
-   palette:{kimono:0x352822,hakama:0x1e1712,obi:0x7c1f1f,skin:0xbf9276,accent:0x101010,
+   palette:{kimono:0x46302a,hakama:0x241a14,obi:0xa82424,skin:0xbf9276,accent:0x101010,
      face:{mustache:true}},
    ai:{skill:.95,reaction:.11,engage:[2.6,4.2],atkCircle:.32,atkBlock:.28,
        windupT:[.2,.3],strikeT:[.26,.36],speedMul:1.02,parry:.35,maai:2.5,tempo:[1.2,2.4],
@@ -2967,7 +3045,7 @@ function setup(){
   for(const m of allStains)scene.remove(m); allStains.length=0; stainCount=0;
   if(groundMark)groundMark.reset();   // fresh snow fell overnight
   player=new Fighter('Musashi',
-    {kimono:0x2e4059,hakama:0x1b2534,obi:0xcfc8b6,skin:0xc9a184,accent:0xe9e5da},-1.9,1,true);
+    {kimono:0x2a4a78,hakama:0x18263e,obi:0xe8ddc0,skin:0xd0a684,accent:0xf2eee2},-1.9,1,true);
   const D=DUELISTS[game.stage];
   enemy=new Fighter(D.name,D.palette,1.9,-1,false);
   enemy.speedMul=D.ai.speedMul;
@@ -2997,6 +3075,7 @@ function disposeFighter(f){
 }
 function restart(){
   if(game.advance===true)game.stage=Math.min(game.stage+1,DUELISTS.length-1);
+  OUTLINE.meshes=OUTLINE.meshes.filter(o=>!!o.parent&&o.parent.parent!==null);
   game.advance=false; killCam=null; game.firstBlood=false;
   game.bind=null; game._bindN=0; placeIce();
   document.body.classList.remove('cine');
@@ -3275,7 +3354,7 @@ function frame(now){
       }
     }
   }
-  updatePuffs(dt);
+  updatePuffs(dt); updateFlares(dt);
   if(groundMark)groundMark.flush();
   /* dying from the inside: sight narrows, colour drains, sound sinks,
      the sword grows heavy in the hands */

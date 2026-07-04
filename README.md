@@ -273,6 +273,21 @@ look handheld." Rebuilt as real kenjutsu mechanics:
 All combat numbers unchanged and re-verified: kills, parries, binds, and
 the physics sword all operate on the new geometry.
 
+## v11 — the grip cone and the arcade look
+
+- **The grip cone** — a two-handed katana now has a hard orientation
+  envelope enforced in body frame: never inverted (floor ≈46° below
+  horizontal), never backward through your own chest — while jodan's
+  overhead cock and waki's flank carry remain legal (explicit carve-outs,
+  all four cases unit-tested). Applied to the player's intent, the AI,
+  and the rendered blade after physics blending.
+- **Fighting-game render kit** — 90s-arcade readability: every fighter
+  wears a dark **inverted-hull outline** (normal-displaced in the vertex
+  shader, so it deforms with the skinned body); cool **fresnel rim
+  light** pops the silhouette off the night; the palette is punched to
+  arcade saturation; and severe hits burst an additive **impact flare**.
+  Press **O** to toggle outlines.
+
 ## Headless tests
 
 `node test_harness.js` — jsdom + real three.js math, stubbed GPU/audio.
