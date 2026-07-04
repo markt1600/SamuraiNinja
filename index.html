@@ -1,0 +1,125 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>斬 ZAN — a duel in the snow</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Shippori+Mincho:wght@400;600;800&family=Zen+Kaku+Gothic+New:wght@300;400;500&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --snow:#dde1e4; --night:#101318; --ink:#14161a;
+    --blood:#9e1b1b; --blood-fresh:#c22323;
+    --steel:#b9c2cb; --paper:#e9e6df; --dim:#7d838c;
+  }
+  *{margin:0;padding:0;box-sizing:border-box}
+  html,body{height:100%;overflow:hidden;background:var(--night)}
+  body{font-family:'Zen Kaku Gothic New',sans-serif;color:var(--paper);cursor:crosshair}
+  canvas{display:block}
+
+  /* ---------- HUD ---------- */
+  #hud{position:fixed;inset:0;pointer-events:none;z-index:10}
+  .fighter-panel{position:absolute;top:22px;width:150px;display:flex;gap:12px;align-items:flex-start}
+  #panel-player{left:24px}
+  #panel-enemy{right:24px;flex-direction:row-reverse;text-align:right}
+  .fp-name{font-family:'Shippori Mincho',serif;font-size:15px;letter-spacing:.14em;color:var(--paper)}
+  .fp-sub{font-size:10px;letter-spacing:.2em;color:var(--dim);text-transform:uppercase;margin-top:2px}
+  .fp-state{font-size:11px;margin-top:8px;color:var(--dim);line-height:1.5;min-height:32px}
+  .fp-state .crit{color:var(--blood-fresh)}
+  .diagram{width:56px;flex-shrink:0}
+  .diagram svg{width:100%;display:block}
+  /* blood column */
+  .blood-col{position:absolute;top:22px;width:5px;height:120px;background:rgba(233,230,223,.10)}
+  #blood-player{left:6px}
+  #blood-enemy{right:6px}
+  .blood-fill{position:absolute;bottom:0;left:0;width:100%;height:100%;background:var(--blood);transition:height .4s}
+
+  /* wound log */
+  #log{position:absolute;bottom:9vh;left:50%;transform:translateX(-50%);width:min(640px,90vw);
+       display:flex;flex-direction:column-reverse;align-items:center;gap:6px}
+  .log-line{font-family:'Shippori Mincho',serif;font-size:15px;letter-spacing:.06em;color:var(--paper);
+       text-shadow:0 1px 8px rgba(0,0,0,.8);opacity:0;animation:logfade 5s forwards}
+  .log-line.mortal{color:var(--blood-fresh);font-size:17px}
+  @keyframes logfade{0%{opacity:0;transform:translateY(6px)}6%{opacity:1;transform:none}80%{opacity:1}100%{opacity:0}}
+
+  /* controls hint */
+  #hint{position:absolute;bottom:20px;left:50%;transform:translateX(-50%);
+        font-size:10.5px;letter-spacing:.18em;color:var(--dim);text-transform:uppercase;white-space:nowrap}
+
+  /* ---------- title / end screens ---------- */
+  .screen{position:fixed;inset:0;z-index:20;display:flex;flex-direction:column;align-items:center;justify-content:center;
+          background:radial-gradient(ellipse at 50% 60%, rgba(16,19,24,.55), rgba(16,19,24,.92));
+          transition:opacity .8s;pointer-events:all}
+  .screen.hidden{opacity:0;pointer-events:none}
+  .kanji{font-family:'Shippori Mincho',serif;font-weight:800;font-size:clamp(90px,18vw,170px);line-height:1;
+         color:var(--paper);text-shadow:0 0 60px rgba(233,230,223,.12)}
+  .kanji.red{color:var(--blood-fresh);text-shadow:0 0 80px rgba(194,35,35,.25)}
+  .title-sub{font-family:'Shippori Mincho',serif;font-size:20px;letter-spacing:.5em;margin-top:14px;color:var(--paper)}
+  .title-tag{font-size:11.5px;letter-spacing:.24em;color:var(--dim);margin-top:10px;text-transform:uppercase}
+  .rule{width:52px;height:1px;background:var(--dim);margin:34px 0 26px;opacity:.5}
+  .controls{display:grid;grid-template-columns:auto auto;gap:7px 22px;font-size:12.5px;color:var(--dim);letter-spacing:.08em}
+  .controls b{color:var(--paper);font-weight:500;text-align:right;letter-spacing:.14em}
+  .begin{margin-top:40px;font-family:'Shippori Mincho',serif;font-size:15px;letter-spacing:.32em;color:var(--paper);
+         border:1px solid rgba(233,230,223,.35);padding:13px 44px;cursor:pointer;background:none;transition:all .25s}
+  .begin:hover{background:rgba(233,230,223,.08);border-color:var(--paper)}
+  #cause{font-size:13.5px;color:var(--dim);margin-top:16px;letter-spacing:.1em;max-width:520px;text-align:center;line-height:1.7}
+  #verdict-sub{font-family:'Shippori Mincho',serif;font-size:19px;letter-spacing:.3em;margin-top:16px}
+  .warn{margin-top:26px;font-size:10.5px;color:var(--dim);letter-spacing:.14em;text-transform:uppercase}
+</style>
+</head>
+<body>
+
+<div id="hud">
+  <div class="blood-col" id="blood-player"><div class="blood-fill" id="bloodfill-player"></div></div>
+  <div class="blood-col" id="blood-enemy"><div class="blood-fill" id="bloodfill-enemy"></div></div>
+
+  <div class="fighter-panel" id="panel-player">
+    <div class="diagram" id="diagram-player"></div>
+    <div>
+      <div class="fp-name">MUSASHI<span style="color:var(--dim)"> 武</span></div>
+      <div class="fp-sub">you</div>
+      <div class="fp-state" id="state-player">composed</div>
+    </div>
+  </div>
+
+  <div class="fighter-panel" id="panel-enemy">
+    <div class="diagram" id="diagram-enemy"></div>
+    <div>
+      <div class="fp-name"><span style="color:var(--dim)">鬼 </span>ONIMARU</div>
+      <div class="fp-sub">the opponent</div>
+      <div class="fp-state" id="state-enemy">composed</div>
+    </div>
+  </div>
+
+  <div id="log"></div>
+  <div id="hint">move W A S D &nbsp;·&nbsp; cut — swing mouse &nbsp;·&nbsp; hold RMB — guard &nbsp;·&nbsp; hold SHIFT — thrust &nbsp;·&nbsp; R — again</div>
+</div>
+
+<div class="screen" id="menu">
+  <div class="kanji">斬</div>
+  <div class="title-sub">Z A N</div>
+  <div class="title-tag">a duel in the snow · one cut decides</div>
+  <div class="rule"></div>
+  <div class="controls">
+    <b>mouse</b><span>your blade has mass — swing hard to cut, slow taps glance off</span>
+    <b>edge</b><span>a turning blade lands flat; commit through the line of the cut</span>
+    <b>RMB</b><span>guard — meet his blade with yours</span>
+    <b>shift</b><span>thrust posture — the point beats armor and ribs</span>
+    <b>W A S D</b><span>footwork — distance is life</span>
+  </div>
+  <button class="begin" id="btn-begin">BEGIN</button>
+  <div class="warn">no health bar · anatomy is the health bar · a severed artery ends the duel</div>
+</div>
+
+<div class="screen hidden" id="verdict">
+  <div class="kanji red" id="verdict-kanji">斬</div>
+  <div id="verdict-sub"></div>
+  <div id="cause"></div>
+  <button class="begin" id="btn-again">AGAIN&nbsp;&nbsp;·&nbsp;&nbsp;R</button>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script src="game.js"></script>
+</body>
+</html>
