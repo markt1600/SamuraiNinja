@@ -1404,13 +1404,22 @@ class Fighter{
     const hand=limb==='armR'?this.parts.handR:this.parts.handL;
     scene.attach(fore); scene.attach(hand);
     hand.position.copy(fore.position);
+    /* the torn ends: jagged flesh, protruding bone */
+    const ua=limb==='armR'?this.parts.upperArmR:this.parts.upperArmL;
+    this.stumpAt=attachStump(ua,-this.dims.upperArm,.052);   // on the body
+    attachStump(fore,0,.048);                                 // on the piece
     this.severedPieces=this.severedPieces||[];
-    this.severedPieces.push({mesh:fore,vel:V3(hitDir.x*2+rand(-1,1),2.2,hitDir.z*2+rand(-1,1)),
+    this.severedPieces.push({mesh:fore,bleed:1.6,
+      vel:V3(hitDir.x*2+rand(-1,1),2.2,hitDir.z*2+rand(-1,1)),
       ang:V3(rand(-6,6),rand(-6,6),rand(-6,6))});
-    this.severedPieces.push({mesh:hand,vel:V3(hitDir.x*2+rand(-1,1),2.4,hitDir.z*2+rand(-1,1)),
+    this.severedPieces.push({mesh:hand,bleed:.5,
+      vel:V3(hitDir.x*2+rand(-1,1),2.4,hitDir.z*2+rand(-1,1)),
       ang:V3(rand(-6,6),rand(-6,6),rand(-6,6))});
     if(limb==='armR')this.dropSword(log);
-    emitBlood(hitPoint,V3(0,1,0),3.5,30);
+    /* the burst, and the stump keeps pumping */
+    emitBlood(hitPoint,V3(0,1,0),4.5,44);
+    emitBlood(hitPoint,hitDir,3,18);
+    this.stumpBleed=2.2;                                      // seconds of pump
   }
 
   /* mobility multiplier from legs + blood + stamina */
@@ -1552,7 +1561,13 @@ const MODELPIPE=(()=>{
   }
   if(typeof process!=='undefined'||typeof THREE.GLTFLoader==='undefined')
     return {enabled:false,cycle(){},drive(){},sources:[],boneQuat};
-  const sources=['models/samurai.glb','models/Xbot.glb','models/Soldier.glb'];
+  const sources=['models/samurai.glb','models/samurai2.glb','models/samurai3.glb',
+    'models/fighter.glb','models/Xbot.glb','models/Soldier.glb'];
+  /* models/index.json (["file.glb",...]) prepends to the cycle */
+  try{ fetch('models/index.json').then(r=>r.ok?r.json():null).then(list=>{
+    if(Array.isArray(list))
+      for(const f of list.reverse())sources.unshift('models/'+String(f).replace(/^models\//,''));
+  }).catch(()=>{}); }catch(e){}
   const cache={};
   function load(url,cb){
     if(cache[url])return cb(cache[url]);
@@ -1585,8 +1600,15 @@ const MODELPIPE=(()=>{
       if(o.material){ o.material=o.material.clone();
         o.material._base=o.material.color?o.material.color.clone():null; } } });
     const bones={};
-    for(const n of CORE)bones[n]=findBone(root,n);
-    if(!bones.Hips){ return null; }
+    let found=0;
+    for(const n of CORE){ bones[n]=findBone(root,n); if(bones[n])found++; }
+    if(!bones.Hips){
+      log('model loaded but has NO Mixamo rig ('+found+'/'+CORE.length+
+        ' bones) — run it through Mixamo auto-rigger, re-export, retry',false);
+      return null;
+    }
+    if(found<CORE.length)
+      log('model rig partial: '+found+'/'+CORE.length+' bones resolved',false);
     scene.add(root);
     return {root,bones,scale:s,worldQ:{}};
   }
@@ -1650,6 +1672,26 @@ const MODELPIPE=(()=>{
           clamp((1-(f.bloodFrac||1))*1.4,0,.7)); });
     }
   }
+  /* drop a .glb anywhere on the page — it loads and fights immediately */
+  addEventListener('dragover',e=>e.preventDefault());
+  addEventListener('drop',e=>{
+    e.preventDefault();
+    const f=e.dataTransfer&&e.dataTransfer.files&&e.dataTransfer.files[0];
+    if(!f||!/\.glb$/i.test(f.name))return;
+    const rd=new FileReader();
+    rd.onload=()=>{
+      try{
+        new THREE.GLTFLoader().parse(rd.result,'',g=>{
+          cache['drop:'+f.name]=g;
+          if(typeof player!=='undefined'&&player){
+            player.setModel(g); enemy.setModel(g);
+            if(player.model)log('dropped: '+f.name+' — retargeted, fighting',false);
+          }
+        },()=>log('could not parse '+f.name,false));
+      }catch(err){ log('could not load '+f.name,false); }
+    };
+    rd.readAsArrayBuffer(f);
+  });
   return {enabled:true,sources,load,attach,drive,boneQuat,
     _handFix:new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1,0,0),-Math.PI/2),
     mode:0};
@@ -2331,9 +2373,9 @@ addEventListener('keydown',e=>{ input.keys[e.code]=true;
     } else {
       const url=MODELPIPE.sources[MODELPIPE.mode-1];
       MODELPIPE.load(url,g=>{
-        if(!g){ log('no model at '+url,false); return; }
+        if(!g){ log('no file at '+url+' — skipping',false); return; }
         player.setModel(g); enemy.setModel(g);
-        log('model: '+url.split('/').pop(),false);
+        if(player.model)log('model: '+url.split('/').pop()+' — retargeted, fighting',false);
       });
     }
   }
@@ -2706,8 +2748,22 @@ function updateLoose(f,dt){
     if(!p.vel)continue;
     p.vel.y-=9.8*dt; p.mesh.position.addScaledVector(p.vel,dt);
     p.mesh.rotation.x+=p.ang.x*dt; p.mesh.rotation.z+=p.ang.z*dt;
+    /* the tumbling piece bleeds as it flies */
+    if(p.bleed>0){ p.bleed-=dt;
+      if(Math.random()<dt*22)
+        emitBlood(p.mesh.position,V3(rand(-.4,.4),-.6,rand(-.4,.4)),1.2,2); }
     if(p.mesh.position.y<=.05){ p.mesh.position.y=.05; p.vel=null;
-      addStain(p.mesh.position.x,p.mesh.position.z,.14); }
+      addStain(p.mesh.position.x,p.mesh.position.z,.2);
+      addStain(p.mesh.position.x+rand(-.1,.1),p.mesh.position.z+rand(-.1,.1),.1); }
+  }
+  /* the fresh stump pumps in time with the heart */
+  if(f.stumpBleed>0&&f.stumpAt){
+    f.stumpBleed-=dt;
+    if(Math.random()<dt*9){
+      TMP1.setFromMatrixPosition(f.stumpAt.matrixWorld);
+      TMP2.set(rand(-.5,.5),1,rand(-.5,.5)).normalize();
+      emitBlood(TMP1,TMP2,2.6,7);
+    }
   }
 }
 
@@ -2870,6 +2926,67 @@ function updateFlares(dt){
     s.scale.setScalar(s.scale.x+dt*u.grow*.1);
   }
 }
+/* ================= GORE KIT: the wound is not abstract =================
+   Severing leaves a JAGGED STUMP — torn flesh ring, protruding bone —
+   on both the body and the flying piece, which trails blood as it
+   tumbles. Severe cuts leave gash decals stuck to the body part. */
+function jaggedCap(r){
+  const g=new THREE.Group();
+  try{
+    const N=12, pos=[0,0,0], idx=[];
+    for(let i=0;i<=N;i++){
+      const a=i/N*Math.PI*2, rr=r*(0.62+Math.random()*.55);
+      pos.push(Math.cos(a)*rr, Math.sin(a)*rr, (Math.random()-.5)*r*.35);
+    }
+    for(let i=1;i<=N;i++)idx.push(0,i,i+1);
+    const geo=new THREE.BufferGeometry();
+    geo.setAttribute('position',new THREE.Float32BufferAttribute(pos,3));
+    geo.setIndex(idx); geo.computeVertexNormals();
+    const meat=new THREE.Mesh(geo,stdMat(0x5e0f0f,{roughness:.55,side:THREE.DoubleSide}));
+    const meat2=new THREE.Mesh(geo,stdMat(0x7e1b16,{roughness:.7,side:THREE.DoubleSide}));
+    meat2.scale.setScalar(.72); meat2.position.z=r*.06;
+    const bone=new THREE.Mesh(new THREE.CylinderGeometry(r*.24,r*.28,r*.9,8),
+      stdMat(0xd9d2c0,{roughness:.5}));
+    bone.rotation.x=Math.PI/2; bone.position.z=r*.28;
+    g.add(meat,meat2,bone);
+  }catch(e){}
+  return g;
+}
+function attachStump(part,atY,r){
+  const s=jaggedCap(r);
+  s.rotation.x=Math.PI/2; s.position.y=atY;
+  part.add(s); return s;
+}
+/* a gash: dark jagged decal stuck to the part, in its local frame */
+const gashTex=canTex(128,64,(x,w,h)=>{
+  x.clearRect(0,0,w,h);
+  x.strokeStyle='rgba(70,8,8,.95)'; x.lineWidth=7; x.lineCap='round';
+  x.beginPath(); x.moveTo(8,h*.5);
+  for(let px=8;px<=w-8;px+=9)x.lineTo(px,h*.5+(Math.random()-.5)*h*.55);
+  x.stroke();
+  x.strokeStyle='rgba(150,26,20,.8)'; x.lineWidth=3;
+  x.beginPath(); x.moveTo(10,h*.5);
+  for(let px=10;px<=w-10;px+=9)x.lineTo(px,h*.5+(Math.random()-.5)*h*.4);
+  x.stroke();
+});
+Fighter.prototype.addGash=function(partKey,worldPt,dir){
+  this._gashes=this._gashes||0;
+  if(this._gashes>=12||!gashTex)return;
+  const part=this.parts[partKey]; if(!part)return;
+  this._gashes++;
+  try{
+    const m=new THREE.Mesh(new THREE.PlaneGeometry(.14,.06),
+      new THREE.MeshBasicMaterial({map:gashTex,transparent:true,
+        depthWrite:false,polygonOffset:true,polygonOffsetFactor:-2}));
+    part.updateMatrixWorld(true);
+    m.position.copy(part.worldToLocal(worldPt.clone()));
+    m.position.multiplyScalar(.92);          // hug the surface
+    m.lookAt(m.position.clone().multiplyScalar(2));
+    m.rotation.z=Math.random()*Math.PI;
+    part.add(m);
+  }catch(e){}
+};
+
 /* contact shadows: soft dark blobs under feet and body — grounding
    that a single directional shadow can't provide */
 const blobTex=canTex(64,64,(x,w,h)=>{
@@ -3278,6 +3395,15 @@ document.getElementById('btn-begin').addEventListener('click',()=>{
   Sound.startWind();
   document.getElementById('menu').classList.add('hidden');
   setTimeout(grabPointer,60);
+  /* if you provided a samurai, wear it from the first duel */
+  if(MODELPIPE.enabled&&MODELPIPE.mode===0){
+    MODELPIPE.load('models/samurai.glb',g=>{
+      if(!g)return;
+      player.setModel(g); enemy.setModel(g);
+      if(player.model){ MODELPIPE.mode=1;
+        log('models/samurai.glb — loaded and retargeted (M to cycle)',false); }
+    });
+  }
   restart();
 });
 document.getElementById('btn-again').addEventListener('click',restart);

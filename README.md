@@ -329,6 +329,23 @@ slot is the door — any Mixamo-rigged samurai dropped at
 full IK + physics + connectivity system and inherits the IBL, outlines,
 rim and grade above. That single file is the remaining distance.
 
+## v14 — any model, and honest gore
+
+- **Model auto-discovery** — three ways in, zero code edits:
+  (1) **drag-and-drop any .glb onto the game window** — parses and
+  fights immediately; (2) drop files named `samurai.glb`, `samurai2.glb`,
+  `samurai3.glb`, or `fighter.glb` into `/models/` — probed in the M
+  cycle, `samurai.glb` auto-loads at BEGIN; (3) optionally list any
+  filenames in `models/index.json` (`["mizu.glb","ronin.glb"]`) and
+  they join the cycle. Clear log lines report rig status (20/20 bones)
+  or tell you the model needs a Mixamo auto-rig pass.
+- **Gore** — severing now tears: a **jagged flesh stump with protruding
+  bone** caps both the body and the flying piece; the tumbling forearm
+  **trails blood** as it spins and splashes where it lands; the fresh
+  stump **pumps arterially** for two seconds in time with the heart;
+  and every severe cut leaves a **jagged gash decal** stuck to the body
+  part it opened (up to 12), riding the animation.
+
 ## Headless tests
 
 `node test_harness.js` — jsdom + real three.js math, stubbed GPU/audio.
