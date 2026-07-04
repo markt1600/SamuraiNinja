@@ -379,6 +379,18 @@ game's IK + physics drive the skeleton live.
 All harness-verified: brain exposure, three organs falling and landing,
 the hanging loop attached, alongside the existing stump/severing tests.
 
+## v17 — animation-directed death (clips installed)
+
+Four mocap death performances ship in `models/anims/` (all verified:
+49/49 tracks bind, hips descend 91→12-20cm): `death_back` (struck from
+the front), `death_fwd` (from behind), and two kneel-collapses. The
+killing blow's direction selects the performance; the actor owns the
+rig for ~2.5s of clutch-and-fall; then the pose **melts** (per-bone
+slerp, ~0.6s) into the motor-cutoff physics corpse that has been
+collapsing underneath in parallel. Hips-position tracks are kept for
+death clips only, with automatic cm/meter unit detection per rig.
+The draw and sheath ritual clips ship alongside.
+
 ## Headless tests
 
 `node test_harness.js` — jsdom + real three.js math, stubbed GPU/audio.

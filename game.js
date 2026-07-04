@@ -1307,6 +1307,16 @@ class Fighter{
       (this.bloodFrac<.65?'exsanguination — bled white into the snow':'shock');
     if(PHYS.enabled&&this.phys){ this.physDead=true;
       for(const k in this.phys.B)this.phys.B[k].damping=3.5;  // dead weight
+      /* the killing blow chooses the performance */
+      if(this.model&&MODELPIPE.clips){
+        const back=this.lastHitDir?
+          this.lastHitDir.dot(DIRY(this.bodyYaw))<0:Math.random()<.5;
+        const pool=back?['death_back','death_kneel','death_kneel2']
+                       :['death_fwd','death_kneel','death_kneel2'];
+        for(const c of pool)
+          if(MODELPIPE.clips[c]&&MODELPIPE.playClip(this,c,.12)){
+            this._deathClip=true; this._deathBlend=0; break; }
+      }
     }
     else this.buildRagdoll();
     Sound.thump();
@@ -1646,10 +1656,13 @@ const MODELPIPE=(()=>{
   function drive(f,J){
     const M=f.model; if(!M)return;
     const fwd=DIRY(f.bodyYaw||0);
+    const w=MODELPIPE.driveBlend===undefined?1:MODELPIPE.driveBlend;
     const setW=(name,q)=>{ const b=M.bones[name]; if(!b)return;
       const p=b.parent;
       p.getWorldQuaternion(_qp);
-      b.quaternion.copy(_qp.invert().multiply(q));
+      _qp.invert().multiply(q);
+      if(w>=1)b.quaternion.copy(_qp);
+      else b.quaternion.slerp(_qp,w);
       b.updateMatrixWorld(true);
     };
     /* hips: world position + orientation */
@@ -1732,7 +1745,70 @@ const MODELPIPE=(()=>{
     };
     rd.readAsArrayBuffer(f);
   });
-  return {enabled:true,sources,load,attach,drive,boneQuat,
+  /* ---- mocap clips: sheath (after the kill), draw (at the bow) ----
+     Skeleton-only Mixamo FBX in models/anims/. Retargeted by bone name
+     onto whatever model is active. Combat is never clip-driven — only
+     the ritual moments where the simulation has nothing to say. */
+  const clips={};
+  function loadClip(name,url){
+    if(typeof THREE.FBXLoader==='undefined')return;
+    new THREE.FBXLoader().load(url,obj=>{
+      if(obj.animations&&obj.animations.length){
+        clips[name]=obj.animations[0];
+        log('animation ready: '+name+' ('+obj.animations[0].duration.toFixed(1)+'s)',false);
+      }
+    },undefined,()=>{});
+  }
+  loadClip('sheath','models/anims/sheath.fbx');
+  loadClip('draw','models/anims/draw.fbx');
+  loadClip('death_back','models/anims/death_back.fbx');
+  loadClip('death_fwd','models/anims/death_fwd.fbx');
+  loadClip('death_kneel','models/anims/death_kneel.fbx');
+  loadClip('death_kneel2','models/anims/death_kneel2.fbx');
+  function playClip(f,name,fade){
+    const M=f.model; if(!M||!clips[name])return false;
+    try{
+      if(!M.mixer)M.mixer=new THREE.AnimationMixer(M.root);
+      /* retarget: rebind tracks whose bone names resolve on this rig */
+      if(!M._clips)M._clips={};
+      if(!M._clips[name]){
+        const tracks=[];
+        const isDeath=/^death/.test(name);
+        for(const t of clips[name].tracks){
+          const isHipsPos=/Hips\.position$/.test(t.name);
+          if(!/\.quaternion$/.test(t.name)&&!(isDeath&&isHipsPos))continue;
+          const bn=t.name.split('.')[0];
+          const target=findBone(M.root,bn.replace(/^.*?(Hips|Spine\d?|Neck|Head|Left\w+|Right\w+)$/,'$1')||bn);
+          if(target){ const nt=t.clone(); nt.name=target.name+'.'+t.name.split('.').pop();
+            if(isHipsPos){
+              /* unit detection: match the clip's rest hips height to the rig's */
+              const rig=Math.abs(target.position.y)||1;
+              const clip0=Math.abs(nt.values[1])||1;
+              const k=rig/clip0;
+              if(Math.abs(k-1)>.15)for(let i=0;i<nt.values.length;i++)nt.values[i]*=k;
+            }
+            tracks.push(nt); }
+        }
+        if(!tracks.length)return false;
+        M._clips[name]=new THREE.AnimationClip(name,clips[name].duration,tracks);
+      }
+      M.mixer.stopAllAction();
+      const a=M.mixer.clipAction(M._clips[name]);
+      a.setLoop(THREE.LoopOnce); a.clampWhenFinished=true;
+      a.reset().fadeIn(fade||.15).play();
+      M.clipUntil=performance.now()+clips[name].duration*1000;
+      return true;
+    }catch(e){ return false; }
+  }
+  function tickClips(f,dt){
+    const M=f.model;
+    if(M&&M.mixer&&M.clipUntil){
+      if(performance.now()<M.clipUntil){ M.mixer.update(dt); return true; }
+      M.clipUntil=0; M.mixer.stopAllAction();
+    }
+    return false;
+  }
+  return {enabled:true,sources,load,attach,drive,boneQuat,playClip,tickClips,clips,
     _handFix:new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1,0,0),-Math.PI/2),
     mode:0};
 })();
@@ -1907,7 +1983,16 @@ Fighter.prototype.updateDeadPhys=function(dt){
   }
   /* pools follow the corpse */
   this.pos.set(_dj.pelvis.x,0,_dj.pelvis.z);
-  if(this.model)MODELPIPE.drive(this,_dj);
+  if(this.model){
+    if(this._deathClip&&MODELPIPE.tickClips(this,dt))return; // the performance
+    if(this._deathClip){ this._deathClip=false; this._deathBlend=0; }
+    if(this._deathBlend!==undefined&&this._deathBlend<1){
+      this._deathBlend=Math.min(1,this._deathBlend+dt*1.6);
+      MODELPIPE.driveBlend=this._deathBlend;   // melt from acted pose to physics
+    }
+    MODELPIPE.drive(this,_dj);
+    MODELPIPE.driveBlend=1;
+  }
 };
 Fighter.prototype.setModel=function(gltf){
   if(!MODELPIPE.enabled)return;
@@ -2347,7 +2432,9 @@ Fighter.prototype.updateAlive=function(dt,opponent){
     if(!this.phys)this.buildPhys(this._K);
     this.physTargets(this._K,dt);
   }
-  if(this.model)MODELPIPE.drive(this,this._K);
+  if(this.model){
+    if(!MODELPIPE.tickClips(this,dt))MODELPIPE.drive(this,this._K);
+  }
   aimLimb(P.thighR,hipR,knR); aimLimb(P.shinR,knR,ankR);
   aimLimb(P.thighL,hipL,knL); aimLimb(P.shinL,knL,ankL);
   this.setBone('thR',hipR,knR); this.setBone('shR',knR,ankR);
@@ -3474,6 +3561,8 @@ function restart(){
   OUTLINE.meshes=OUTLINE.meshes.filter(o=>!!o.parent&&o.parent.parent!==null);
   game.advance=false; killCam=null; game.firstBlood=false;
   game.bind=null; game._bindN=0; placeIce();
+  setTimeout(()=>{ if(player&&player.model)MODELPIPE.playClip(player,'draw',.1);
+    if(enemy&&enemy.model)MODELPIPE.playClip(enemy,'draw',.1); },250);
   document.body.classList.remove('cine');
   document.getElementById('verdict').classList.add('hidden');
   setTimeout(grabPointer,60);
@@ -3616,6 +3705,13 @@ function updateKillRitual(dt){
   const kc=killCam; kc.ritual+=dt;
   const vt=kc.victor;
   if(!vt.alive)return;
+  /* mocap noto: the clip owns the body; the sim stands aside */
+  if(vt.model&&MODELPIPE.clips&&MODELPIPE.clips.sheath){
+    if(!kc.clipStarted&&kc.ritual>1.1){ kc.clipStarted=true;
+      MODELPIPE.playClip(vt,'sheath',.25); }
+    if(kc.clipStarted){ vt.vel.multiplyScalar(Math.pow(.001,dt));
+      MODELPIPE.tickClips(vt,dt); return; }
+  }
   vt.vel.multiplyScalar(Math.pow(.001,dt));          // stillness after the cut
   const fwd=DIRY(vt.bodyYaw), right=V3(fwd.z,0,-fwd.x);
   const r=kc.ritual;
