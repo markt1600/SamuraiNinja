@@ -424,6 +424,17 @@ picker instead of failing silently. Duelist identities (KIYOMASA's
 aggression, SHIZUKA's speed) are unchanged — models are skins over the
 same souls.
 
+## v20 — the clothing comes off
+
+Any severe wound to the chest or belly now STRIPS that region: the
+fabric is cut away from the body (bind-space vertex collapse on the
+skinned kimono — 513→155 verts in the band, harness-measured), a flesh
+under-body appears beneath (skin-textured, blood-tinting as he bleeds),
+and two torn kimono panels physically tear off and FLUTTER down (cloth
+aerodynamics: low gravity + drag) to lie in the snow. Combined with the
+wound plates, gashes, flaps, and squirters, a fighter late in a duel is
+stripped to the waist and painted red — every wound visible.
+
 ## Headless tests
 
 `node test_harness.js` — jsdom + real three.js math, stubbed GPU/audio.

@@ -3002,7 +3002,9 @@ function updateLoose(f,dt){
   }
   if(f.severedPieces)for(const p of f.severedPieces){
     if(!p.vel)continue;
-    p.vel.y-=9.8*dt; p.mesh.position.addScaledVector(p.vel,dt);
+    if(p.cloth){ p.vel.y-=2.6*dt; p.vel.multiplyScalar(1-1.4*dt); }
+    else p.vel.y-=9.8*dt;
+    p.mesh.position.addScaledVector(p.vel,dt);
     p.mesh.rotation.x+=p.ang.x*dt; p.mesh.rotation.z+=p.ang.z*dt;
     /* the tumbling piece bleeds as it flies */
     if(p.bleed>0){ p.bleed-=dt;
@@ -3012,6 +3014,8 @@ function updateLoose(f,dt){
       addStain(p.mesh.position.x,p.mesh.position.z,.2);
       addStain(p.mesh.position.x+rand(-.1,.1),p.mesh.position.z+rand(-.1,.1),.1); }
   }
+  if(f._fleshM)for(const m of f._fleshM)
+    if(m.color&&f.bloodTint)m.color.lerp(f.bloodTint,dt*.05*(1-(f.bloodFrac||1)));
   /* torn cloth breathes and swings */
   if(f._flaps&&f._flaps.length){
     const t=performance.now()*.003,
@@ -3380,6 +3384,59 @@ const tearTex=canTex(64,64,(x,w,h)=>{
   x.closePath(); x.fill();
 });
 const CLOTHED=/chest|abdomen|upperArm|thigh|pelvis/;
+/* the cloth comes OFF: collapse the fabric out of a torso band, reveal
+   a flesh under-body, and throw kimono panels fluttering to the snow */
+const REND_BANDS={chest:[1.04,1.52],abdomen:[.76,1.04]};
+Fighter.prototype.rendRegion=function(region,worldPt){
+  this._rend=this._rend||{};
+  if(this._rend[region]||!REND_BANDS[region])return;
+  this._rend[region]=true;
+  try{
+    const [y0,y1]=REND_BANDS[region];
+    /* 1) the fabric is cut away (bind-space vertex collapse) */
+    if(this.skin&&this.skin.mesh&&this.skin.mesh.geometry){
+      const pos=this.skin.mesh.geometry.attributes.position;
+      for(let i=0;i<pos.count;i++){
+        const y=pos.getY(i), x=pos.getX(i), z=pos.getZ(i);
+        if(y>=y0&&y<=y1&&Math.hypot(x,z)<.21){
+          pos.setX(i,x*.1); pos.setZ(i,z*.1);
+        }
+      }
+      pos.needsUpdate=true;
+    }
+    /* 2) the body beneath */
+    const part=region==='chest'?this.parts.chest:this.parts.abdomen;
+    if(part&&this.palette){
+      const len=y1-y0+.05;
+      const flesh=new THREE.Mesh(
+        new THREE.CylinderGeometry(.142,.152,len,12,1,false),
+        stdMat(this.palette.skin,{roughness:.5,map:skinTex||null,
+          normalMap:skinNrm||null}));
+      flesh.position.y=-len*.5+.02;
+      flesh.userData.flesh=true;
+      part.add(flesh);
+      this._fleshM=this._fleshM||[];
+      this._fleshM.push(flesh.material);
+    }
+    /* 3) the torn panels flutter down */
+    this.severedPieces=this.severedPieces||[];
+    for(let i=0;i<2;i++){
+      const scrap=new THREE.Mesh(new THREE.PlaneGeometry(.24,.36),
+        new THREE.MeshStandardMaterial({
+          color:region==='chest'?this.palette.kimono:this.palette.hakama,
+          roughness:.92,side:THREE.DoubleSide,
+          alphaMap:tearTex||null,transparent:!!tearTex,
+          alphaTest:tearTex?.35:0}));
+      scrap.position.copy(worldPt||this.pos.clone().setY((y0+y1)/2));
+      scrap.position.x+=rand(-.06,.06); scrap.position.z+=rand(-.06,.06);
+      scene.add(scrap);
+      this.severedPieces.push({mesh:scrap,bleed:0,cloth:true,
+        vel:V3(rand(-1.2,1.2),rand(.6,1.4),rand(-1.2,1.2)),
+        ang:V3(rand(-5,5),rand(-5,5),rand(-5,5))});
+    }
+    Sound&&Sound.cloth&&Sound.cloth();
+  }catch(e){}
+};
 Fighter.prototype.addOpenWound=function(partKey,worldPt,severity){
   this._openW=(this._openW||0);
   if(this._openW>=14)return;
