@@ -864,7 +864,7 @@ function buildSkinnedBody(kimonoMat,hakamaMat){
     const prof=[ // y, radius, depth-scale — a torso, not a pipe
       [.78,.150,.82],[ .84,.154,.85],[ .90,.155,.86],[ .96,.146,.84],
       [1.02,.134,.81],[1.07,.127,.79],[1.12,.128,.79],[1.18,.134,.79],
-      [1.24,.143,.80],[1.30,.152,.82],[1.36,.160,.85],[1.41,.161,.87],
+      [1.24,.146,.80],[1.30,.158,.82],[1.36,.170,.85],[1.41,.172,.87],
       [1.45,.148,.88],[1.475,.120,.88]];
     const rings=prof.map(([y,r,szz])=>{
       let skin;
@@ -883,8 +883,8 @@ function buildSkinnedBody(kimonoMat,hakamaMat){
     const rings=[];
     for(let i=0;i<=8;i++){
       const t=i/8, y=lerp(top,bot,t);
-      const deltoid=.012*minJerkBell(clamp(t/.5,0,1));  // shoulder muscle
-      const r=lerp(.054,.078,Math.pow(t,1.35))+deltoid;
+      const deltoid=.021*minJerkBell(clamp(t/.5,0,1));  // shoulder muscle
+      const r=lerp(.058,.084,Math.pow(t,1.35))+deltoid;
       const skin=t<.18?blend(t,0,.3,Ch,UA):(t<.3?blend(t,0,.3,Ch,UA):[UA,1,Ch,0]);
       rings.push({c:[x,y,0],r,sz:1,skin});
     }
@@ -985,8 +985,11 @@ function solveIK(S,T,l1,l2,bendDir,out){
 const UPV=V3(0,-1,0), UPY=V3(0,1,0);
 function aimLimb(g,from,to){
   g.position.copy(from);
-  TMP1.subVectors(to,from).normalize();
+  const d=TMP1.subVectors(to,from).length();
+  if(d>1e-6)TMP1.divideScalar(d);
   g.quaternion.setFromUnitVectors(UPV,TMP1);
+  /* a limb mesh always SPANS its joints — no gaps, ever */
+  if(g.userData.len)g.scale.y=clamp(d/g.userData.len,.55,1.6);
 }
 
 class Fighter{
@@ -1078,62 +1081,36 @@ class Fighter{
     parts.neck=limbMesh(D.neck,.043,.05,skin);
     /* head: skull, jaw, hair, topknot; player wears a hachimaki */
     parts.head=new THREE.Group();
-    { const skull=new THREE.Mesh(new THREE.SphereGeometry(D.headR,16,14),skin);
-      skull.castShadow=true; skull.scale.set(.92,1.06,1);
-      const jaw=new THREE.Mesh(new THREE.SphereGeometry(D.headR*.7,10,8),skin);
-      jaw.position.set(0,-.06,.03); jaw.scale.set(.82,.7,.9);
+    { const fTex=faceTex(palette.skin,palette.face);
+      const faceMat=rimify(stdMat(0xffffff,{map:fTex||null,
+        normalMap:skinNrm||null,roughness:.52}),.42,.4,.42,3,.3);
+      if(faceMat.normalMap)faceMat.normalScale=new THREE.Vector2(.35,.35);
+      const headGeo=new THREE.SphereGeometry(D.headR,26,20);
+      headGeo.rotateY(-Math.PI/2);            // painted face looks down +Z
+      const skull=new THREE.Mesh(headGeo,fTex?faceMat:skin);
+      skull.castShadow=true; skull.scale.set(.92,1.08,.98);
       const hairC=new THREE.Mesh(
         new THREE.SphereGeometry(D.headR*1.04,14,12,0,Math.PI*2,0,1.6),hairM);
       hairC.scale.set(.94,1.06,1); hairC.rotation.x=-.5;
       const mage=new THREE.Mesh(new THREE.CylinderGeometry(.015,.02,.09,8),hairM);
       mage.position.set(0,.095,-.02); mage.rotation.x=1.1;
-      /* the face — built, not painted, so it cannot misalign */
+      /* the painted face carries the features; geometry keeps only
+         what shapes the silhouette: nose, ears, facial hair */
       const F=[];
-      const darkM=stdMat(0x17110d,{roughness:.18,envMap:envCube||null,envMapIntensity:.9});
-      const whiteM=stdMat(0xd8d2c4,{roughness:.2,envMap:envCube||null,envMapIntensity:.5});
-      const mkEye=(sx)=>{
-        const sc=new THREE.Mesh(new THREE.SphereGeometry(.0145,10,8),whiteM);
-        sc.position.set(sx*.033,.006,D.headR*.82); sc.scale.set(1.25,.72,.5);
-        const ir=new THREE.Mesh(new THREE.SphereGeometry(.0085,8,6),darkM);
-        ir.position.set(sx*.033,.005,D.headR*.87); ir.scale.set(1,.9,.45);
-        const lid=new THREE.Mesh(new THREE.BoxGeometry(.037,.006,.012),skin);
-        lid.position.set(sx*.033,.02,D.headR*.85); lid.rotation.x=.35;
-        F.push(sc,ir,lid);
-      };
-      mkEye(1); mkEye(-1);
-      const mkBrow=(sx)=>{
-        const ridge=new THREE.Mesh(new THREE.SphereGeometry(.021,8,6),skin);
-        ridge.scale.set(1.05,.4,.5);
-        ridge.position.set(sx*.034,.034,D.headR*.83); ridge.rotation.z=sx*-.12;
-        const hair=new THREE.Mesh(new THREE.BoxGeometry(.036,.006,.006),hairM);
-        hair.position.set(sx*.034,.037,D.headR*.9); hair.rotation.z=sx*-.2;
-        F.push(ridge,hair);
-      };
-      mkBrow(1); mkBrow(-1);
-      const bridge=new THREE.Mesh(new THREE.BoxGeometry(.013,.045,.014),skin);
-      bridge.position.set(0,.008,D.headR*.9); bridge.rotation.x=.16;
-      const noseTip=new THREE.Mesh(new THREE.SphereGeometry(.013,8,6),skin);
-      noseTip.position.set(0,-.018,D.headR*.96); noseTip.scale.set(1.15,.85,.8);
-      const lipU=new THREE.Mesh(new THREE.SphereGeometry(.016,8,6),
-        stdMat(0x8a5a4c,{roughness:.55}));
-      lipU.position.set(0,-.055,D.headR*.87); lipU.scale.set(1.95,.32,.55);
-      const lipL=new THREE.Mesh(new THREE.SphereGeometry(.015,8,6),
-        stdMat(0x966352,{roughness:.5}));
-      lipL.position.set(0,-.066,D.headR*.86); lipL.scale.set(1.65,.45,.6);
-      /* cheekbones catch the moonlight */
-      for(const sx of [1,-1]){ const ch=new THREE.Mesh(new THREE.SphereGeometry(.02,8,6),skin);
-        ch.position.set(sx*.036,-.02,D.headR*.72); ch.scale.set(1.1,.9,.7); F.push(ch); }
-      const mkEar=(sx)=>{ const e=new THREE.Mesh(new THREE.SphereGeometry(.02,8,6),skin);
-        e.position.set(sx*D.headR*.9,-.005,0); e.scale.set(.4,1,.72); F.push(e); };
+      const bridge=new THREE.Mesh(new THREE.BoxGeometry(.012,.042,.013),skin);
+      bridge.position.set(0,.006,D.headR*.9); bridge.rotation.x=.16;
+      const noseTip=new THREE.Mesh(new THREE.SphereGeometry(.0125,8,6),skin);
+      noseTip.position.set(0,-.017,D.headR*.95); noseTip.scale.set(1.1,.82,.78);
+      const mkEar=(sx)=>{ const e=new THREE.Mesh(new THREE.SphereGeometry(.019,8,6),skin);
+        e.position.set(sx*D.headR*.9,-.005,0); e.scale.set(.4,1,.7); F.push(e); };
       mkEar(1); mkEar(-1);
-      F.push(bridge,noseTip,lipU,lipL);
-      /* facial hair: each man wears his own */
+      F.push(bridge,noseTip);
       const fh=(palette.face)||{};
-      if(fh.mustache){ const mu=new THREE.Mesh(new THREE.BoxGeometry(.042,.009,.012),hairM);
-        mu.position.set(0,-.047,D.headR*.88); F.push(mu); }
-      if(fh.beard){ const bd=new THREE.Mesh(new THREE.SphereGeometry(D.headR*.62,10,8),hairM);
-        bd.position.set(0,-.075,.025); bd.scale.set(.86,.75,.88); F.push(bd); }
-      parts.head.add(skull,jaw,hairC,mage,...F);
+      if(fh.mustache){ const mu=new THREE.Mesh(new THREE.BoxGeometry(.04,.008,.011),hairM);
+        mu.position.set(0,-.046,D.headR*.88); F.push(mu); }
+      if(fh.beard){ const bd=new THREE.Mesh(new THREE.SphereGeometry(D.headR*.6,10,8),hairM);
+        bd.position.set(0,-.078,.024); bd.scale.set(.85,.72,.86); F.push(bd); }
+      parts.head.add(skull,hairC,mage,...F);
       if(isPlayer){
         const hachi=new THREE.Mesh(new THREE.TorusGeometry(D.headR*.94,.014,6,16),accentM);
         hachi.rotation.x=Math.PI/2+.12; hachi.position.y=.028;
@@ -1143,8 +1120,8 @@ class Fighter{
     /* arms: kimono sleeve flares on the upper arm, bare forearm */
     parts.upperArmR=limbMesh(D.upperArm,.052,.075,kimono);
     parts.upperArmL=limbMesh(D.upperArm,.052,.075,kimono);
-    parts.forearmR=limbMesh(D.foreArm,.045,.038,skin);
-    parts.forearmL=limbMesh(D.foreArm,.045,.038,skin);
+    parts.forearmR=limbMesh(D.foreArm,.052,.042,skin);
+    parts.forearmL=limbMesh(D.foreArm,.052,.042,skin);
     parts.handR=new THREE.Mesh(new THREE.SphereGeometry(.037,8,7),skin);
     parts.handR.scale.set(.8,1.15,.9); parts.handR.castShadow=true;
     parts.handL=parts.handR.clone();
@@ -2139,6 +2116,10 @@ Fighter.prototype.updateAlive=function(dt,opponent){
     const handle=gripAnchor.clone().addScaledVector(handDir,gripR);
     const headY=chestT.y+.28;                        // hands rise less than steel
     if(this.tip.y>headY)handle.y+=Math.min((this.tip.y-headY)*.30,.14);
+    /* the grip never leaves the sword arm's honest reach */
+    { TMP4.subVectors(handle,shR); const hd=TMP4.length();
+      const maxR=(D.upperArm+D.foreArm)*.94;
+      if(hd>maxR)handle.copy(shR).addScaledVector(TMP4.divideScalar(hd),maxR); }
     const bladeDir=TMP2.subVectors(this.tip,handle);
     if(bladeDir.lengthSq()<.04)bladeDir.copy(toTip); // degenerate guard
     bladeDir.normalize();
@@ -2175,23 +2156,43 @@ Fighter.prototype.updateAlive=function(dt,opponent){
     /* arms: two-bone IK with anatomical elbow hints */
     const elR=V3(),elL=V3();
     const handR=handle.clone().addScaledVector(bladeDir,-.02);   // at the tsuba
-    const handL=handle.clone().addScaledVector(bladeDir,-.15);   // at the pommel
+    /* on full extension the LEFT hand slides up the grip toward the
+       tsuba rather than tearing off the pommel — as real hands do */
+    let gripS=-.15;
+    { const maxL=(D.upperArm+D.foreArm)*.94;
+      while(gripS<-.03&&
+        TMP4.copy(handle).addScaledVector(bladeDir,gripS).distanceTo(shL)>maxL)
+        gripS+=.02; }
+    const handL=handle.clone().addScaledVector(bladeDir,gripS);
     /* the elbows: down and in at guard, out and up through the raise */
     const rise=clamp((handle.y-shR.y+.18)*2.6,0,1);
     const hintR=rightC.clone().multiplyScalar(lerp(.85,1.2,rise))
       .addScaledVector(fwdC,lerp(-.3,.15,rise)); hintR.y=lerp(-.55,.5,rise);
     solveIK(shR,handR,D.upperArm,D.foreArm,hintR,elR);
+    this._ikR=(this._ikR||elR.clone()).copy(elR);      // the exact IK answer
     this.soften('elR',elR,34,dt);
+    /* flesh may lag the bone by 7cm — never more; then exact length */
+    TMP4.subVectors(elR,this._ikR);
+    if(TMP4.lengthSq()>.0049)elR.copy(this._ikR).addScaledVector(TMP4.clampLength(0,.07),1);
+    TMP4.subVectors(elR,shR).normalize();
+    elR.copy(shR).addScaledVector(TMP4,D.upperArm);
     this._K.elR.copy(elR); this._K.haR.copy(handR);
     aimLimb(P.upperArmR,shR,elR); aimLimb(P.forearmR,elR,handR);
     this.setBone('uaR',shR,elR);
     P.handR.position.copy(handR);
     P.handR.quaternion.copy(this.katana.quaternion);
+    if(this.isPlayer){ game._drift=Math.max(game._drift||0,Math.abs(shR.distanceTo(elR)-D.upperArm));
+      game._span=Math.max(game._span||0,Math.abs(P.forearmR.scale.y*P.forearmR.userData.len-elR.distanceTo(handR))); }
     if(!this.disabled.armL&&!this.severed.armL){
       const hintL=rightC.clone().multiplyScalar(lerp(-.85,-1.2,rise))
         .addScaledVector(fwdC,lerp(-.3,.15,rise)); hintL.y=lerp(-.55,.5,rise);
       solveIK(shL,handL,D.upperArm,D.foreArm,hintL,elL);
+      this._ikL=(this._ikL||elL.clone()).copy(elL);
       this.soften('elL',elL,34,dt);
+      TMP4.subVectors(elL,this._ikL);
+      if(TMP4.lengthSq()>.0049)elL.copy(this._ikL).addScaledVector(TMP4.clampLength(0,.07),1);
+      TMP4.subVectors(elL,shL).normalize();
+      elL.copy(shL).addScaledVector(TMP4,D.upperArm);
       this._K.elL.copy(elL); this._K.haL.copy(handL);
       aimLimb(P.upperArmL,shL,elL); aimLimb(P.forearmL,elL,handL);
       this.setBone('uaL',shL,elL);
@@ -2214,6 +2215,8 @@ Fighter.prototype.updateAlive=function(dt,opponent){
   solveIK(hipR,ankR,D.thigh,D.shin,kneeHint,knR);
   solveIK(hipL,ankL,D.thigh,D.shin,kneeHint,knL);
   this.soften('knR',knR,42,dt); this.soften('knL',knL,42,dt);
+  TMP4.subVectors(knR,hipR).normalize(); knR.copy(hipR).addScaledVector(TMP4,D.thigh);
+  TMP4.subVectors(knL,hipL).normalize(); knL.copy(hipL).addScaledVector(TMP4,D.thigh);
   this._K.hipR.copy(hipR); this._K.hipL.copy(hipL);
   this._K.knR.copy(knR); this._K.knL.copy(knL);
   this._K.ankR.copy(ankR); this._K.ankL.copy(ankL);
@@ -2261,6 +2264,8 @@ Fighter.prototype.hangArm=function(side,sh,right,P){
   const D=this.dims;
   const dir=side==='R'?1:-1;
   const el=sh.clone().addScaledVector(right,dir*.06); el.y-=D.upperArm;
+  TMP4.subVectors(el,sh).normalize();
+  el.copy(sh).addScaledVector(TMP4,D.upperArm);       // exact bone length
   const ha=el.clone(); ha.y-=D.foreArm;
   (side==='R'?this._K.elR:this._K.elL).copy(el);
   (side==='R'?this._K.haR:this._K.haL).copy(ha);
@@ -2875,6 +2880,76 @@ const kimonoNrm=mkNormalTex(256,(x,w,h)=>{
   for(let i=0;i<w;i+=2){ x.fillStyle='rgba(255,255,255,.3)'; x.fillRect(i,0,1,h); }
 },2.2);
 if(kimonoNrm)kimonoNrm.repeat.set(3,3);
+/* a FACE, painted the way 90s digitized fighters were: airbrushed skin
+   values, socketed eyes with catchlights, feathered brows, two-tone lips.
+   Painted per-fighter in his own skin tone; mapped onto the skull. */
+function faceTex(skinHex,face){
+  return canTex(512,512,(x,w,h)=>{
+    const c=new THREE.Color(skinHex);
+    const R=c.r*255,G=c.g*255,B=c.b*255;
+    const tone=(m,a)=>'rgba('+Math.round(R*m)+','+Math.round(G*m)+','+Math.round(B*m)+','+(a===undefined?1:a)+')';
+    x.fillStyle=tone(1); x.fillRect(0,0,w,h);
+    /* airbrush: forehead light, temples/jaw shaded */
+    let g=x.createLinearGradient(0,h*.3,0,h*.72);
+    g.addColorStop(0,tone(1.1,.55)); g.addColorStop(.45,tone(1,.0));
+    g.addColorStop(1,tone(.72,.5)); x.fillStyle=g; x.fillRect(0,0,w,h);
+    g=x.createRadialGradient(w*.5,h*.5,w*.1,w*.5,h*.5,w*.34);
+    g.addColorStop(0,tone(1.06,.3)); g.addColorStop(1,tone(.85,.35));
+    x.fillStyle=g; x.fillRect(w*.2,h*.28,w*.6,h*.44);
+    const mir=f=>{ for(const s of [1,-1]){ x.save();
+      x.translate(w*.5,0); x.scale(s,1); f(x); x.restore(); } };
+    /* eye sockets */
+    mir(x=>{ const g2=x.createRadialGradient(w*.052,h*.435,2,w*.052,h*.435,w*.055);
+      g2.addColorStop(0,tone(.62,.5)); g2.addColorStop(1,tone(1,0));
+      x.fillStyle=g2; x.beginPath();
+      x.ellipse(w*.052,h*.435,w*.055,h*.038,0,0,6.29); x.fill(); });
+    /* whites, iris, pupil, catchlight */
+    mir(x=>{ x.fillStyle='rgba(226,220,206,.95)'; x.beginPath();
+      x.ellipse(w*.052,h*.44,w*.03,h*.016,0,0,6.29); x.fill();
+      x.fillStyle='#3a2a1c'; x.beginPath();
+      x.arc(w*.052,h*.441,w*.0145,0,6.29); x.fill();
+      x.fillStyle='#120c08'; x.beginPath();
+      x.arc(w*.052,h*.441,w*.007,0,6.29); x.fill();
+      x.fillStyle='rgba(255,255,255,.9)'; x.beginPath();
+      x.arc(w*.046,h*.435,w*.004,0,6.29); x.fill();
+      /* lash line + lid crease */
+      x.strokeStyle='rgba(30,20,14,.85)'; x.lineWidth=w*.006;
+      x.beginPath(); x.ellipse(w*.052,h*.437,w*.031,h*.015,0,Math.PI*1.05,Math.PI*1.95);
+      x.stroke();
+      x.strokeStyle=tone(.7,.55); x.lineWidth=w*.004;
+      x.beginPath(); x.ellipse(w*.052,h*.428,w*.033,h*.014,0,Math.PI*1.1,Math.PI*1.9);
+      x.stroke(); });
+    /* brows: feathered strokes, angled */
+    mir(x=>{ x.strokeStyle='rgba(24,17,12,.9)'; x.lineWidth=w*.004;
+      for(let i=0;i<9;i++){
+        const t=i/8, bx=w*(.022+t*.062), by=h*(.402-t*.014)+Math.random()*h*.004;
+        x.beginPath(); x.moveTo(bx,by+h*.008); x.lineTo(bx+w*.008,by-h*.006); x.stroke(); } });
+    /* nostril shadows (the 3D nose sits above) */
+    mir(x=>{ x.fillStyle=tone(.55,.6); x.beginPath();
+      x.ellipse(w*.018,h*.532,w*.009,h*.006,.4,0,6.29); x.fill(); });
+    /* lips: two-tone with center line and highlight */
+    g=x.createLinearGradient(0,h*.575,0,h*.605);
+    g.addColorStop(0,'rgba(148,86,72,.95)'); g.addColorStop(.5,'rgba(120,62,52,.95)');
+    g.addColorStop(.52,'rgba(60,32,26,.95)'); g.addColorStop(.62,'rgba(158,96,80,.95)');
+    g.addColorStop(1,'rgba(134,78,64,.9)');
+    x.fillStyle=g; x.beginPath();
+    x.ellipse(w*.5,h*.59,w*.042,h*.017,0,0,6.29); x.fill();
+    x.fillStyle='rgba(255,235,225,.25)'; x.beginPath();
+    x.ellipse(w*.5,h*.597,w*.02,h*.005,0,0,6.29); x.fill();
+    /* chin + jaw shading, philtrum */
+    g=x.createRadialGradient(w*.5,h*.655,2,w*.5,h*.655,w*.05);
+    g.addColorStop(0,tone(1.05,.3)); g.addColorStop(1,tone(.8,.25));
+    x.fillStyle=g; x.fillRect(w*.42,h*.61,w*.16,h*.09);
+    x.strokeStyle=tone(.8,.4); x.lineWidth=w*.005;
+    x.beginPath(); x.moveTo(w*.5,h*.555); x.lineTo(w*.5,h*.572); x.stroke();
+    /* stubble for the bearded */
+    if(face&&(face.beard||face.stubble)){
+      x.fillStyle='rgba(25,18,12,.16)';
+      for(let i=0;i<900;i++){ const a=Math.random()*6.29,r=Math.random();
+        const px=w*.5+Math.cos(a)*w*.11*r, py=h*.62+Math.sin(a)*h*.07*r;
+        if(py>h*.6)x.fillRect(px,py,1.4,1.4); } }
+  });
+}
 const skinTex=canTex(512,512,(ctx,w,h)=>{
   ctx.fillStyle='#d9d2ca'; ctx.fillRect(0,0,w,h);
   /* subsurface mottle: warm and cool blotches, very soft */

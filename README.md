@@ -288,6 +288,24 @@ the physics sword all operate on the new geometry.
   arcade saturation; and severe hits burst an additive **impact flare**.
   Press **O** to toggle outlines.
 
+## v12 — connected bodies and the painted face
+
+- **Disconnection eliminated by construction** — three-layer fix: soft
+  joints re-project to exact bone lengths after flesh lag (elbow capped
+  at 7cm around the IK answer), every limb mesh stretch-spans its true
+  endpoints, the grip never leaves the sword arm's honest reach, and the
+  left hand *slides up the tsuka* on full extension instead of tearing
+  off the pommel (as real hands do). Asserted in-engine every duel:
+  bone drift ~1e-16, mesh span gap ~1e-17. Machine epsilon.
+- **The painted face** — 90s-MK approach: the face is an airbrushed
+  512² texture painted per fighter in his own skin tone (socketed eyes
+  with iris/pupil/catchlight, lash lines and lid creases, feathered
+  brows, two-tone lips with highlight, jaw shading, optional stubble)
+  mapped onto a higher-poly skull. Geometry keeps only silhouette:
+  nose, ears, facial hair. Primitive eye/lip meshes retired.
+- **Fighting-game physique** — broader chest and shoulder yoke, bigger
+  deltoids, fuller sleeves, thicker forearms.
+
 ## Headless tests
 
 `node test_harness.js` — jsdom + real three.js math, stubbed GPU/audio.
