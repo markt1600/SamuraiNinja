@@ -172,6 +172,39 @@ physical-pendulum period vs analytic, joint integrity under whip impulses
 settling at exactly capsule radius. In-game: 10 bodies finite through
 full duels, chest tracking error ~2cm.
 
+## v7 — the engine closes the loop
+
+- **The trunk fixed** — v6's spine could fold like rope. Now: cone-limited
+  joints in the engine (spine ~29° max, verified holding 20.0° under a
+  violent kick in the law tests), much stiffer trunk motors, per-joint
+  physics blend weights (taut trunk, physical limbs), and a tauter soft
+  layer. Chest tracks the fight to ~6cm while remaining a real body.
+- **SIMBICON-lite balance** — the pelvis hand-of-god is 6× weaker; in its
+  place, a real controller: center-of-mass position + velocity error
+  against the support line feeds capped corrective forces and an
+  ankle-strategy tilt on the shin motors. Balance is now mostly earned.
+- **Death by motor cutoff** — the Verlet ragdoll is retired when physics
+  is on. Dying is continuous: motor strength scales with consciousness
+  (a bleeding man's motors brown out — the sword arm droops first), and
+  at death the motors fade over ~1s and gravity wins. The corpse falls,
+  settles at capsule radius, and does not bounce (contacts made properly
+  inelastic — a real XPBD bug found and fixed by the harness).
+- **The sword is steel** — a 1.1kg rigid body with real inertia, jointed
+  to the sword hand, motor-driven toward your intent. Its momentum bends
+  the rendered blade's line (`PHYS.swordBlend`), the arm physically
+  carries its mass, and a disarm releases a real object.
+- **Fighters collide** — capsule-capsule contacts between the two bodies
+  (opt-in collision groups so joints don't fight themselves). Corps-à-
+  corps shoving and stumbling into the fallen are now physical facts.
+- **A clear winter night** — fog and mist removed. In their place: a
+  gradient sky dome, ~420 stars densest at the zenith, and two ranges of
+  snow-capped silhouette ridgelines encircling the ring.
+- **Faces and skin** — sculpted geometric faces: sclera + iris eyes with
+  lids, brow ridges with hair, nose bridge and tip, two-tone lips, ears;
+  per-duelist facial hair (Kiyomasa's beard, Shizuka's mustache, random
+  for the endless road). Skin has a subsurface-mottled, pored texture;
+  kimono and hakama keep their weave and pleats.
+
 ## Headless tests
 
 `node test_harness.js` — jsdom + real three.js math, stubbed GPU/audio.

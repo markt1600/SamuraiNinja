@@ -227,7 +227,7 @@ const stdMat=(hex,opts)=>new THREE.MeshStandardMaterial(Object.assign({color:SRG
 
 const scene=new THREE.Scene();
 scene.background=SRGB(0x0c0f14);
-scene.fog=new THREE.FogExp2(SRGB(0x0e1218).getHex(),0.048);
+/* no fog: the night is clear and deep */
 
 const camera=new THREE.PerspectiveCamera(45,innerWidth/innerHeight,.1,140);
 camera.position.set(0,2.1,6.4);
@@ -514,24 +514,72 @@ scene.add(ringGround);
   m.position.set(-26,22,-48); m.lookAt(0,2,0); scene.add(m);
 })();
 
-/* drifting mist */
-const mists=[];
-(function buildMist(){
-  const tex=canTex(256,64,(ctx,w,h)=>{
-    const g=ctx.createRadialGradient(w/2,h/2,4,w/2,h/2,w/2);
-    g.addColorStop(0,'rgba(205,215,228,.5)'); g.addColorStop(.6,'rgba(200,210,224,.18)');
-    g.addColorStop(1,'rgba(200,210,224,0)');
+/* ---------------- a clear winter night: sky, stars, mountains ---------- */
+const mists=[];   // gone — the air is clear
+(function buildNight(){
+  /* sky: vertical gradient dome with a faint glow near the moon's quarter */
+  const skyTex=canTex(64,512,(ctx,w,h)=>{
+    const g=ctx.createLinearGradient(0,0,0,h);
+    g.addColorStop(0,'#04060c'); g.addColorStop(.45,'#080d18');
+    g.addColorStop(.75,'#0e1626'); g.addColorStop(1,'#18222f');
     ctx.fillStyle=g; ctx.fillRect(0,0,w,h);
   });
-  if(!tex)return;
-  for(let i=0;i<6;i++){
-    const m=new THREE.Mesh(new THREE.PlaneGeometry(rand(8,13),rand(2,3.4)),
-      new THREE.MeshBasicMaterial({map:tex,transparent:true,opacity:rand(.25,.45),
-        depthWrite:false,fog:true}));
-    m.position.set(rand(-12,12),rand(.4,1.5),rand(-10,8));
-    scene.add(m); mists.push({mesh:m,v:rand(.06,.2)*(Math.random()<.5?-1:1)});
+  if(skyTex){
+    const sky=new THREE.Mesh(new THREE.SphereGeometry(90,24,16),
+      new THREE.MeshBasicMaterial({map:skyTex,side:THREE.BackSide,
+        depthWrite:false,fog:false}));
+    sky.renderOrder=-20; scene.add(sky);
   }
+  /* stars: a few hundred points, denser near the zenith */
+  { const N=420, ps=new Float32Array(N*3), sz=new Float32Array(N);
+    for(let i=0;i<N;i++){
+      const az=rand(0,Math.PI*2), el=Math.acos(rand(0,.96));
+      const r=84;
+      ps[i*3]=Math.cos(az)*Math.sin(el)*r;
+      ps[i*3+1]=Math.cos(el)*r+4;
+      ps[i*3+2]=Math.sin(az)*Math.sin(el)*r;
+    }
+    const g=new THREE.BufferGeometry();
+    g.setAttribute('position',new THREE.BufferAttribute(ps,3));
+    const stars=new THREE.Points(g,new THREE.PointsMaterial({
+      color:0xcdd8ee,size:.42,sizeAttenuation:true,transparent:true,
+      opacity:.85,depthWrite:false,fog:false}));
+    stars.renderOrder=-19; scene.add(stars);
+  }
+  /* mountains: two silhouette ridgelines, far and farther */
+  const ridge=(dist,height,tone,seed)=>{
+    const tex=canTex(1024,256,(ctx,w,h)=>{
+      ctx.clearRect(0,0,w,h);
+      ctx.fillStyle=tone; ctx.beginPath(); ctx.moveTo(0,h);
+      let y=h*.55;
+      for(let x=0;x<=w;x+=8){
+        y+=Math.sin(x*.013+seed)*4+Math.sin(x*.037+seed*2)*2.4+rand(-2,2);
+        y=clamp(y,h*.18,h*.8);
+        ctx.lineTo(x,y);
+      }
+      ctx.lineTo(w,h); ctx.closePath(); ctx.fill();
+      /* faint snow on the upper slopes */
+      ctx.globalCompositeOperation='source-atop';
+      const g=ctx.createLinearGradient(0,0,0,h);
+      g.addColorStop(0,'rgba(120,135,155,.5)'); g.addColorStop(.4,'rgba(120,135,155,0)');
+      ctx.fillStyle=g; ctx.fillRect(0,0,w,h);
+    },{transparent:true});
+    if(!tex)return;
+    for(let k=0;k<4;k++){
+      const m=new THREE.Mesh(new THREE.PlaneGeometry(dist*1.6,height),
+        new THREE.MeshBasicMaterial({map:tex,transparent:true,
+          depthWrite:false,fog:false}));
+      const a=k*Math.PI/2+seed;
+      m.position.set(Math.sin(a)*dist,height*.32,Math.cos(a)*dist);
+      m.lookAt(0,height*.32,0);
+      m.renderOrder=-18+ (dist<60?1:0);
+      scene.add(m);
+    }
+  };
+  ridge(70,26,'#070b13',1.7);
+  ridge(52,17,'#0b111c',4.2);
 })();
+
 
 /* falling snow — two depth layers, soft sprites */
 const snowSprite=canTex(64,64,(ctx,w,h)=>{
@@ -949,7 +997,7 @@ class Fighter{
     /* materials */
     const kimono=stdMat(palette.kimono,{roughness:.9,map:kimonoTex||null});
     const hakama=stdMat(palette.hakama,{roughness:.94,map:hakamaTex||null});
-    const skin=stdMat(palette.skin,{roughness:.62});
+    const skin=stdMat(palette.skin,{roughness:.58,map:skinTex||null});
     const hairM=stdMat(0x14110d,{roughness:.9});
     const obiM=stdMat(palette.obi,{roughness:.8});
     const accentM=stdMat(palette.accent,{roughness:.75});
@@ -1009,20 +1057,49 @@ class Fighter{
       hairC.scale.set(.94,1.06,1); hairC.rotation.x=-.5;
       const mage=new THREE.Mesh(new THREE.CylinderGeometry(.015,.02,.09,8),hairM);
       mage.position.set(0,.095,-.02); mage.rotation.x=1.1;
-      /* the face */
-      const darkM=stdMat(0x120e0c,{roughness:.5});
-      const mkEye=(sx)=>{ const e=new THREE.Mesh(new THREE.SphereGeometry(.014,8,6),darkM);
-        e.position.set(sx*.034,.008,D.headR*.84); e.scale.set(1.25,.75,.5); return e; };
-      const eyeR=mkEye(1), eyeL=mkEye(-1);
-      const mkBrow=(sx)=>{ const b=new THREE.Mesh(new THREE.BoxGeometry(.035,.007,.008),hairM);
-        b.position.set(sx*.035,.036,D.headR*.86); b.rotation.z=sx*-.18; return b; };
-      const browR=mkBrow(1), browL=mkBrow(-1);
-      const nose=new THREE.Mesh(new THREE.ConeGeometry(.011,.03,6),skin);
-      nose.position.set(0,-.016,D.headR*.94); nose.rotation.x=Math.PI/2+.35;
-      const mouth=new THREE.Mesh(new THREE.BoxGeometry(.03,.005,.006),
-        stdMat(0x5e3a34,{roughness:.7}));
-      mouth.position.set(0,-.062,D.headR*.86);
-      parts.head.add(skull,jaw,hairC,mage,eyeR,eyeL,browR,browL,nose,mouth);
+      /* the face — built, not painted, so it cannot misalign */
+      const F=[];
+      const darkM=stdMat(0x17110d,{roughness:.4});
+      const whiteM=stdMat(0xd8d2c4,{roughness:.35});
+      const mkEye=(sx)=>{
+        const sc=new THREE.Mesh(new THREE.SphereGeometry(.0145,10,8),whiteM);
+        sc.position.set(sx*.033,.006,D.headR*.82); sc.scale.set(1.25,.72,.5);
+        const ir=new THREE.Mesh(new THREE.SphereGeometry(.0085,8,6),darkM);
+        ir.position.set(sx*.033,.005,D.headR*.87); ir.scale.set(1,.9,.45);
+        const lid=new THREE.Mesh(new THREE.BoxGeometry(.037,.006,.012),skin);
+        lid.position.set(sx*.033,.02,D.headR*.85); lid.rotation.x=.35;
+        F.push(sc,ir,lid);
+      };
+      mkEye(1); mkEye(-1);
+      const mkBrow=(sx)=>{
+        const ridge=new THREE.Mesh(new THREE.BoxGeometry(.042,.012,.014),skin);
+        ridge.position.set(sx*.034,.035,D.headR*.83); ridge.rotation.z=sx*-.12;
+        const hair=new THREE.Mesh(new THREE.BoxGeometry(.038,.007,.006),hairM);
+        hair.position.set(sx*.034,.037,D.headR*.9); hair.rotation.z=sx*-.2;
+        F.push(ridge,hair);
+      };
+      mkBrow(1); mkBrow(-1);
+      const bridge=new THREE.Mesh(new THREE.BoxGeometry(.013,.045,.014),skin);
+      bridge.position.set(0,.008,D.headR*.9); bridge.rotation.x=.16;
+      const noseTip=new THREE.Mesh(new THREE.SphereGeometry(.013,8,6),skin);
+      noseTip.position.set(0,-.018,D.headR*.96); noseTip.scale.set(1.15,.85,.8);
+      const lipU=new THREE.Mesh(new THREE.BoxGeometry(.031,.005,.008),
+        stdMat(0x8a5a4c,{roughness:.65}));
+      lipU.position.set(0,-.055,D.headR*.87);
+      const lipL=new THREE.Mesh(new THREE.BoxGeometry(.026,.007,.009),
+        stdMat(0x966352,{roughness:.6}));
+      lipL.position.set(0,-.065,D.headR*.86);
+      const mkEar=(sx)=>{ const e=new THREE.Mesh(new THREE.SphereGeometry(.02,8,6),skin);
+        e.position.set(sx*D.headR*.9,-.005,0); e.scale.set(.4,1,.72); F.push(e); };
+      mkEar(1); mkEar(-1);
+      F.push(bridge,noseTip,lipU,lipL);
+      /* facial hair: each man wears his own */
+      const fh=(palette.face)||{};
+      if(fh.mustache){ const mu=new THREE.Mesh(new THREE.BoxGeometry(.042,.009,.012),hairM);
+        mu.position.set(0,-.047,D.headR*.88); F.push(mu); }
+      if(fh.beard){ const bd=new THREE.Mesh(new THREE.SphereGeometry(D.headR*.62,10,8),hairM);
+        bd.position.set(0,-.075,.025); bd.scale.set(.86,.75,.88); F.push(bd); }
+      parts.head.add(skull,jaw,hairC,mage,...F);
       if(isPlayer){
         const hachi=new THREE.Mesh(new THREE.TorusGeometry(D.headR*.94,.014,6,16),accentM);
         hachi.rotation.x=Math.PI/2+.12; hachi.position.y=.028;
@@ -1171,7 +1248,10 @@ class Fighter{
     const mortal=this.wounds.find(w=>w.severity==='mortal');
     this.deathCause=mortal?mortal.name:
       (this.bloodFrac<.65?'exsanguination — bled white into the snow':'shock');
-    this.buildRagdoll();
+    if(PHYS.enabled&&this.phys){ this.physDead=true;
+      for(const k in this.phys.B)this.phys.B[k].damping=3.5;  // dead weight
+    }
+    else this.buildRagdoll();
     Sound.thump();
     if(!this.pool)this.pool=addPool(this.pos.x,this.pos.z);
     log(this.name+' falls.', true);
@@ -1253,7 +1333,7 @@ class Fighter{
 
   dropSword(log){
     if(!this.hasSword)return;
-    this.hasSword=false;
+    this.hasSword=false; this.disposeSwordPhys&&this.disposeSwordPhys();
     scene.attach(this.katana);
     this.droppedSword={vel:V3(rand(-.5,.5),1.5,rand(-.5,.5)),spin:rand(-4,4)};
     log(this.name+"'s sword falls to the snow",false);
@@ -1328,7 +1408,8 @@ class Fighter{
     link('shR','shL'); link('hipR','hipL'); link('head','chestT'); link('neck','shR'); link('neck','shL');
     link('pelvis','chestT'); link('hipR','chestB'); link('hipL','chestB');
     for(const k in P)scene.attach(P[k]);
-    if(this.hasSword){ this.hasSword=false; scene.attach(this.katana);
+    if(this.hasSword){ this.hasSword=false;
+      this.disposeSwordPhys&&this.disposeSwordPhys(); scene.attach(this.katana);
       this.droppedSword={vel:V3(rand(-.4,.4),.8,rand(-.4,.4)),spin:rand(-3,3)}; }
     this.trailPush(null,null,0); this.trailMesh.visible=false;
     this.ragdoll=true;
@@ -1390,7 +1471,7 @@ class Fighter{
    1 = pure physics. PHYS.assist: how hard the balance hand-of-god holds
    the pelvis. Death-by-motor-cutoff is staged for v2; Verlet death stays. */
 const PHYS=(typeof ZPhys!=='undefined')?{
-  engine:new ZPhys.Engine(), blend:.5, assist:.0008, enabled:true,
+  engine:new ZPhys.Engine(), blend:.5, assist:.005, swordBlend:.3, enabled:true,
 }:{enabled:false};
 if(PHYS.enabled){ PHYS.engine.g.set(0,-9.81,0); PHYS.engine.substeps=6; PHYS.engine.iters=3; }
 
@@ -1421,9 +1502,35 @@ Fighter.prototype.buildPhys=function(kin){
   E.joint(B.uaR,B.faR,K.elR); E.joint(B.uaL,B.faL,K.elL);
   E.joint(B.pelvis,B.thR,K.hipR); E.joint(B.pelvis,B.thL,K.hipL);
   E.joint(B.thR,B.shR,K.knR); E.joint(B.thL,B.shL,K.knL);
-  const M={}, comp={pelvis:.0004,chest:.0006,uaR:.0016,uaL:.0016,
-    faR:.002,faL:.002,thR:.0008,thL:.0008,shR:.001,shL:.001};
-  for(const k in B){ M[k]=E.motor(B[k]); M[k].compliance=comp[k]; M[k].maxCorr=.3; }
+  /* anatomy as safety rails: wider than any pose, tighter than absurdity.
+     the trunk's tautness comes from the motors; limits stop the folding */
+  E.limit(B.pelvis,B.chest,.5);                  // ~29° waist swing max
+  E.limit(B.chest,B.uaR,2.6); E.limit(B.chest,B.uaL,2.6);
+  E.limit(B.uaR,B.faR,2.5); E.limit(B.uaL,B.faL,2.5);
+  E.limit(B.pelvis,B.thR,1.9); E.limit(B.pelvis,B.thL,1.9);
+  E.limit(B.thR,B.shR,2.4); E.limit(B.thL,B.shL,2.4);
+  const M={}, comp={pelvis:.00015,chest:.0002,uaR:.0014,uaL:.0014,
+    faR:.0018,faL:.0018,thR:.0006,thL:.0006,shR:.0009,shL:.0009};
+  for(const k in B){ M[k]=E.motor(B[k]); M[k].compliance=comp[k];
+    M[k].maxCorr=(k==='chest'||k==='pelvis')?.45:.3;
+    M[k]._c0=M[k].compliance; M[k]._m0=M[k].maxCorr; }
+  /* fighters collide with each other, never with themselves */
+  PHYS._grp=(PHYS._grp||0)+1;
+  for(const k in B)B[k].group=PHYS._grp;
+  /* the sword is steel with real mass in a real hand */
+  if(this.hasSword&&this.tip){
+    const grip=K.haR, tipd=_pv2.subVectors(this.tip,grip);
+    if(tipd.lengthSq()>.04){
+      const sw=new ZPhys.Body({pos:_pv.addVectors(this.tip,grip).multiplyScalar(.5).clone(),
+        mass:1.1,r:.015,len:Math.max(tipd.length(),.6),damping:.5});
+      mkTargetQ(this.tip,grip,sw.q);
+      sw.noCollide=true; sw.group=PHYS._grp; sw.name=this.name+'.sword';
+      E.add(sw); B.sword=sw;
+      E.joint(B.faR,sw,grip);
+      M.sword=E.motor(sw); M.sword.compliance=.0022; M.sword.maxCorr=.5;
+      M.sword._c0=.0022; M.sword._m0=.5;
+    }
+  }
   const A=E.anchor(B.pelvis,V3(0,0,0)); A.compliance=PHYS.assist;
   /* remember where the joints live on each body */
   const L={}; const cap=(n,body,w)=>{ L[n]={body,l:body.toLocal(w,V3())}; };
@@ -1434,9 +1541,43 @@ Fighter.prototype.buildPhys=function(kin){
   cap('knR',B.shR,K.knR); cap('knL',B.shL,K.knL);
   this.phys={B,M,A,L};
 };
-Fighter.prototype.physTargets=function(K){
+const _com=V3(), _cv=V3(), _be=V3(), _bq=new THREE.Quaternion();
+Fighter.prototype.physTargets=function(K,dt){
   if(!this.phys)return;
-  const {M,A}=this.phys;
+  const {M,A,B}=this.phys;
+  /* motor strength: consciousness browns the motors out; death cuts them.
+     a dying man's sword arm droops before he knows he's done */
+  let s;
+  if(this.alive)s=clamp(this.consciousness/100,.3,1);
+  else{ this._deadFade=this._deadFade===undefined?1:Math.max(0,this._deadFade-(dt||.016)*.9);
+    s=this._deadFade; A.enabled=false; }
+  for(const k in M){ const m=M[k];
+    if(s<=0){ m.enabled=false; continue; }
+    m.enabled=true;
+    m.compliance=m._c0/(s*s); m.maxCorr=m._m0*s; }
+  /* SIMBICON-lite: com error against the support line feeds corrective
+     velocity (capped virtual force) and an ankle-strategy target tilt */
+  if(this.alive&&dt){
+    _com.set(0,0,0); _cv.set(0,0,0); let mt=0;
+    for(const k in B){ const b=B[k]; if(b.invMass===0)continue;
+      const m=1/b.invMass; mt+=m;
+      _com.addScaledVector(b.pos,m); _cv.addScaledVector(b.vel,m); }
+    _com.divideScalar(mt); _cv.divideScalar(mt);
+    _be.addVectors(this.feet.R.p,this.feet.L.p).multiplyScalar(.5);
+    _be.subVectors(_com,_be); _be.y=0;
+    _be.addScaledVector(_cv.setY(0),.22);
+    _be.clampLength(0,.5);
+    const g=8;
+    B.pelvis.vel.addScaledVector(_be,-dt*g);
+    B.chest.vel.addScaledVector(_be,-dt*g*.7);
+    /* ankle strategy: shins lean the body back over its feet */
+    const mag=Math.min(_be.length()*1.2,.2);
+    if(mag>.01){
+      _cv.set(_be.z,0,-_be.x).normalize();       // axis ⊥ error
+      _bq.setFromAxisAngle(_cv,mag);
+      M.shR.target.premultiply(_bq); M.shL.target.premultiply(_bq);
+    }
+  }
   mkTargetQ(_pv2.copy(K.pelvis).setY(K.pelvis.y+.1),
     _pv2.clone().setY(K.pelvis.y-.1),M.pelvis.target);
   mkTargetQ(K.neckT,K.chestB,M.chest.target);
@@ -1444,7 +1585,66 @@ Fighter.prototype.physTargets=function(K){
   mkTargetQ(K.elR,K.haR,M.faR.target); mkTargetQ(K.elL,K.haL,M.faL.target);
   mkTargetQ(K.hipR,K.knR,M.thR.target); mkTargetQ(K.hipL,K.knL,M.thL.target);
   mkTargetQ(K.knR,K.ankR,M.shR.target); mkTargetQ(K.knL,K.ankL,M.shL.target);
+  if(M.sword&&this.hasSword&&this.tip)mkTargetQ(this.tip,K.haR,M.sword.target);
   A.target.copy(K.pelvis);
+};
+Fighter.prototype.disposeSwordPhys=function(){
+  if(!this.phys||!this.phys.B.sword)return;
+  const E=PHYS.engine, sw=this.phys.B.sword;
+  E.bodies=E.bodies.filter(b=>b!==sw);
+  E.joints=E.joints.filter(j=>j.a!==sw&&j.b!==sw);
+  E.motors=E.motors.filter(m=>m.body!==sw);
+  delete this.phys.B.sword; delete this.phys.M.sword;
+};
+const _dj={};
+'pelvis chestB chestT neckT shR shL elR elL haR haL hipR hipL knR knL ankR ankL'
+  .split(' ').forEach(k=>_dj[k]=V3());
+Fighter.prototype.updateDeadPhys=function(dt){
+  const {B}=this.phys, P=this.parts;
+  this.physTargets(this._K,dt);          // continues the brown-out fade
+  /* joints from the rigid bodies */
+  this.physJoint('chestB',_dj.chestB); this.physJoint('chestT',_dj.chestT);
+  this.physJoint('neckT',_dj.neckT);
+  this.physJoint('shR',_dj.shR); this.physJoint('shL',_dj.shL);
+  this.physJoint('elR',_dj.elR); this.physJoint('elL',_dj.elL);
+  this.physJoint('knR',_dj.knR); this.physJoint('knL',_dj.knL);
+  _dj.pelvis.copy(B.pelvis.pos);
+  TMP1.set(0,-B.faR.len/2,0); B.faR.toWorld(TMP1,_dj.haR);
+  TMP1.set(0,-B.faL.len/2,0); B.faL.toWorld(TMP1,_dj.haL);
+  TMP1.set(0,B.thR.len/2,0); B.thR.toWorld(TMP1,_dj.hipR);
+  TMP1.set(0,B.thL.len/2,0); B.thL.toWorld(TMP1,_dj.hipL);
+  TMP1.set(0,-B.shR.len/2,0); B.shR.toWorld(TMP1,_dj.ankR);
+  TMP1.set(0,-B.shL.len/2,0); B.shL.toWorld(TMP1,_dj.ankL);
+  /* drive the visuals */
+  P.pelvis.position.copy(_dj.pelvis); P.pelvis.quaternion.copy(B.pelvis.q);
+  aimLimb(P.abdomen,_dj.chestB,_dj.pelvis);
+  aimLimb(P.chest,_dj.chestT,_dj.chestB);
+  aimLimb(P.neck,_dj.neckT,_dj.chestT);
+  P.head.position.copy(_dj.neckT).y+=this.dims.headR*.7;
+  P.head.position.copy(_dj.neckT); P.head.position.y+=this.dims.headR*.7;
+  aimLimb(P.upperArmR,_dj.shR,_dj.elR); aimLimb(P.forearmR,_dj.elR,_dj.haR);
+  aimLimb(P.upperArmL,_dj.shL,_dj.elL); aimLimb(P.forearmL,_dj.elL,_dj.haL);
+  P.handR.position.copy(_dj.haR); P.handL.position.copy(_dj.haL);
+  aimLimb(P.thighR,_dj.hipR,_dj.knR); aimLimb(P.shinR,_dj.knR,_dj.ankR);
+  aimLimb(P.thighL,_dj.hipL,_dj.knL); aimLimb(P.shinL,_dj.knL,_dj.ankL);
+  P.footR.position.copy(_dj.ankR); P.footR.position.y=Math.max(P.footR.position.y,.03);
+  P.footL.position.copy(_dj.ankL); P.footL.position.y=Math.max(P.footL.position.y,.03);
+  /* skinned bones follow the corpse */
+  TMP2.copy(_dj.pelvis).multiplyScalar(2).sub(_dj.chestB);
+  this.setBone('pelvis',_dj.pelvis,TMP2);
+  this.setBone('spine',_dj.chestB,_dj.pelvis);
+  this.setBone('chest',_dj.chestT,_dj.chestB);
+  this.setBone('uaR',_dj.shR,_dj.elR); this.setBone('uaL',_dj.shL,_dj.elL);
+  this.setBone('thR',_dj.hipR,_dj.knR); this.setBone('shR',_dj.knR,_dj.ankR);
+  this.setBone('thL',_dj.hipL,_dj.knL); this.setBone('shL',_dj.knL,_dj.ankL);
+  /* the sword falls with the hand that held it */
+  if(B.sword&&this.hasSword){
+    this.katana.position.copy(_dj.haR);
+    TMP1.set(0,1,0).applyQuaternion(B.sword.q);
+    this.katana.quaternion.setFromUnitVectors(UPY,TMP1);
+  }
+  /* pools follow the corpse */
+  this.pos.set(_dj.pelvis.x,0,_dj.pelvis.z);
 };
 Fighter.prototype.physJoint=function(k,out){
   const j=this.phys&&this.phys.L[k];
@@ -1467,15 +1667,18 @@ Fighter.prototype.disposePhys=function(){
   E.joints=E.joints.filter(j=>!Object.values(B).includes(j.a)&&!Object.values(B).includes(j.b));
   E.motors=E.motors.filter(m=>!Object.values(B).includes(m.body));
   E.anchors=E.anchors.filter(a=>!Object.values(B).includes(a.body));
+  E.limits=E.limits.filter(l=>!Object.values(B).includes(l.a)&&!Object.values(B).includes(l.b));
   this.phys=null;
 };
 
 const _sT=V3();
 const _pj=V3();
 Fighter.prototype.soften=function(k,v,rate,dt){
-  /* the torque-driven body's opinion blends into the target */
+  /* the torque-driven body's opinion blends into the target;
+     the trunk stays taut, the limbs carry the physics */
   if(PHYS.enabled&&this.phys&&this.alive&&this.physJoint(k,_pj)){
-    if(_pj.distanceToSquared(v)<.36)v.lerp(_pj,PHYS.blend);
+    const wgt=(k==='chestB'||k==='chestT'||k==='neckT')?.35:1;
+    if(_pj.distanceToSquared(v)<.36)v.lerp(_pj,PHYS.blend*wgt);
   }
   const S=this.soft||(this.soft={});
   let s=S[k]; if(!s){ s=S[k]={p:v.clone(),vel:V3()}; }
@@ -1610,7 +1813,7 @@ Fighter.prototype.updateAlive=function(dt,opponent){
   /* acceleration → anticipation lean (the body leans before it moves) */
   TMP3.subVectors(this.vel,this.prevVel).divideScalar(Math.max(dt,1e-4));
   this.prevVel.copy(this.vel);
-  TMP3.clampLength(0,14).multiplyScalar(.006).addScaledVector(this.vel,.012);
+  TMP3.clampLength(0,14).multiplyScalar(.004).addScaledVector(this.vel,.009);
   this.leanV.lerp(TMP3,clamp(dt*5,0,1)); this.leanV.y=0;
   /* inverted-pendulum catch point ~0.26s ahead */
   const catchPt=TMP4.copy(this.pos).addScaledVector(this.vel,.26);
@@ -1655,19 +1858,19 @@ Fighter.prototype.updateAlive=function(dt,opponent){
   this.flinch.addScaledVector(this.flinchV,dt);
 
   /* spine: pelvis → abdomen → chest, distributing lean and twist */
-  const lean=clamp(.05+this.tipVel.length()*.010+speed2d*.02,0,.16);
+  const lean=clamp(.04+this.tipVel.length()*.007+speed2d*.016,0,.12);
   const chestYawA=this.bodyYaw+this.twist*.8;
   const fwdC=DIRY(chestYawA), rightC=V3(fwdC.z,0,-fwdC.x);
   const chestB=pelvis.clone().addScaledVector(fwdP,.03+lean*.3)
     .addScaledVector(this.flinch,.6).addScaledVector(this.leanV,.45);
   chestB.y=pelvisY+.17;
-  this.soften('chestB',chestB,34,dt);
+  this.soften('chestB',chestB,52,dt);
   const chestT=chestB.clone().addScaledVector(fwdC,lean).add(this.flinch)
     .add(this.leanV);
   chestT.y=chestB.y+D.torso*.62;
-  this.soften('chestT',chestT,26,dt);
+  this.soften('chestT',chestT,42,dt);
   const neckT=chestT.clone().addScaledVector(fwdC,.02); neckT.y=chestT.y+D.neck+.02;
-  this.soften('neckT',neckT,20,dt);
+  this.soften('neckT',neckT,34,dt);
 
   P.pelvis.position.copy(pelvis);
   P.pelvis.quaternion.setFromAxisAngle(UPY,pelvisYawA);
@@ -1742,6 +1945,13 @@ Fighter.prototype.updateAlive=function(dt,opponent){
     const gripDir=TMP1.subVectors(this.tip,shR).normalize();
     const handle=shR.clone().addScaledVector(gripDir,clamp(shR.distanceTo(this.tip)-.87,.25,.52));
     const bladeDir=TMP2.subVectors(this.tip,handle).normalize();
+    /* the physical sword's momentum bends the rendered blade's line */
+    if(PHYS.enabled&&this.phys&&this.phys.B.sword){
+      const sw=this.phys.B.sword;
+      TMP3.set(0,sw.len/2,0); sw.toWorld(TMP3,TMP3);
+      TMP3.sub(handle).normalize();
+      if(TMP3.dot(bladeDir)>.2)bladeDir.lerp(TMP3,PHYS.swordBlend).normalize();
+    }
     this.katana.position.copy(handle);
     this.katana.quaternion.setFromUnitVectors(UPY,bladeDir);
     /* keep previous segment for swept collision */
@@ -1793,7 +2003,7 @@ Fighter.prototype.updateAlive=function(dt,opponent){
   this._K.ankR.copy(ankR); this._K.ankL.copy(ankL);
   if(PHYS.enabled){
     if(!this.phys)this.buildPhys(this._K);
-    this.physTargets(this._K);
+    this.physTargets(this._K,dt);
   }
   aimLimb(P.thighR,hipR,knR); aimLimb(P.shinR,knR,ankR);
   aimLimb(P.thighL,hipL,knL); aimLimb(P.shinL,knL,ankL);
@@ -2325,6 +2535,24 @@ const kimonoTex=canTex(256,256,(ctx,w,h)=>{
     ctx.fillRect(Math.random()*w,Math.random()*h,1+Math.random()*3,1); }
 });
 if(kimonoTex){ kimonoTex.wrapS=kimonoTex.wrapT=THREE.RepeatWrapping; kimonoTex.repeat.set(3,3); }
+const skinTex=canTex(256,256,(ctx,w,h)=>{
+  ctx.fillStyle='#d9d2ca'; ctx.fillRect(0,0,w,h);
+  /* subsurface mottle: warm and cool blotches, very soft */
+  for(let i=0;i<140;i++){
+    const x=Math.random()*w,y=Math.random()*h,r=6+Math.random()*22;
+    const g=ctx.createRadialGradient(x,y,1,x,y,r);
+    const warm=Math.random()<.55;
+    g.addColorStop(0,warm?'rgba(198,120,100,.06)':'rgba(120,130,150,.05)');
+    g.addColorStop(1,'rgba(0,0,0,0)');
+    ctx.fillStyle=g; ctx.beginPath(); ctx.arc(x,y,r,0,6.29); ctx.fill();
+  }
+  /* pores and grain */
+  for(let i=0;i<2600;i++){
+    ctx.fillStyle='rgba(90,70,60,'+(0.015+Math.random()*.03)+')';
+    ctx.fillRect(Math.random()*w,Math.random()*h,1,1);
+  }
+});
+if(skinTex){ skinTex.wrapS=skinTex.wrapT=THREE.RepeatWrapping; skinTex.repeat.set(2,2); }
 const hakamaTex=canTex(256,256,(ctx,w,h)=>{
   ctx.fillStyle='#d2d2d2'; ctx.fillRect(0,0,w,h);
   /* pleats: broad vertical bands, each shaded across its width */
@@ -2356,7 +2584,8 @@ const KAMAE={
 /* ------------------------- the opponent ladder ------------------------- */
 const DUELISTS=[
   {name:'KIYOMASA', kanji:'猪', epithet:'the Boar',
-   palette:{kimono:0x3a2420,hakama:0x241611,obi:0x8a5a1f,skin:0xbf9276,accent:0x101010},
+   palette:{kimono:0x3a2420,hakama:0x241611,obi:0x8a5a1f,skin:0xbf9276,accent:0x101010,
+     face:{beard:true}},
    ai:{skill:.72,reaction:.24,engage:[1.2,2.0],atkCircle:.62,atkBlock:.3,
        windupT:[.36,.5],strikeT:[.3,.44],speedMul:.8,parry:.12,maai:1.95,tempo:[.5,1.2],
        kamae:'jodan'}},
@@ -2366,7 +2595,8 @@ const DUELISTS=[
        windupT:[.3,.42],strikeT:[.28,.4],speedMul:.9,parry:.5,maai:2.3,tempo:[.9,1.9],
        kamae:'seigan'}},
   {name:'SHIZUKA', kanji:'静', epithet:'First Draw',
-   palette:{kimono:0x352822,hakama:0x1e1712,obi:0x7c1f1f,skin:0xbf9276,accent:0x101010},
+   palette:{kimono:0x352822,hakama:0x1e1712,obi:0x7c1f1f,skin:0xbf9276,accent:0x101010,
+     face:{mustache:true}},
    ai:{skill:.95,reaction:.11,engage:[2.6,4.2],atkCircle:.32,atkBlock:.28,
        windupT:[.2,.3],strikeT:[.26,.36],speedMul:1.02,parry:.35,maai:2.5,tempo:[1.2,2.4],
        kamae:'waki'}},
@@ -2393,7 +2623,8 @@ function genDuelist(stage){
     epithet:GEN.epi[Math.floor(Math.random()*GEN.epi.length)],
     palette:{kimono:[0x3a2420,0x27313d,0x352822,0x2c3527,0x3d2733][Math.floor(Math.random()*5)],
       hakama:0x1c1712,obi:[0x8a5a1f,0xb9b3a4,0x7c1f1f,0x746c58][Math.floor(Math.random()*4)],
-      skin:0xbf9276,accent:0x101010},
+      skin:0xbf9276,accent:0x101010,
+      face:{beard:Math.random()<.3,mustache:Math.random()<.35}},
     ai:{skill:s,reaction:lerp(.2,.1,s),engage:[1.4+arch*1.4,2.4+arch*1.8],
       atkCircle:lerp(.6,.2,arch),atkBlock:lerp(.3,.6,arch),
       windupT:[lerp(.34,.2,s),lerp(.5,.3,s)],strikeT:[.26,.4],
@@ -2588,8 +2819,10 @@ function updateCamera(dt){
   if(killCam&&killCam.t<6){
     killCam.t+=dt;
     const kc=killCam, k=clamp(kc.t/2.6,0,1), e=k*k*(3-2*k);
-    const vJ=kc.victim.J;
-    const tgt=TMP1.copy(vJ?vJ.chestB.p:kc.victim.pos); tgt.y=Math.max(tgt.y,.35);
+    const v=kc.victim;
+    if(v.physDead&&v.physJoint('chestB',TMP1)){}
+    else TMP1.copy(v.J?v.J.chestB.p:v.pos);
+    const tgt=TMP1; tgt.y=Math.max(tgt.y,.35);
     camTarget.lerp(tgt,clamp(dt*2.5,0,1));
     kc.orbit+=dt*.12;
     const d=lerp(4.2,2.7,e), h=lerp(1.9,.85,e);
@@ -2652,11 +2885,6 @@ function frame(now){
   }
   for(const L of lanterns)
     L.light.intensity=L.base*(0.82+0.22*Math.sin(now*.011+L.seed)+0.1*Math.sin(now*.037+L.seed*2.7));
-  for(const M of mists){
-    M.mesh.quaternion.copy(camera.quaternion);
-    M.mesh.position.x+=M.v*dt;
-    if(Math.abs(M.mesh.position.x)>15)M.mesh.position.x*=-.95;
-  }
 
   if(game.state==='fight'||game.state==='over'){
     game.state==='fight'&&(game.duelTime+=dt);
@@ -2668,7 +2896,8 @@ function frame(now){
     updateBind(dt);
 
     for(const f of [player,enemy]){
-      if(f.ragdoll)f.updateRagdoll(dt);
+      if(f.physDead)f.updateDeadPhys(dt);
+      else if(f.ragdoll)f.updateRagdoll(dt);
       else{ f.updateAlive(dt,f===player?enemy:player); f.updatePhysiology(dt,log); }
       updateLoose(f,dt);
       if(!f.dead&&f.arterialWound&&f.bleedRate>15){

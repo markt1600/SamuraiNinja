@@ -86,6 +86,34 @@ const ZPhys=(()=>{
     }
   }
 
+  /* cone limit: child's local +Y may deviate from parent's local rest
+     direction by at most maxAng — a joint that cannot fold in half. */
+  class SwingLimit{
+    constructor(a,b,maxAng){
+      this.a=a; this.b=b; this.max=maxAng;
+      /* capture child axis in parent frame at build (rest) */
+      _a.set(0,1,0).applyQuaternion(b.q);
+      this.rest=_a.clone().applyQuaternion(_q.copy(a.q).invert()).normalize();
+    }
+    solve(h){
+      const a=this.a,b=this.b;
+      _a.set(0,1,0).applyQuaternion(b.q);                 // child axis, world
+      _b.copy(this.rest).applyQuaternion(a.q).normalize();// allowed axis, world
+      const d=Math.min(1,Math.max(-1,_a.dot(_b)));
+      const ang=Math.acos(d);
+      if(ang<=this.max)return;
+      _n.crossVectors(_a,_b);
+      const s=_n.length(); if(s<1e-8)return;
+      _n.divideScalar(s);
+      const excess=ang-this.max;
+      const wa=a.angW(_n), wb=b.angW(_n), w=wa+wb;
+      if(w<1e-12)return;
+      /* rotate child toward the cone, parent slightly away */
+      b.applyAngCorr(_c.copy(_n).multiplyScalar(excess*(wb/w)));
+      a.applyAngCorr(_c.copy(_n).multiplyScalar(-excess*(wa/w)));
+    }
+  }
+
   /* motor: drive body's WORLD orientation toward target quaternion.
      compliance sets "strength"; maxCorr per substep is the torque limit. */
   class Motor{
@@ -131,11 +159,12 @@ const ZPhys=(()=>{
   }
 
   class Engine{
-    constructor(){ this.bodies=[]; this.joints=[]; this.motors=[]; this.anchors=[];
+    constructor(){ this.bodies=[]; this.joints=[]; this.motors=[]; this.anchors=[]; this.limits=[];
       this.g=V(0,-9.81,0); this.substeps=10; this.iters=3; this.groundY=0;
       this.friction=.85; }
     add(b){ this.bodies.push(b); return b; }
     joint(a,b,pt,comp){ const j=new Joint(a,b,pt,comp||0); this.joints.push(j); return j; }
+    limit(a,b,maxAng){ const l=new SwingLimit(a,b,maxAng); this.limits.push(l); return l; }
     motor(b){ const m=new Motor(b); this.motors.push(m); return m; }
     anchor(b,local){ const a=new Anchor(b,local); this.anchors.push(a); return a; }
     step(dt){
@@ -153,9 +182,11 @@ const ZPhys=(()=>{
             b.q.normalize();
           }
         }
+        for(const b of this.bodies)b._grounded=false;
         /* constraints */
         for(let it=0;it<this.iters;it++){
           for(const j of this.joints)j.solve(h);
+          for(const l of this.limits)l.solve(h);
           for(const m of this.motors)m.solve(h);
           for(const a of this.anchors)a.solve(h);
           this.contacts(h);
@@ -167,6 +198,8 @@ const ZPhys=(()=>{
           _q.copy(b.q).multiply(_q2.copy(b.prevQ).invert());
           if(_q.w<0){_q.x*=-1;_q.y*=-1;_q.z*=-1;_q.w*=-1;}
           b.w.set(_q.x,_q.y,_q.z).multiplyScalar(2/h);
+          /* contacts are inelastic: pushout must not become bounce */
+          if(b._grounded&&b.vel.y>0)b.vel.y*=.05;
           const dmp=Math.exp(-b.damping*h);
           b.vel.multiplyScalar(dmp); b.w.multiplyScalar(dmp);
           /* hard sanity clamps */
@@ -176,6 +209,43 @@ const ZPhys=(()=>{
       }
     }
     contacts(h){
+      /* body vs body: capsule-capsule between different groups */
+      const bs=this.bodies;
+      for(let i=0;i<bs.length;i++)for(let j=i+1;j<bs.length;j++){
+        const A=bs[i],B2=bs[j];
+        if(A.noCollide||B2.noCollide)continue;
+        if(A.group===undefined||B2.group===undefined||A.group===B2.group)continue;
+        if(A.invMass===0&&B2.invMass===0)continue;
+        /* segment endpoints */
+        _a.set(0,A.len/2,0); A.toWorld(_a,_a); _b.set(0,-A.len/2,0); A.toWorld(_b,_b);
+        _c.set(0,B2.len/2,0); B2.toWorld(_c,_c); _d.set(0,-B2.len/2,0); B2.toWorld(_d,_d);
+        /* closest points between segments (clamped) */
+        const d1x=_b.x-_a.x,d1y=_b.y-_a.y,d1z=_b.z-_a.z;
+        const d2x=_d.x-_c.x,d2y=_d.y-_c.y,d2z=_d.z-_c.z;
+        const rx=_a.x-_c.x,ry=_a.y-_c.y,rz=_a.z-_c.z;
+        const a11=d1x*d1x+d1y*d1y+d1z*d1z, a22=d2x*d2x+d2y*d2y+d2z*d2z;
+        const a12=d1x*d2x+d1y*d2y+d1z*d2z;
+        const b1=d1x*rx+d1y*ry+d1z*rz, b2=d2x*rx+d2y*ry+d2z*rz;
+        const den=a11*a22-a12*a12;
+        let t1=den>1e-9?Math.max(0,Math.min(1,(a12*b2-a22*b1)/den)):0;
+        let t2=a22>1e-9?Math.max(0,Math.min(1,(a12*t1+b2)/a22)):0;
+        t1=a11>1e-9?Math.max(0,Math.min(1,(a12*t2-b1)/a11)):0;
+        const px=_a.x+d1x*t1,py=_a.y+d1y*t1,pz=_a.z+d1z*t1;
+        const qx=_c.x+d2x*t2,qy=_c.y+d2y*t2,qz=_c.z+d2z*t2;
+        _n.set(px-qx,py-qy,pz-qz);
+        const dist=_n.length(), pen=A.r+B2.r-dist;
+        if(pen>0&&dist>1e-6){
+          _n.divideScalar(dist);
+          _r1.set(px-A.pos.x,py-A.pos.y,pz-A.pos.z);
+          _r2.set(qx-B2.pos.x,qy-B2.pos.y,qz-B2.pos.z);
+          const w=A.wAt(_r1,_n)+B2.wAt(_r2,_n);
+          if(w>1e-12){
+            const dl=pen/w*.8;
+            A.applyCorr(_d.copy(_n).multiplyScalar(dl),_r1);
+            B2.applyCorr(_d.copy(_n).multiplyScalar(-dl),_r2);
+          }
+        }
+      }
       for(const b of this.bodies){
         if(b.invMass===0)continue;
         /* capsule endpoints vs ground plane */
@@ -187,6 +257,7 @@ const ZPhys=(()=>{
             _n.set(0,1,0);
             const w=b.wAt(_r1,_n);
             if(w>1e-12){
+              b._grounded=true;
               _d.set(0,pen/w,0);
               b.applyCorr(_d,_r1);
               /* Coulomb friction: tangential correction capped by μ·penetration */
@@ -200,6 +271,6 @@ const ZPhys=(()=>{
       }
     }
   }
-  return {Engine,Body,V};
+  return {Engine,Body,V,SwingLimit};
 })();
 if(typeof module!=='undefined')module.exports=ZPhys;
