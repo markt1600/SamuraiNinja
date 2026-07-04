@@ -1557,7 +1557,7 @@ const PHYS=(typeof ZPhys!=='undefined')?{
 if(PHYS.enabled){ PHYS.engine.g.set(0,-9.81,0); PHYS.engine.substeps=6; PHYS.engine.iters=3; }
 
 
-const ZAN_VERSION='v20-strip';
+const ZAN_VERSION='v21';
 console.log('%c斬 ZAN '+ZAN_VERSION,'font-size:16px');
 
 /* =========================================================================
