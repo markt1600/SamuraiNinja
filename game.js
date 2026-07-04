@@ -1093,6 +1093,9 @@ class Fighter{
     this.feet={R:mkFoot(1,.20),L:mkFoot(-1,-.16)};
     this.legDamage={R:0,L:0};
     this.prevVel=V3(); this.leanV=V3();
+    this._K={pelvis:V3(),chestB:V3(),chestT:V3(),neckT:V3(),
+      shR:V3(),shL:V3(),elR:V3(),elL:V3(),haR:V3(),haL:V3(),
+      hipR:V3(),hipL:V3(),knR:V3(),knL:V3(),ankR:V3(),ankL:V3()};
 
     this.capsules={};
     for(const k in ANATOMY)this.capsules[k]={a:V3(),b:V3(),r:ANATOMY[k].r};
@@ -1380,8 +1383,100 @@ class Fighter{
    to its kinematic target. Children are computed FROM softened parents, so
    the chain stays connected; impacts inject velocity and the whole body
    physically absorbs them. */
+/* ============ TORQUE-DRIVEN BODY (ZPhys XPBD engine) ============
+   A full articulated rigid body per fighter — real masses, real inertia —
+   driven by joint motors toward the kinematic pose. Its solution blends
+   into the render through the soft layer. PHYS.blend: 0 = pure animation,
+   1 = pure physics. PHYS.assist: how hard the balance hand-of-god holds
+   the pelvis. Death-by-motor-cutoff is staged for v2; Verlet death stays. */
+const PHYS=(typeof ZPhys!=='undefined')?{
+  engine:new ZPhys.Engine(), blend:.5, assist:.0008, enabled:true,
+}:{enabled:false};
+if(PHYS.enabled){ PHYS.engine.g.set(0,-9.81,0); PHYS.engine.substeps=6; PHYS.engine.iters=3; }
+
+const _pq=new THREE.Quaternion(), _pv=V3(), _pv2=V3();
+function mkTargetQ(from,to,q){ _pv.subVectors(to,from).normalize();
+  return q.setFromUnitVectors(UPV,_pv); }
+
+Fighter.prototype.buildPhys=function(kin){
+  if(!PHYS.enabled)return;
+  const E=PHYS.engine, mkB=(name,top,bot,mass,r)=>{
+    const len=Math.max(top.distanceTo(bot),.08);
+    const b=new ZPhys.Body({pos:_pv.addVectors(top,bot).multiplyScalar(.5).clone(),
+      mass,r,len,damping:.9});
+    mkTargetQ(top,bot,b.q); b.name=this.name+'.'+name;
+    E.add(b); return b; };
+  const K=kin;
+  const B={
+    pelvis:mkB('pelvis',_pv2.copy(K.pelvis).setY(K.pelvis.y+.1),
+      _pv2.clone().setY(K.pelvis.y-.1),11,.13),
+    chest:mkB('chest',K.neckT,K.chestB,19,.14),
+    uaR:mkB('uaR',K.shR,K.elR,2.2,.05), uaL:mkB('uaL',K.shL,K.elL,2.2,.05),
+    faR:mkB('faR',K.elR,K.haR,1.9,.045), faL:mkB('faL',K.elL,K.haL,1.9,.045),
+    thR:mkB('thR',K.hipR,K.knR,8,.09), thL:mkB('thL',K.hipL,K.knL,8,.09),
+    shR:mkB('shR',K.knR,K.ankR,5,.06), shL:mkB('shL',K.knL,K.ankL,5,.06),
+  };
+  E.joint(B.pelvis,B.chest,K.chestB);
+  E.joint(B.chest,B.uaR,K.shR); E.joint(B.chest,B.uaL,K.shL);
+  E.joint(B.uaR,B.faR,K.elR); E.joint(B.uaL,B.faL,K.elL);
+  E.joint(B.pelvis,B.thR,K.hipR); E.joint(B.pelvis,B.thL,K.hipL);
+  E.joint(B.thR,B.shR,K.knR); E.joint(B.thL,B.shL,K.knL);
+  const M={}, comp={pelvis:.0004,chest:.0006,uaR:.0016,uaL:.0016,
+    faR:.002,faL:.002,thR:.0008,thL:.0008,shR:.001,shL:.001};
+  for(const k in B){ M[k]=E.motor(B[k]); M[k].compliance=comp[k]; M[k].maxCorr=.3; }
+  const A=E.anchor(B.pelvis,V3(0,0,0)); A.compliance=PHYS.assist;
+  /* remember where the joints live on each body */
+  const L={}; const cap=(n,body,w)=>{ L[n]={body,l:body.toLocal(w,V3())}; };
+  cap('chestB',B.chest,K.chestB); cap('chestT',B.chest,K.chestT);
+  cap('neckT',B.chest,K.neckT);
+  cap('shR',B.chest,K.shR); cap('shL',B.chest,K.shL);
+  cap('elR',B.faR,K.elR); cap('elL',B.faL,K.elL);
+  cap('knR',B.shR,K.knR); cap('knL',B.shL,K.knL);
+  this.phys={B,M,A,L};
+};
+Fighter.prototype.physTargets=function(K){
+  if(!this.phys)return;
+  const {M,A}=this.phys;
+  mkTargetQ(_pv2.copy(K.pelvis).setY(K.pelvis.y+.1),
+    _pv2.clone().setY(K.pelvis.y-.1),M.pelvis.target);
+  mkTargetQ(K.neckT,K.chestB,M.chest.target);
+  mkTargetQ(K.shR,K.elR,M.uaR.target); mkTargetQ(K.shL,K.elL,M.uaL.target);
+  mkTargetQ(K.elR,K.haR,M.faR.target); mkTargetQ(K.elL,K.haL,M.faL.target);
+  mkTargetQ(K.hipR,K.knR,M.thR.target); mkTargetQ(K.hipL,K.knL,M.thL.target);
+  mkTargetQ(K.knR,K.ankR,M.shR.target); mkTargetQ(K.knL,K.ankL,M.shL.target);
+  A.target.copy(K.pelvis);
+};
+Fighter.prototype.physJoint=function(k,out){
+  const j=this.phys&&this.phys.L[k];
+  if(!j)return null;
+  return j.body.toWorld(j.l,out);
+};
+Fighter.prototype.physImpulse=function(partKey,dir,J){
+  if(!this.phys)return;
+  const map={head:'chest',neck:'chest',chest:'chest',abdomen:'pelvis',pelvis:'pelvis',
+    upperArmR:'uaR',forearmR:'faR',upperArmL:'uaL',forearmL:'faL',
+    thighR:'thR',shinR:'shR',thighL:'thL',shinL:'shL'};
+  const b=this.phys.B[map[partKey]||'chest'];
+  b.vel.addScaledVector(dir,J*b.invMass);
+  b.w.x+=rand(-1,1)*J*.15; b.w.z+=rand(-1,1)*J*.15;
+};
+Fighter.prototype.disposePhys=function(){
+  if(!this.phys)return;
+  const E=PHYS.engine, {B}=this.phys;
+  E.bodies=E.bodies.filter(b=>!Object.values(B).includes(b));
+  E.joints=E.joints.filter(j=>!Object.values(B).includes(j.a)&&!Object.values(B).includes(j.b));
+  E.motors=E.motors.filter(m=>!Object.values(B).includes(m.body));
+  E.anchors=E.anchors.filter(a=>!Object.values(B).includes(a.body));
+  this.phys=null;
+};
+
 const _sT=V3();
+const _pj=V3();
 Fighter.prototype.soften=function(k,v,rate,dt){
+  /* the torque-driven body's opinion blends into the target */
+  if(PHYS.enabled&&this.phys&&this.alive&&this.physJoint(k,_pj)){
+    if(_pj.distanceToSquared(v)<.36)v.lerp(_pj,PHYS.blend);
+  }
   const S=this.soft||(this.soft={});
   let s=S[k]; if(!s){ s=S[k]={p:v.clone(),vel:V3()}; }
   s.vel.multiplyScalar(Math.exp(-6.5*dt));
@@ -1588,6 +1683,8 @@ Fighter.prototype.updateAlive=function(dt,opponent){
   this.setPelvisBone(pelvis,pelvisYawA);
   this.setBone('spine',chestB,pelvis);
   this.setBone('chest',chestT,chestB);
+  this._K.pelvis.copy(pelvis); this._K.chestB.copy(chestB);
+  this._K.chestT.copy(chestT); this._K.neckT.copy(neckT);
 
   /* head tracks the opponent, clamped toward the chest's facing */
   const headPos=neckT.clone().addScaledVector(fwdC,.028)
@@ -1603,10 +1700,10 @@ Fighter.prototype.updateAlive=function(dt,opponent){
 
   /* ---- sword: spring-driven tip, two-handed grip ---- */
   const shR=chestT.clone().addScaledVector(rightC,.185).addScaledVector(fwdC,.01);
-  this.soften('shR',shR,30,dt);
+  this.soften('shR',shR,30,dt); this._K.shR.copy(shR);
   shR.y=chestT.y-.045;
   const shL=chestT.clone().addScaledVector(rightC,-.185).addScaledVector(fwdC,.01);
-  this.soften('shL',shL,30,dt);
+  this.soften('shL',shL,30,dt); this._K.shL.copy(shL);
   shL.y=chestT.y-.045;
   const ctrl=this.swordControl;
   if(this.hasSword){
@@ -1660,6 +1757,7 @@ Fighter.prototype.updateAlive=function(dt,opponent){
     const hintR=rightC.clone().multiplyScalar(.85).addScaledVector(fwdC,-.3); hintR.y=-.55;
     solveIK(shR,handR,D.upperArm,D.foreArm,hintR,elR);
     this.soften('elR',elR,17,dt);
+    this._K.elR.copy(elR); this._K.haR.copy(handR);
     aimLimb(P.upperArmR,shR,elR); aimLimb(P.forearmR,elR,handR);
     this.setBone('uaR',shR,elR);
     P.handR.position.copy(handR);
@@ -1668,6 +1766,7 @@ Fighter.prototype.updateAlive=function(dt,opponent){
       const hintL=rightC.clone().multiplyScalar(-.85).addScaledVector(fwdC,-.3); hintL.y=-.55;
       solveIK(shL,handL,D.upperArm,D.foreArm,hintL,elL);
       this.soften('elL',elL,17,dt);
+      this._K.elL.copy(elL); this._K.haL.copy(handL);
       aimLimb(P.upperArmL,shL,elL); aimLimb(P.forearmL,elL,handL);
       this.setBone('uaL',shL,elL);
       P.handL.position.copy(handL);
@@ -1689,6 +1788,13 @@ Fighter.prototype.updateAlive=function(dt,opponent){
   solveIK(hipR,ankR,D.thigh,D.shin,kneeHint,knR);
   solveIK(hipL,ankL,D.thigh,D.shin,kneeHint,knL);
   this.soften('knR',knR,42,dt); this.soften('knL',knL,42,dt);
+  this._K.hipR.copy(hipR); this._K.hipL.copy(hipL);
+  this._K.knR.copy(knR); this._K.knL.copy(knL);
+  this._K.ankR.copy(ankR); this._K.ankL.copy(ankL);
+  if(PHYS.enabled){
+    if(!this.phys)this.buildPhys(this._K);
+    this.physTargets(this._K);
+  }
   aimLimb(P.thighR,hipR,knR); aimLimb(P.shinR,knR,ankR);
   aimLimb(P.thighL,hipL,knL); aimLimb(P.shinL,knL,ankL);
   this.setBone('thR',hipR,knR); this.setBone('shR',knR,ankR);
@@ -1729,6 +1835,8 @@ Fighter.prototype.hangArm=function(side,sh,right,P){
   const dir=side==='R'?1:-1;
   const el=sh.clone().addScaledVector(right,dir*.06); el.y-=D.upperArm;
   const ha=el.clone(); ha.y-=D.foreArm;
+  (side==='R'?this._K.elR:this._K.elL).copy(el);
+  (side==='R'?this._K.haR:this._K.haL).copy(ha);
   const ua=side==='R'?P.upperArmR:P.upperArmL, fa=side==='R'?P.forearmR:P.forearmL;
   aimLimb(ua,sh,el);
   this.setBone(side==='R'?'uaR':'uaL',sh,el);
@@ -1739,6 +1847,19 @@ Fighter.prototype.hangArm=function(side,sh,right,P){
 /* ============================== INPUT ================================== */
 const input={keys:{},mx:0,my:0,rmb:false,shift:false};
 addEventListener('keydown',e=>{ input.keys[e.code]=true;
+  /* physics dials: [ ] = blend, ; ' = assist strength (live tuning) */
+  if(PHYS.enabled){
+    if(e.code==='BracketLeft'){ PHYS.blend=Math.max(0,PHYS.blend-.1);
+      log('physics blend '+PHYS.blend.toFixed(1),false); }
+    if(e.code==='BracketRight'){ PHYS.blend=Math.min(1,PHYS.blend+.1);
+      log('physics blend '+PHYS.blend.toFixed(1),false); }
+    if(e.code==='Semicolon'&&player&&player.phys){
+      player.phys.A.compliance*=2; enemy.phys.A.compliance*=2;
+      log('balance assist loosened',false); }
+    if(e.code==='Quote'&&player&&player.phys){
+      player.phys.A.compliance*=.5; enemy.phys.A.compliance*=.5;
+      log('balance assist tightened',false); }
+  }
   if(e.code==='ShiftLeft'||e.code==='ShiftRight')input.shift=true;
   if(e.code==='KeyR'&&game.state!=='menu')restart(); });
 addEventListener('keyup',e=>{ input.keys[e.code]=false;
@@ -2311,6 +2432,7 @@ function disposeFighter(f){
   scene.remove(f.root); scene.remove(f.katana); scene.remove(f.trailMesh);
   if(f.skin)scene.remove(f.skin.mesh);
   if(f.glint)scene.remove(f.glint);
+  f.disposePhys&&f.disposePhys();
   for(const k in f.parts)scene.remove(f.parts[k]);
 }
 function restart(){
@@ -2567,6 +2689,7 @@ function frame(now){
     }
   }
 
+  if(PHYS.enabled&&player&&player.phys)PHYS.engine.step(Math.min(dt,.033));
   for(const f of [player,enemy]){
     if(!f)continue;
     /* moon glint when steel rises */

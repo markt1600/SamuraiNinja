@@ -143,6 +143,35 @@ Kill all three: **三人斬り**.
   waist, deltoid swell into the sleeve flare, and a geometric face: eyes,
   brows, nose, mouth.
 
+## v6 — the engine (ZPhys)
+
+`physics.js` is a from-scratch **XPBD articulated rigid-body engine** —
+the same class of method used in modern game physics. Real masses and
+capsule inertia tensors, ball joints as compliant positional constraints,
+**joint motors as compliant angular constraints** (the torque drive),
+positional anchors (dialable balance assist), sphere-ground contacts with
+Coulomb friction. 60Hz × 6 substeps × 3 iterations. Zero dependencies
+beyond THREE math types; ~200 lines.
+
+Each fighter is an articulated body of **10 rigid bodies** (~66kg: pelvis
+11, chest+head 19, thighs 8, shins+feet 5, arms 2.2/1.9) with 9 joints,
+per-bone motors driven toward the kinematic pose, and a pelvis anchor.
+Cuts and parries apply **true impulses** (J·m⁻¹ into velocity, torque
+noise into spin). The physical solution blends into the render through
+the soft layer.
+
+**Live dials:** `[` `]` physics blend (0 = pure animation, 1 = pure
+physics; ships at 0.5) · `;` `'` loosen/tighten the balance assist.
+Crank blend up and loosen assist to watch the body become genuinely
+physical; the current controller is pose-tracking + assist (SIMBICON-
+style stance feedback and motor-cutoff death are the staged next steps).
+
+Engine verification (`node physics_test.js`): free-fall distance vs ½gt²,
+physical-pendulum period vs analytic, joint integrity under whip impulses
+(<2cm), motor tracking of a moving target (<0.001 rad), gravity collapse
+settling at exactly capsule radius. In-game: 10 bodies finite through
+full duels, chest tracking error ~2cm.
+
 ## Headless tests
 
 `node test_harness.js` — jsdom + real three.js math, stubbed GPU/audio.
