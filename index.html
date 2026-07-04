@@ -66,9 +66,13 @@
   #cause{font-size:13.5px;color:var(--dim);margin-top:16px;letter-spacing:.1em;max-width:520px;text-align:center;line-height:1.7}
   #verdict-sub{font-family:'Shippori Mincho',serif;font-size:19px;letter-spacing:.3em;margin-top:16px}
   .warn{margin-top:26px;font-size:10.5px;color:var(--dim);letter-spacing:.14em;text-transform:uppercase}
+  /* cinematic vignette */
+  #vignette{position:fixed;inset:0;pointer-events:none;z-index:4;
+    background:radial-gradient(ellipse at 50% 46%, transparent 52%, rgba(6,8,12,.62) 100%);}
 </style>
 </head>
 <body>
+<div id="vignette"></div>
 
 <div id="hud">
   <div class="blood-col" id="blood-player"><div class="blood-fill" id="bloodfill-player"></div></div>
@@ -99,7 +103,7 @@
 <div class="screen" id="menu">
   <div class="kanji">斬</div>
   <div class="title-sub">Z A N</div>
-  <div class="title-tag">a duel in the snow · one cut decides</div>
+  <div class="title-tag">a duel in the roped ring · one cut decides · nowhere to run</div>
   <div class="rule"></div>
   <div class="controls">
     <b>mouse</b><span>your blade has mass — swing hard to cut, slow taps glance off</span>

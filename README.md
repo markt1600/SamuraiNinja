@@ -1,8 +1,9 @@
 # 斬 ZAN — a duel in the snow
 
-A physics-and-anatomy-first samurai duel. **There is no health bar and no attack
-button.** Your blade is a spring-mass system driven by your mouse; the body is a
-stack of tissue layers at realistic depths. One cut decides.
+A physics-and-anatomy-first samurai duel inside a roped shrine ring. **There is
+no health bar and no attack button.** Your blade is a spring-mass system driven
+by your mouse; the body is a stack of tissue layers at realistic depths. One
+cut decides — and the shimenawa rope means nowhere to run.
 
 ## Deploy to Vercel
 
@@ -50,6 +51,17 @@ for either of you. Pneumothorax drains stamina; a crushed windpipe suffocates;
 pain and stun degrade sword control. Within one swing, flesh drags the blade —
 each successive body part hit in the same pass sees a much slower edge.
 
+**Movement.** Fully procedural articulation: feet actually step and plant
+(no sliding), the pelvis rides between them so weight transfer is visible, and
+the sword's lateral momentum twists hips then chest — cuts are hip-led, the way
+they should be. The head tracks the opponent within the neck's range; hits send
+a flinch spring rippling through the trunk; hakama panels trail the motion;
+crippled legs drag.
+
+**The ring.** A 5 m roped ring (posts, sagging shimenawa, paper shide). Both
+fighters are hard-clamped inside and the AI refuses to be pinned against the
+rope — it fights back toward center.
+
 **Death** switches the skeleton to a Verlet ragdoll with distance constraints,
 arterial spray paced to a rising pulse, and a blood pool that grows with actual
 volume lost into the snow.
@@ -58,5 +70,9 @@ volume lost into the snow.
 
 All constants live at the top of their sections in `game.js`:
 `ANATOMY` (layer depths, bleed rates, bone gates), `BLADE_EFF_MASS`,
-`cutDepth()` (J/cm), `UNCONSCIOUS_AT` / `DEAD_AT`, and the AI's `skill`,
+`cutDepth()` (J/cm), `UNCONSCIOUS_AT` / `DEAD_AT`, the ring radius `RING_R`, and the AI's `skill`,
 reaction time, and attack cadence in `class AI`.
+
+Rendering: ACES filmic tone mapping, sRGB output, warm lantern light against
+cold moonlight, canvas-generated snow/mist/blood textures, curved katana with
+hamon line, additive sword-trail ribbon.
