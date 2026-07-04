@@ -1,78 +1,114 @@
 # 斬 ZAN — a duel in the snow
 
-A physics-and-anatomy-first samurai duel inside a roped shrine ring. **There is
-no health bar and no attack button.** Your blade is a spring-mass system driven
-by your mouse; the body is a stack of tissue layers at realistic depths. One
-cut decides — and the shimenawa rope means nowhere to run.
+A samurai duel where **the simulation is the game**. No health bars, no attack
+button, no hit points. Your mouse *is* the sword: a spring-mass blade with
+mass, momentum and edge alignment, cutting into layered anatomy. One clean
+cut can end it. So can a nick to the wrong artery, ninety seconds later.
 
-## Deploy to Vercel
+Three duelists wait in the roped ring.
 
-This is a static site — two files, zero build step.
+## Deploy
 
-```bash
-cd samurai-duel
-vercel          # or: vercel --prod
+```
+vercel --prod
 ```
 
-Or push the folder to a Git repo and import it in the Vercel dashboard
-(Framework preset: **Other**, no build command, output directory: root).
+Static site: `index.html` + `game.js`. Three.js r128 from cdnjs. No build step.
 
 ## Controls
 
-| Input | Action |
+| input | action |
 |---|---|
-| Mouse | Sword control — the tip has mass and momentum. Swing hard to cut; slow taps glance off. |
-| Hold RMB | Guard — your blade auto-tracks his to intercept |
-| Hold Shift | Thrust posture — the point concentrates force and slips between ribs |
-| W A S D | Footwork (distance is life) |
-| R | Restart |
+| W A S D | footwork |
+| mouse | the sword — swing speed and edge angle decide everything |
+| hold RMB | guard — **raised in the last instant, it becomes a parry** |
+| hold SHIFT | thrust grip (deep, narrow, half the bone toll) |
+| R | next duel / retry |
 
-## The simulation
+## The ladder
 
-**Cut model.** Cut energy = ½ · m_eff · v², where v is the actual blade-tip
-velocity and m_eff ≈ 2 kg (katana + the arms behind it). Energy is degraded by
-edge alignment (*hasuji*) raised to the 1.6 power — a blade that wobbles across
-its own line lands partly flat and delivers blunt trauma instead. Tissue
-resists ~14 J per cm of cut depth. Thrusts multiply penetration ×1.8 and pay
-only half the bone toll (the point slips between ribs).
+1. **猪 KIYOMASA — the Boar.** Comes forward. Big committed cuts, long
+   wind-ups, little patience with a guard.
+2. **鏡 GENNOSUKE — the Mirror.** Rarely initiates. Blocks, parries (50%),
+   and punishes your recovery. Beat him by feinting, not by swinging.
+3. **静 SHIZUKA — First Draw.** Faster than you (1.02×), near-invisible
+   wind-up, long patient distance. One mistake each.
 
-**Anatomy.** Every body zone is a layer stack with real depths:
-skin → carotid at 1.4 cm → windpipe → cervical spine; ribs (160 J gate) →
-lung → heart at 5.5 cm; femoral artery at 2.8 cm in the thigh; grip tendons at
-1 cm in the forearm (severing them makes the sword fall); bones gate deeper
-progress and can be split or, at high energies, cut through — taking the
-forearm with them.
+Kill all three: **三人斬り**.
 
-**Physiology.** 5,000 ml blood volume. Each severed vessel bleeds at its own
-rate (carotid 75 ml/s, femoral 42, brachial 26, lung 14), scaled by remaining
-blood pressure. Consciousness fades below ~62 % volume; death near 48 %. A
-heart strike gives 4.5–8 seconds of consciousness — enough for one last cut,
-for either of you. Pneumothorax drains stamina; a crushed windpipe suffocates;
-pain and stun degrade sword control. Within one swing, flesh drags the blade —
-each successive body part hit in the same pass sees a much slower edge.
+## Fencing model
 
-**Movement.** Fully procedural articulation: feet actually step and plant
-(no sliding), the pelvis rides between them so weight transfer is visible, and
-the sword's lateral momentum twists hips then chest — cuts are hip-led, the way
-they should be. The head tracks the opponent within the neck's range; hits send
-a flinch spring rippling through the trunk; hakama panels trail the motion;
-crippled legs drag.
+- **Telegraphs** — every AI attack begins with a visible rise to jodan
+  (0.2–0.5s by duelist). Read it.
+- **Parry** — a guard raised within **185ms** of the incoming cut turns it
+  aside: the attacker is stunned ~0.6s, blade flung wide, forced to recover.
+  A held guard merely deflects. Blade-vs-blade contact is swept, so full-speed
+  steel can't tunnel through a frame.
+- **Cut mechanics** — kinetic energy of the effective blade mass, degraded by
+  edge misalignment (^1.6), ~14 J/cm through tissue; thrusts penetrate ×1.8
+  with half bone cost.
+- **Anatomy** — carotid, femoral, brachial arteries with distinct bleed
+  rates; grip tendons (drops the sword); skull/rib bone gates; heart, lungs,
+  windpipe. Blood volume 5000ml; unconscious at 62%, dead at 48%. Bleeding
+  slows as pressure falls. Forearms can be severed outright.
+- **Bodies** — procedurally **skinned meshes** (9 world-space bones per
+  fighter, driven by the same IK joints as the physics skeleton): continuous
+  deformation at shoulders, waist, hips, knees; kimono darkens as its owner
+  bleeds. Rigid forearms so severing still works. Verlet ragdoll on death
+  drives the same bones.
 
-**The ring.** A 5 m roped ring (posts, sagging shimenawa, paper shide). Both
-fighters are hard-clamped inside and the AI refuses to be pinned against the
-rope — it fights back toward center.
+## Presentation
 
-**Death** switches the skeleton to a Verlet ragdoll with distance constraints,
-arterial spray paced to a rising pulse, and a blood pool that grows with actual
-volume lost into the snow.
+- **Kill cam** — on the deciding cut: slow time, low orbiting push-in;
+  the survivor holds zanshin over the fallen, flicks blood from the blade
+  (**chiburi**), lowers it. Stillness, then the verdict.
+- **Snow memory** — the ring is a live 1024² canvas: every footstep prints,
+  crippled legs drag furrows, blood soaks in. Fresh snow between duels.
+- **Bloom** — hand-rolled post pipeline (bright-pass → half-res separable
+  gaussian ×2 → additive composite, manual sRGB). Lanterns, moon and sword
+  trail glow. Falls back to direct render on any GPU hiccup.
+- **Sound** — all procedural WebAudio: wind that breathes and holds its
+  breath at the kill, a heartbeat that rises as your blood falls, one taiko
+  hit at first blood, a sub-boom on the deciding cut. Steel rings on parry.
 
-## Tuning
+## Tuning knobs (game.js)
 
-All constants live at the top of their sections in `game.js`:
-`ANATOMY` (layer depths, bleed rates, bone gates), `BLADE_EFF_MASS`,
-`cutDepth()` (J/cm), `UNCONSCIOUS_AT` / `DEAD_AT`, the ring radius `RING_R`, and the AI's `skill`,
-reaction time, and attack cadence in `class AI`.
+- Duelist difficulty: `DUELISTS[n].ai` — skill, reaction, windupT, speedMul,
+  parry probability, attack rates.
+- Parry feel: freshness window `185` ms; interception width `.13`;
+  attacker stun `.6`.
+- Bloom: composite strength `1.15`, threshold `smoothstep(.62,.95)`.
+- Cut lethality: `TISSUE_J_CM`, `BLADE_EFF_MASS`, artery flow rates in `ANATOMY`.
 
-Rendering: ACES filmic tone mapping, sRGB output, warm lantern light against
-cold moonlight, canvas-generated snow/mist/blood textures, curved katana with
-hamon line, additive sword-trail ribbon.
+## Movement model (v4 — toward mocap feel)
+
+- **CoM-led locomotion** — the body is an inverted pendulum: it falls where
+  it's going and a foot reaches out to *catch* it (~0.26s prediction).
+  Stride and cadence scale with speed; acceleration produces anticipation
+  lean before the body moves.
+- **Foot locking** — planted feet are pinned in position **and yaw** (zero
+  slide, harness-asserted at 1e-6). Feet re-aim only in flight; >41° of
+  body turn triggers a repositioning pivot step. Toe-off → flight → heel-
+  first strike → sole settle, as a rotation profile per step. Steps crunch.
+- **Minimum-jerk trajectories** — steps and AI sword wind-ups follow
+  quintic minimum-jerk profiles (Flash–Hogan), the velocity shape of real
+  human point-to-point movement, replacing robotic sine ramps.
+- **Powered-ragdoll overlay** — every major joint (trunk, neck, shoulders,
+  elbows, knees) is a soft particle spring-tracked to its kinematic target;
+  children compute from softened parents so the chain never detaches. Cuts
+  and parries inject velocity: the body physically absorbs and ripples.
+- **Balance + wound gaits** — the CoM is monitored against the support
+  polygon; escapes trigger urgent catch-steps. Leg wounds accumulate
+  per-side damage: shorter stride, slower cadence, lower foot lift, and a
+  pelvis dip whenever weight passes over the hurt leg — a synthesized limp,
+  driven by the anatomy model.
+- **Kamae** — five authored guards (chudan, seigan, jodan, gedan, waki).
+  Kiyomasa waits in jodan, Gennosuke in seigan, Shizuka in waki: you can
+  read each duelist's school from their silhouette.
+
+## Headless tests
+
+`node test_harness.js` — jsdom + real three.js math, stubbed GPU/audio.
+Verifies: wound/bleed/death pipeline, fair-duel integrity, ladder
+progression, parry mechanics (deterministic), kill-cam trigger, skinned-bone
+finiteness, ring containment, restart reset, no NaN anywhere.
