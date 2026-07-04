@@ -233,6 +233,25 @@ full duels, chest tracking error ~2cm.
   prompt, and near-greyscale luminance works best (the game tints them
   per duelist).
 
+## v9 — real models, retargeted live
+
+Two rigged characters ship in `/models/` (from the three.js project, MIT;
+originally Mixamo rigs): **Xbot** (neutral mannequin) and **Soldier**.
+Press **M** in-game to cycle: procedural samurai → samurai.glb (yours) →
+Xbot → Soldier. The retargeter drives any **Mixamo-convention skeleton**
+(`mixamorig:` bones, or bare names) in world space from the same IK +
+physics joints every frame — alive, kneeling, bleeding out, or collapsing
+under motor cutoff. Blood still darkens the model's materials. The katana
+stays ours.
+
+**To get a real samurai:** download any Mixamo-rigged samurai GLB (e.g.
+Sketchfab, filter CC0/CC-BY; or auto-rig any mesh through Mixamo itself),
+drop it at `models/samurai.glb`, press M once. Height auto-scales; bone
+names resolve `mixamorig:X`, `mixamorigX`, or `X`.
+
+The world-space bone math (basis construction + parent-inverse assignment
+through arbitrarily rotated hierarchies) is harness-verified to 0 rad.
+
 ## Headless tests
 
 `node test_harness.js` — jsdom + real three.js math, stubbed GPU/audio.

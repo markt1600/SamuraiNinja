@@ -1509,6 +1509,129 @@ const PHYS=(typeof ZPhys!=='undefined')?{
 }:{enabled:false};
 if(PHYS.enabled){ PHYS.engine.g.set(0,-9.81,0); PHYS.engine.substeps=6; PHYS.engine.iters=3; }
 
+
+/* =========================================================================
+   GLB CHARACTER PIPELINE — load any Mixamo-rigged model (models/samurai.glb
+   if you provide one, bundled Xbot/Soldier otherwise) and retarget it live:
+   our IK + physics joints drive its skeleton in world space every frame.
+   Press M to cycle: procedural samurai → loaded models. Browser only.
+   ========================================================================= */
+const MODELPIPE=(()=>{
+  const _m=new THREE.Matrix4(), _x=V3(), _y=V3(), _z=V3();
+  function boneQuat(from,to,hint,out){
+    _y.subVectors(to,from).normalize();
+    _z.copy(hint).addScaledVector(_y,-hint.dot(_y));
+    if(_z.lengthSq()<1e-6)_z.set(0,0,1).addScaledVector(_y,-_y.z);
+    _z.normalize();
+    _x.crossVectors(_y,_z);
+    _m.makeBasis(_x,_y,_z);
+    return out.setFromRotationMatrix(_m);
+  }
+  if(typeof process!=='undefined'||typeof THREE.GLTFLoader==='undefined')
+    return {enabled:false,cycle(){},drive(){},sources:[],boneQuat};
+  const sources=['models/samurai.glb','models/Xbot.glb','models/Soldier.glb'];
+  const cache={};
+  function load(url,cb){
+    if(cache[url])return cb(cache[url]);
+    if(cache[url]===false)return cb(null);
+    new THREE.GLTFLoader().load(url,g=>{ cache[url]=g; cb(g); },
+      undefined,()=>{ cache[url]=false; cb(null); });
+  }
+  /* bone-name resolution: mixamorig:X, mixamorigX, or bare X */
+  function findBone(root,name){
+    let b=null;
+    root.traverse(o=>{ if(b)return;
+      if(o.isBone&&(o.name==='mixamorig:'+name||o.name==='mixamorig'+name||o.name===name))b=o; });
+    return b;
+  }
+  const CORE=['Hips','Spine','Spine1','Spine2','Neck','Head',
+    'RightShoulder','RightArm','RightForeArm','RightHand',
+    'LeftShoulder','LeftArm','LeftForeArm','LeftHand',
+    'RightUpLeg','RightLeg','RightFoot','LeftUpLeg','LeftLeg','LeftFoot'];
+  const _qw=new THREE.Quaternion(), _qp=new THREE.Quaternion();
+  function attach(f,gltf){
+    if(f.model){ scene.remove(f.model.root); }
+    const root=THREE.SkeletonUtils?THREE.SkeletonUtils.clone(gltf.scene)
+                                  :gltf.scene.clone(true);
+    /* scale to fighter height */
+    const box=new THREE.Box3().setFromObject(root);
+    const h=Math.max(box.max.y-box.min.y,.1);
+    const s=1.72/h;
+    root.scale.setScalar(s);
+    root.traverse(o=>{ if(o.isMesh){ o.castShadow=true; o.frustumCulled=false;
+      if(o.material){ o.material=o.material.clone();
+        o.material._base=o.material.color?o.material.color.clone():null; } } });
+    const bones={};
+    for(const n of CORE)bones[n]=findBone(root,n);
+    if(!bones.Hips){ return null; }
+    scene.add(root);
+    return {root,bones,scale:s,worldQ:{}};
+  }
+  /* drive the rig from joint positions (alive: f._K + head; dead: _dj) */
+  function drive(f,J){
+    const M=f.model; if(!M)return;
+    const fwd=DIRY(f.bodyYaw||0);
+    const setW=(name,q)=>{ const b=M.bones[name]; if(!b)return;
+      const p=b.parent;
+      p.getWorldQuaternion(_qp);
+      b.quaternion.copy(_qp.invert().multiply(q));
+      b.updateMatrixWorld(true);
+    };
+    /* hips: world position + orientation */
+    { const b=M.bones.Hips;
+      boneQuat(J.pelvis,J.chestB,fwd,_qw);
+      b.parent.updateMatrixWorld(true);
+      _x.copy(J.pelvis);
+      b.parent.worldToLocal(_x);
+      b.position.copy(_x);
+      b.parent.getWorldQuaternion(_qp);
+      b.quaternion.copy(_qp.invert().multiply(_qw));
+      b.updateMatrixWorld(true);
+    }
+    /* spine chain: distribute pelvis→chestB→chestT→neck */
+    _x.lerpVectors(J.pelvis,J.chestB,.55);
+    setW('Spine',boneQuat(_x,J.chestB,fwd,_qw));
+    setW('Spine1',boneQuat(J.chestB,_y.lerpVectors(J.chestB,J.chestT,.6).clone(),fwd,_qw));
+    setW('Spine2',boneQuat(_y,J.chestT,fwd,_qw));
+    setW('Neck',boneQuat(J.chestT,J.neckT,fwd,_qw));
+    { const top=J.neckT.clone(); top.y+=.16;
+      setW('Head',boneQuat(J.neckT,top,fwd,_qw)); }
+    /* arms: hint = out+down for natural roll */
+    const right=V3(fwd.z,0,-fwd.x);
+    const hintR=V3().addScaledVector(right,.6).setY(-.6),
+          hintL=V3().addScaledVector(right,-.6).setY(-.6);
+    setW('RightShoulder',boneQuat(J.chestT,J.shR,fwd,_qw));
+    setW('RightArm',boneQuat(J.shR,J.elR,hintR,_qw));
+    setW('RightForeArm',boneQuat(J.elR,J.haR,hintR,_qw));
+    if(f.katana&&f.hasSword){ setW('RightHand',
+      _qw.copy(f.katana.quaternion).multiply(MODELPIPE._handFix)); }
+    setW('LeftShoulder',boneQuat(J.chestT,J.shL,fwd,_qw));
+    setW('LeftArm',boneQuat(J.shL,J.elL,hintL,_qw));
+    setW('LeftForeArm',boneQuat(J.elL,J.haL,hintL,_qw));
+    /* legs: hint = body forward keeps knees forward */
+    setW('RightUpLeg',boneQuat(J.hipR,J.knR,fwd,_qw));
+    setW('RightLeg',boneQuat(J.knR,J.ankR,fwd,_qw));
+    setW('LeftUpLeg',boneQuat(J.hipL,J.knL,fwd,_qw));
+    setW('LeftLeg',boneQuat(J.knL,J.ankL,fwd,_qw));
+    /* feet: flat, using our locked plant yaw */
+    for(const side of ['R','L']){
+      const ft=f.feet[side==='R'?'R':'L'];
+      const a=side==='R'?J.ankR:J.ankL;
+      _x.copy(a).addScaledVector(DIRY(ft.yaw||f.bodyYaw),.16); _x.y=a.y-.05;
+      setW(side==='R'?'RightFoot':'LeftFoot',boneQuat(a,_x,V3(0,1,0),_qw));
+    }
+    /* the cloth remembers the blood */
+    if(f.kimonoMat&&M.root){
+      M.root.traverse(o=>{ if(o.isMesh&&o.material&&o.material._base)
+        o.material.color.copy(o.material._base).lerp(f.bloodTint||o.material._base,
+          clamp((1-(f.bloodFrac||1))*1.4,0,.7)); });
+    }
+  }
+  return {enabled:true,sources,load,attach,drive,boneQuat,
+    _handFix:new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1,0,0),-Math.PI/2),
+    mode:0};
+})();
+
 const _pq=new THREE.Quaternion(), _pv=V3(), _pv2=V3();
 function mkTargetQ(from,to,q){ _pv.subVectors(to,from).normalize();
   return q.setFromUnitVectors(UPV,_pv); }
@@ -1679,6 +1802,22 @@ Fighter.prototype.updateDeadPhys=function(dt){
   }
   /* pools follow the corpse */
   this.pos.set(_dj.pelvis.x,0,_dj.pelvis.z);
+  if(this.model)MODELPIPE.drive(this,_dj);
+};
+Fighter.prototype.setModel=function(gltf){
+  if(!MODELPIPE.enabled)return;
+  if(!gltf){ // back to the procedural samurai
+    if(this.model){ scene.remove(this.model.root); this.model=null; }
+    this.root.visible=true;
+    if(this.skin)this.skin.mesh.visible=true;
+    return;
+  }
+  const m=MODELPIPE.attach(this,gltf);
+  if(!m)return;
+  this.model=m;
+  this.root.visible=false;             // hide procedural body...
+  if(this.skin)this.skin.mesh.visible=false;
+  this.katana.visible=true;            // ...but the steel is always ours
 };
 Fighter.prototype.physJoint=function(k,out){
   const j=this.phys&&this.phys.L[k];
@@ -2043,6 +2182,7 @@ Fighter.prototype.updateAlive=function(dt,opponent){
     if(!this.phys)this.buildPhys(this._K);
     this.physTargets(this._K,dt);
   }
+  if(this.model)MODELPIPE.drive(this,this._K);
   aimLimb(P.thighR,hipR,knR); aimLimb(P.shinR,knR,ankR);
   aimLimb(P.thighL,hipL,knL); aimLimb(P.shinL,knL,ankL);
   this.setBone('thR',hipR,knR); this.setBone('shR',knR,ankR);
@@ -2095,6 +2235,20 @@ Fighter.prototype.hangArm=function(side,sh,right,P){
 /* ============================== INPUT ================================== */
 const input={keys:{},mx:0,my:0,rmb:false,shift:false};
 addEventListener('keydown',e=>{ input.keys[e.code]=true;
+  if(e.code==='KeyM'&&MODELPIPE.enabled&&player){
+    MODELPIPE.mode=(MODELPIPE.mode+1)%(MODELPIPE.sources.length+1);
+    if(MODELPIPE.mode===0){
+      player.setModel(null); enemy.setModel(null);
+      log('procedural samurai',false);
+    } else {
+      const url=MODELPIPE.sources[MODELPIPE.mode-1];
+      MODELPIPE.load(url,g=>{
+        if(!g){ log('no model at '+url,false); return; }
+        player.setModel(g); enemy.setModel(g);
+        log('model: '+url.split('/').pop(),false);
+      });
+    }
+  }
   /* physics dials: [ ] = blend, ; ' = assist strength (live tuning) */
   if(PHYS.enabled){
     if(e.code==='BracketLeft'){ PHYS.blend=Math.max(0,PHYS.blend-.1);
@@ -2804,6 +2958,7 @@ function disposeFighter(f){
   if(f.skin)scene.remove(f.skin.mesh);
   if(f.glint)scene.remove(f.glint);
   f.disposePhys&&f.disposePhys();
+  if(f.model){ scene.remove(f.model.root); f.model=null; }
   for(const k in f.parts)scene.remove(f.parts[k]);
 }
 function restart(){
@@ -2813,6 +2968,10 @@ function restart(){
   document.body.classList.remove('cine');
   document.getElementById('verdict').classList.add('hidden');
   setTimeout(grabPointer,60);
+  if(MODELPIPE.enabled&&MODELPIPE.mode>0){
+    MODELPIPE.load(MODELPIPE.sources[MODELPIPE.mode-1],g=>{
+      if(g){ player.setModel(g); enemy.setModel(g); } });
+  }
   setup(); game.state='fight'; game.timeScale=1; game.duelTime=0;
 }
 function endDuel(){
