@@ -229,6 +229,33 @@ const scene=new THREE.Scene();
 scene.background=SRGB(0x0c0f14);
 /* no fog: the night is clear and deep */
 
+/* IBL: prefilter a lighting-only scene (sky, snowfield, moon) into an
+   environment map — every standard material then receives soft light
+   from the world itself instead of floating in black. */
+(function buildIBL(){
+  try{
+    const env=new THREE.Scene();
+    const skyG=canTex(64,256,(x,w,h)=>{
+      const g=x.createLinearGradient(0,0,0,h);
+      g.addColorStop(0,'#0a1020'); g.addColorStop(.55,'#141f33');
+      g.addColorStop(.8,'#3a4a5e'); g.addColorStop(1,'#93a2b4');
+      x.fillStyle=g; x.fillRect(0,0,w,h); });
+    if(!skyG)return;
+    env.add(new THREE.Mesh(new THREE.SphereGeometry(50,16,12),
+      new THREE.MeshBasicMaterial({map:skyG,side:THREE.BackSide})));
+    const ground=new THREE.Mesh(new THREE.CircleGeometry(50,24),
+      new THREE.MeshBasicMaterial({color:0x8b96a4}));
+    ground.rotation.x=-Math.PI/2; ground.position.y=-2; env.add(ground);
+    const moonB=new THREE.Mesh(new THREE.SphereGeometry(3,12,10),
+      new THREE.MeshBasicMaterial({color:0xeaf1ff}));
+    moonB.position.set(-18,26,14); env.add(moonB);
+    const pm=new THREE.PMREMGenerator(renderer);
+    const rt=pm.fromScene(env,.04);
+    scene.environment=rt.texture;
+    pm.dispose();
+  }catch(e){}
+})();
+
 const camera=new THREE.PerspectiveCamera(45,innerWidth/innerHeight,.1,140);
 camera.position.set(0,2.1,6.4);
 
@@ -240,8 +267,10 @@ const POST=(()=>{
     const mkRT=(w,h)=>new THREE.WebGLRenderTarget(w,h,{
       minFilter:THREE.LinearFilter,magFilter:THREE.LinearFilter,
       format:THREE.RGBAFormat,depthBuffer:true,stencilBuffer:false});
+    const SS=1.4;                       // supersample: the honest anti-alias
     let W=innerWidth,H=innerHeight;
-    const rtScene=mkRT(W,H), rtA=mkRT(W>>1,H>>1), rtB=mkRT(W>>1,H>>1);
+    const rtScene=mkRT(Math.round(W*SS),Math.round(H*SS)),
+          rtA=mkRT(W>>1,H>>1), rtB=mkRT(W>>1,H>>1);
     rtA.depthBuffer=rtB.depthBuffer=false;
     const quadGeo=new THREE.PlaneGeometry(2,2);
     const VS='varying vec2 vUv; void main(){ vUv=uv; gl_Position=vec4(position.xy,0.,1.); }';
@@ -266,17 +295,28 @@ const POST=(()=>{
     const blurV=mat(blurFS,{tex:{value:rtB.texture},dir:{value:new THREE.Vector2(0,1/(H>>1))}});
     const comp=mat(
       'uniform sampler2D scene; uniform sampler2D bloom; varying vec2 vUv;'+
-      'uniform float uDesat; uniform float uVig; uniform float uAdren;'+
-      'void main(){ vec3 c=texture2D(scene,vUv).rgb+texture2D(bloom,vUv).rgb*1.15;'+
+      'uniform float uDesat; uniform float uVig; uniform float uAdren; uniform float uTime;'+
+      'void main(){'+
+      ' vec2 cc=vUv-.5; float rr=dot(cc,cc);'+
+      ' vec2 ca=cc*rr*.028;'+                                 // chromatic fringe
+      ' vec3 c; c.r=texture2D(scene,vUv+ca).r;'+
+      ' c.g=texture2D(scene,vUv).g;'+
+      ' c.b=texture2D(scene,vUv-ca).b;'+
+      ' c+=texture2D(bloom,vUv).rgb*1.15;'+
       ' float l=dot(c,vec3(.2126,.7152,.0722));'+
       ' c=mix(c,vec3(l),uDesat);'+                              // life drains the colour
       ' c=mix(c,c*vec3(1.06,1.0,.94)*1.05,uAdren);'+            // adrenaline warmth
       ' float d=distance(vUv,vec2(.5));'+
       ' c*=1.-smoothstep(.62-uVig*.42,.98-uVig*.3,d)*(.55+uVig*.45);'+ // the world closes in
+      ' c=(c-.5)*1.07+.5+.006;'+                             // grade: contrast lift
+      ' float l2=dot(c,vec3(.2126,.7152,.0722));'+
+      ' c=mix(vec3(l2),c,1.12);'+                              // saturation
+      ' float gr=fract(sin(dot(vUv*vec2(917.,761.)+uTime,vec2(12.9898,78.233)))*43758.5);'+
+      ' c+=(gr-.5)*.028;'+                                     // film grain
       ' c=pow(clamp(c,0.,1.),vec3(1./2.2));'+
       ' gl_FragColor=vec4(c,1.);}',
       {scene:{value:rtScene.texture},bloom:{value:rtA.texture},
-       uDesat:{value:0},uVig:{value:0},uAdren:{value:0}});
+       uDesat:{value:0},uVig:{value:0},uAdren:{value:0},uTime:{value:0}});
     const quadScene=new THREE.Scene();
     const quad=new THREE.Mesh(quadGeo,bright); quad.frustumCulled=false;
     quadScene.add(quad);
@@ -295,7 +335,8 @@ const POST=(()=>{
         comp.uniforms.bloom.value=rtA.texture;
         renderer.setRenderTarget(null); pass(comp,null);
       },
-      resize(w,h){ W=w;H=h; rtScene.setSize(w,h); rtA.setSize(w>>1,h>>1); rtB.setSize(w>>1,h>>1);
+      resize(w,h){ W=w;H=h; rtScene.setSize(Math.round(w*SS),Math.round(h*SS));
+        rtA.setSize(w>>1,h>>1); rtB.setSize(w>>1,h>>1);
         blurH.uniforms.dir.value.set(1/(w>>1),0); blurV.uniforms.dir.value.set(0,1/(h>>1)); },
     };
   }catch(e){ return null; }
@@ -2829,6 +2870,34 @@ function updateFlares(dt){
     s.scale.setScalar(s.scale.x+dt*u.grow*.1);
   }
 }
+/* contact shadows: soft dark blobs under feet and body — grounding
+   that a single directional shadow can't provide */
+const blobTex=canTex(64,64,(x,w,h)=>{
+  const g=x.createRadialGradient(32,32,2,32,32,30);
+  g.addColorStop(0,'rgba(8,10,16,.55)'); g.addColorStop(.6,'rgba(8,10,16,.28)');
+  g.addColorStop(1,'rgba(8,10,16,0)');
+  x.fillStyle=g; x.fillRect(0,0,w,h);
+});
+function mkBlobs(f){
+  f.blobs=[];
+  for(let i=0;i<3;i++){
+    const m=new THREE.Mesh(new THREE.PlaneGeometry(1,1),
+      new THREE.MeshBasicMaterial({map:blobTex||null,transparent:true,
+        depthWrite:false,opacity:1}));
+    m.rotation.x=-Math.PI/2; m.renderOrder=2;
+    scene.add(m); f.blobs.push(m);
+  }
+}
+function updateBlobs(f){
+  if(!f.blobs)mkBlobs(f);
+  const set=(m,x,z,y,s,o)=>{ m.position.set(x,.006,z);
+    m.scale.setScalar(s*(1+y*1.6)); m.material.opacity=o/(1+y*3); };
+  const fr=f.feet.R,fl=f.feet.L;
+  set(f.blobs[0],fr.p.x,fr.p.z,fr.lift||0,.34,.85);
+  set(f.blobs[1],fl.p.x,fl.p.z,fl.lift||0,.34,.85);
+  const py=f.physDead&&f.phys?f.phys.B.pelvis.pos.y:.9;
+  set(f.blobs[2],f.pos.x,f.pos.z,0,f.physDead?1.5:.62,f.physDead?.5:.3);
+}
 const puffs=[];
 function breathe(f,foe){
   const m=new THREE.SpriteMaterial({map:puffTex||null,transparent:true,
@@ -3144,6 +3213,7 @@ function disposeFighter(f){
   scene.remove(f.root); scene.remove(f.katana); scene.remove(f.trailMesh);
   if(f.skin)scene.remove(f.skin.mesh);
   if(f.glint)scene.remove(f.glint);
+  if(f.blobs)for(const b of f.blobs)scene.remove(b);
   f.disposePhys&&f.disposePhys();
   if(f.model){ scene.remove(f.model.root); f.model=null; }
   for(const k in f.parts)scene.remove(f.parts[k]);
@@ -3429,6 +3499,7 @@ function frame(now){
       }
     }
   }
+  if(player){ updateBlobs(player); updateBlobs(enemy); }
   updatePuffs(dt); updateFlares(dt);
   if(groundMark)groundMark.flush();
   /* dying from the inside: sight narrows, colour drains, sound sinks,
@@ -3437,6 +3508,7 @@ function frame(now){
     const bf=clamp(player.bloodFrac,0,1), cs=clamp(player.consciousness/100,0,1);
     const fade=clamp((0.86-bf)*2.4,0,1)*(player.dead?1.4:1);
     const U=POST.comp.uniforms;
+    U.uTime.value=(performance.now()%1000)*.001;
     U.uDesat.value=lerp(U.uDesat.value,clamp(fade*.75+(1-cs)*.4,0,.92),dt*2);
     U.uVig.value=lerp(U.uVig.value,clamp(fade*.8+(1-cs)*.5,0,1),dt*2);
     game.adrenaline=Math.max(0,(game.adrenaline||0)-dt);

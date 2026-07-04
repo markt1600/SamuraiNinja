@@ -306,6 +306,29 @@ the physics sword all operate on the new geometry.
 - **Fighting-game physique** — broader chest and shoulder yoke, bigger
   deltoids, fuller sleeves, thicker forearms.
 
+## v13 — the light itself
+
+- **Image-based lighting** — a lighting-only scene (gradient night sky,
+  bright snowfield, moon) is prefiltered through PMREM into
+  `scene.environment`: every material now receives soft light from the
+  world itself instead of floating over black. This is the single
+  largest perceived-quality lever available without external assets.
+- **Produced post stack** — the scene renders at **1.4× supersampling**
+  (honest anti-aliasing through the whole pipeline), then grades through
+  film grain, subtle radial chromatic aberration, a contrast lift and
+  +12% saturation before the sRGB out.
+- **Contact shadows** — soft blob shadows under each foot and the body
+  (spreading and fading with lift height; wide and faint under a
+  corpse) ground the fighters against the snow in a way a single
+  directional shadow map cannot.
+
+**The honest ceiling, and the door through it:** primitive-assembled
+characters cap out below "quality game" no matter the shading. The GLB
+slot is the door — any Mixamo-rigged samurai dropped at
+`models/samurai.glb` (Sketchfab CC0/CC-BY, ~5 minutes) is driven by the
+full IK + physics + connectivity system and inherits the IBL, outlines,
+rim and grade above. That single file is the remaining distance.
+
 ## Headless tests
 
 `node test_harness.js` — jsdom + real three.js math, stubbed GPU/audio.
