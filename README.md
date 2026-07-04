@@ -252,6 +252,27 @@ names resolve `mixamorig:X`, `mixamorigX`, or `X`.
 The world-space bone math (basis construction + parent-inverse assignment
 through arbitrarily rotated hierarchies) is harness-verified to 0 rad.
 
+## v10 — the sword is held, not pointed
+
+The old grip placed the katana on the shoulder→tip ray: blade always
+collinear with the arm, zero wrist angle, ever — the root of "doesn't
+look handheld." Rebuilt as real kenjutsu mechanics:
+
+- **Compressed-arc grip** — both hands travel a small arc anchored at the
+  solar plexus while the tip travels the full one; the difference *is*
+  the wrist. Raise overhead and the blade cocks back (furikaburi); cut
+  through and the tip snaps far ahead of the hands.
+- **Correct katana grip** — right hand at the tsuba, left at the pommel
+  (the old code had the left hand ON THE BLADE, above the right).
+- **Hasuji (edge line)** — the blade rolls its edge into the direction of
+  travel during cuts (fast smoothing), and settles edge-forward-down at
+  rest, instead of arbitrary roll.
+- **Living elbows** — IK hints morph with hand height: tucked down-and-in
+  at guard, flaring out-and-up through the raise, as arms actually do.
+
+All combat numbers unchanged and re-verified: kills, parries, binds, and
+the physics sword all operate on the new geometry.
+
 ## Headless tests
 
 `node test_harness.js` — jsdom + real three.js math, stubbed GPU/audio.

@@ -2119,9 +2119,24 @@ Fighter.prototype.updateAlive=function(dt,opponent){
     if(this.bladeSpeed>6.5 && performance.now()-this.lastWhoosh>260){
       Sound.whoosh(this.bladeSpeed); this.lastWhoosh=performance.now(); }
 
-    const gripDir=TMP1.subVectors(this.tip,shR).normalize();
-    const handle=shR.clone().addScaledVector(gripDir,clamp(shR.distanceTo(this.tip)-.87,.25,.52));
-    const bladeDir=TMP2.subVectors(this.tip,handle).normalize();
+    /* TWO-HANDED GRIP: the hands sweep a compressed arc anchored at the
+       solar plexus; the WRISTS articulate the blade through the full arc.
+       Raise the tip overhead and the blade cocks back (furikaburi);
+       cut through and the tip snaps far ahead of the hands. The blade
+       is no longer collinear with the arm — it is HELD, not pointed. */
+    const gripAnchor=chestB.clone().addScaledVector(fwdC,.14);
+    gripAnchor.y=chestB.y+.12;
+    const toTip=TMP1.subVectors(this.tip,gripAnchor);
+    const reach=Math.max(toTip.length(),.001); toTip.divideScalar(reach);
+    TMP3.copy(fwdC).setY(-.18).normalize();          // neutral guard direction
+    const handDir=TMP2.copy(toTip).lerp(TMP3,.5).normalize();
+    const gripR=clamp(.28+reach*.10,.30,.48);
+    const handle=gripAnchor.clone().addScaledVector(handDir,gripR);
+    const headY=chestT.y+.28;                        // hands rise less than steel
+    if(this.tip.y>headY)handle.y+=Math.min((this.tip.y-headY)*.30,.14);
+    const bladeDir=TMP2.subVectors(this.tip,handle);
+    if(bladeDir.lengthSq()<.04)bladeDir.copy(toTip); // degenerate guard
+    bladeDir.normalize();
     /* the physical sword's momentum bends the rendered blade's line */
     if(PHYS.enabled&&this.phys&&this.phys.B.sword){
       const sw=this.phys.B.sword;
@@ -2131,6 +2146,20 @@ Fighter.prototype.updateAlive=function(dt,opponent){
     }
     this.katana.position.copy(handle);
     this.katana.quaternion.setFromUnitVectors(UPY,bladeDir);
+    { /* hasuji: the edge leads the cut; at rest it settles forward-down */
+      TMP3.copy(this.tipVel).addScaledVector(bladeDir,-this.tipVel.dot(bladeDir));
+      const sp=TMP3.length();
+      if(sp>1.4)TMP3.divideScalar(sp);
+      else TMP3.copy(fwdC).multiplyScalar(.5).setY(-.85).normalize();
+      _pv.set(1,0,0).applyQuaternion(this.katana.quaternion);   // current edge
+      const cx=_pv.dot(TMP3);
+      _pv2.crossVectors(_pv,TMP3);
+      const want=Math.atan2(_pv2.dot(bladeDir),cx);
+      if(this.katRoll===undefined)this.katRoll=want;
+      this.katRoll+=angDiff(want,this.katRoll)*clamp(dt*(sp>1.4?14:5),0,1);
+      _pq.setFromAxisAngle(UPY,this.katRoll);
+      this.katana.quaternion.multiply(_pq);
+    }
     /* keep previous segment for swept collision */
     if(this.bladeA){ this.prevBladeA.copy(this.bladeA); this.prevBladeB.copy(this.bladeB); this.hadPrev=true; }
     else this.hadPrev=false;
@@ -2139,9 +2168,12 @@ Fighter.prototype.updateAlive=function(dt,opponent){
 
     /* arms: two-bone IK with anatomical elbow hints */
     const elR=V3(),elL=V3();
-    const handR=handle.clone().addScaledVector(bladeDir,-.02);
-    const handL=handle.clone().addScaledVector(bladeDir,.10);
-    const hintR=rightC.clone().multiplyScalar(.85).addScaledVector(fwdC,-.3); hintR.y=-.55;
+    const handR=handle.clone().addScaledVector(bladeDir,-.02);   // at the tsuba
+    const handL=handle.clone().addScaledVector(bladeDir,-.15);   // at the pommel
+    /* the elbows: down and in at guard, out and up through the raise */
+    const rise=clamp((handle.y-shR.y+.18)*2.6,0,1);
+    const hintR=rightC.clone().multiplyScalar(lerp(.85,1.2,rise))
+      .addScaledVector(fwdC,lerp(-.3,.15,rise)); hintR.y=lerp(-.55,.5,rise);
     solveIK(shR,handR,D.upperArm,D.foreArm,hintR,elR);
     this.soften('elR',elR,34,dt);
     this._K.elR.copy(elR); this._K.haR.copy(handR);
@@ -2150,7 +2182,8 @@ Fighter.prototype.updateAlive=function(dt,opponent){
     P.handR.position.copy(handR);
     P.handR.quaternion.copy(this.katana.quaternion);
     if(!this.disabled.armL&&!this.severed.armL){
-      const hintL=rightC.clone().multiplyScalar(-.85).addScaledVector(fwdC,-.3); hintL.y=-.55;
+      const hintL=rightC.clone().multiplyScalar(lerp(-.85,-1.2,rise))
+        .addScaledVector(fwdC,lerp(-.3,.15,rise)); hintL.y=lerp(-.55,.5,rise);
       solveIK(shL,handL,D.upperArm,D.foreArm,hintL,elL);
       this.soften('elL',elL,34,dt);
       this._K.elL.copy(elL); this._K.haL.copy(handL);
@@ -2543,10 +2576,7 @@ function bladeVsBlade(a,b){
     if(rel<2.4&&a.hasSword&&b.hasSword&&a.alive&&b.alive&&!game.bind){
       game._bindTouch=true; game._bindPt=(game._bindPt||V3()).copy(hitTmpA);
     }
-    if(rel<1.5)return;
-    const hard=rel>7;
-    Sound.clang(hard);
-    sparks(hitTmpA,Math.floor(clamp(rel,3,12)));
+
     /* PARRY: a fresh guard against a committed cut turns it aside hard
        and opens the attacker for a beat */
     const now=performance.now();
@@ -2570,6 +2600,10 @@ function bladeVsBlade(a,b){
       return true;
     };
     if(tryParry(a,b)||tryParry(b,a))return;
+    if(rel<1.5)return;                     // resting contact: no clang, no deflect
+    const hard=rel>7;
+    Sound.clang(hard);
+    sparks(hitTmpA,Math.floor(clamp(rel,3,12)));
     /* the faster blade is deflected by the steadier one; guards deflect harder */
     const deflect=(f,other,factor)=>{
       TMP2.subVectors(f.tip,hitTmpA).normalize();
