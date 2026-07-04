@@ -1035,7 +1035,7 @@ function aimLimb(g,from,to){
 
 class Fighter{
   constructor(name,palette,x,facing,isPlayer){
-    this.name=name; this.isPlayer=isPlayer;
+    this.name=name; this.isPlayer=isPlayer; this.palette=palette;
     this.pos=V3(x,0,0); this.vel=V3();
     this.facing=facing;
     this.dead=false; this.downed=false; this.deathCause=null;
@@ -1431,9 +1431,10 @@ class Fighter{
       ang:V3(rand(-6,6),rand(-6,6),rand(-6,6))});
     if(limb==='armR')this.dropSword(log);
     /* the burst, and the stump keeps pumping */
-    emitBlood(hitPoint,V3(0,1,0),4.5,44);
-    emitBlood(hitPoint,hitDir,3,18);
-    this.stumpBleed=2.2;                                      // seconds of pump
+    emitBlood(hitPoint,V3(0,1,0),5.5,66);
+    emitBlood(hitPoint,hitDir,4,30);
+    addSquirt(this,limb==='armR'?'upperArmR':'upperArmL',hitPoint,4,2.4);
+    this.stumpBleed=3.2;                                      // seconds of pump
   }
 
   /* mobility multiplier from legs + blood + stamina */
@@ -1576,15 +1577,23 @@ const MODELPIPE=(()=>{
   if(typeof process!=='undefined'||typeof THREE.GLTFLoader==='undefined')
     return {enabled:false,cycle(){},drive(){},sources:[],boneQuat,
       playClip:()=>false,tickClips:()=>false,playPuppet:()=>false,
-      tickPuppet:()=>false,clips:{}};
-  const sources=['models/samurai.glb','models/samurai.fbx',
-    'models/samurai2.glb','models/samurai2.fbx','models/samurai3.glb',
-    'models/fighter.glb','models/fighter.fbx',
+      tickPuppet:()=>false,clips:{},roster:[],pick:{P:0,E:0},
+      current:{P:null,E:null},applyPick(){}};
+  const sources=['models/samurai.fbx','models/samurai.glb',
+    'models/Old Man.fbx','models/Zombiegirl W Kurniawan.fbx',
+    'models/samurai2.glb','models/fighter.glb',
     'models/Xbot.glb','models/Soldier.glb'];
+  /* the roster: entry 0 is always the classic procedural samurai */
+  const roster=[{label:'武 MUSASHI — classic',src:null}];
+  for(const s of sources)roster.push({
+    label:s.split('/').pop().replace(/\.(glb|fbx)$/i,'').toUpperCase(),src:s});
   /* models/index.json (["file.glb",...]) prepends to the cycle */
   try{ fetch('models/index.json').then(r=>r.ok?r.json():null).then(list=>{
-    if(Array.isArray(list))
-      for(const f of list.reverse())sources.unshift('models/'+String(f).replace(/^models\//,''));
+    if(Array.isArray(list))for(const f of list){
+      const src='models/'+String(f).replace(/^models\//,'');
+      if(!roster.find(r=>r.src===src))
+        roster.push({label:src.split('/').pop().replace(/\.(glb|fbx)$/i,'').toUpperCase(),src});
+    }
   }).catch(()=>{}); }catch(e){}
   const cache={};
   function load(url,cb){
@@ -1592,11 +1601,12 @@ const MODELPIPE=(()=>{
     if(cache[url]===false)return cb(null);
     const done=g=>{ cache[url]=g; cb(g); };
     const fail=()=>{ cache[url]=false; cb(null); };
+    if(/^drop:/.test(url))return cb(cache[url]||null);
     if(/\.fbx$/i.test(url)){
       if(typeof THREE.FBXLoader==='undefined')return fail();
-      new THREE.FBXLoader().load(url,obj=>done({scene:obj}),undefined,fail);
+      new THREE.FBXLoader().load(encodeURI(url),obj=>done({scene:obj}),undefined,fail);
     } else {
-      new THREE.GLTFLoader().load(url,done,undefined,fail);
+      new THREE.GLTFLoader().load(encodeURI(url),done,undefined,fail);
     }
   }
   /* bone-name resolution: mixamorig:X, mixamorigX, or bare X */
@@ -1732,11 +1742,17 @@ const MODELPIPE=(()=>{
     if(!f||!/\.(glb|fbx)$/i.test(f.name))return;
     const isFbx=/\.fbx$/i.test(f.name);
     const rd=new FileReader();
-    const use=g=>{ cache['drop:'+f.name]=g; MODELPIPE.current=g;
+    const use=g=>{ cache['drop:'+f.name]=g;
+      roster.push({label:f.name.replace(/\.(glb|fbx)$/i,'').toUpperCase(),
+        src:'drop:'+f.name});
+      pick.P=roster.length-1; current.P=g;
       if(typeof player!=='undefined'&&player){
-        player.setModel(g); enemy.setModel(g);
-        if(player.model)log('dropped: '+f.name+' — retargeted, fighting',false);
-      } };
+        player.setModel(g);
+        if(player.model)log('dropped: '+f.name+' — you fight as this now',false);
+      }
+      const nameEl=document.getElementById('selP-name');
+      if(nameEl)nameEl.textContent=roster[pick.P].label;
+    };
     rd.onload=()=>{
       try{
         if(isFbx){
@@ -1866,8 +1882,36 @@ const MODELPIPE=(()=>{
     }
     return true;
   }
+  const pick={P:0,E:0}, current={P:null,E:null};
+  function applyPick(slot){
+    const f=slot==='P'?(typeof player!=='undefined'&&player):
+                       (typeof enemy!=='undefined'&&enemy);
+    const entry=roster[pick[slot]];
+    const nameEl=document.getElementById('sel'+slot+'-name');
+    if(nameEl)nameEl.textContent=entry.label;
+    if(!entry.src){ current[slot]=null; if(f)f.setModel(null); return; }
+    if(nameEl)nameEl.textContent=entry.label+' …';
+    load(entry.src,g=>{
+      if(!g){ if(nameEl)nameEl.textContent=entry.label+' (missing)'; return; }
+      if(nameEl)nameEl.textContent=entry.label;
+      current[slot]=g;
+      const ff=slot==='P'?player:enemy;
+      if(ff&&roster[pick[slot]]===entry)ff.setModel(g);
+    });
+  }
+  function cycle(slot,dir){
+    pick[slot]=(pick[slot]+dir+roster.length)%roster.length;
+    applyPick(slot);
+  }
+  setTimeout(()=>{
+    for(const [id,slot,dir] of [['selP-prev','P',-1],['selP-next','P',1],
+                                ['selE-prev','E',-1],['selE-next','E',1]]){
+      const el=document.getElementById(id);
+      if(el)el.addEventListener('click',e=>{ e.stopPropagation(); cycle(slot,dir); });
+    }
+  },0);
   return {enabled:true,sources,load,attach,drive,boneQuat,playClip,tickClips,clips,
-    playPuppet,tickPuppet,
+    playPuppet,tickPuppet,roster,pick,current,applyPick,cycle,
     _handFix:new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1,0,0),-Math.PI/2),
     mode:0};
 })();
@@ -2584,20 +2628,12 @@ addEventListener('keydown',e=>{ input.keys[e.code]=true;
     for(const o of OUTLINE.meshes)o.visible=OUTLINE.on;
     log('outlines '+(OUTLINE.on?'on':'off'),false); }
   if(e.code==='KeyM'&&MODELPIPE.enabled&&player){
-    MODELPIPE.mode=(MODELPIPE.mode+1)%(MODELPIPE.sources.length+1);
-    if(MODELPIPE.mode===0){
-      MODELPIPE.current=null;
-      player.setModel(null); enemy.setModel(null);
-      log('procedural samurai',false);
-    } else {
-      const url=MODELPIPE.sources[MODELPIPE.mode-1];
-      MODELPIPE.load(url,g=>{
-        if(!g){ log('no file at '+url+' — skipping',false); return; }
-        MODELPIPE.current=g;
-        player.setModel(g); enemy.setModel(g);
-        if(player.model)log('model: '+url.split('/').pop()+' — retargeted, fighting',false);
-      });
-    }
+    MODELPIPE.cycle('P',1);
+    log('your fighter: '+MODELPIPE.roster[MODELPIPE.pick.P].label,false);
+  }
+  if(e.code==='KeyN'&&MODELPIPE.enabled&&enemy){
+    MODELPIPE.cycle('E',1);
+    log('the opponent: '+MODELPIPE.roster[MODELPIPE.pick.E].label,false);
   }
   /* physics dials: [ ] = blend, ; ' = assist strength (live tuning) */
   if(PHYS.enabled){
@@ -2976,6 +3012,16 @@ function updateLoose(f,dt){
       addStain(p.mesh.position.x,p.mesh.position.z,.2);
       addStain(p.mesh.position.x+rand(-.1,.1),p.mesh.position.z+rand(-.1,.1),.1); }
   }
+  /* torn cloth breathes and swings */
+  if(f._flaps&&f._flaps.length){
+    const t=performance.now()*.003,
+          sway=1+Math.hypot(f.vel.x,f.vel.z)*1.5;
+    for(const fl of f._flaps){
+      const u=fl.userData;
+      fl.rotation.x=u.base-.5-Math.abs(Math.sin(t*2+u.ph))*u.amp*sway;
+      fl.rotation.z=Math.sin(t*2.7+u.ph)*.2*sway;
+    }
+  }
   /* the gutted keep losing what should stay in */
   if(f.gutsOut&&f.alive&&(f._gutDrip=(f._gutDrip||0)-dt)<0&&
      Math.hypot(f.vel.x,f.vel.z)>.6){
@@ -3323,9 +3369,79 @@ Fighter.prototype.eviscerate=function(worldPt,dir){
     emitBlood(worldPt,dir,3,22);
   }catch(e){}
 };
+/* torn-cloth edge: jagged alpha */
+const tearTex=canTex(64,64,(x,w,h)=>{
+  x.clearRect(0,0,w,h);
+  x.fillStyle='#fff';
+  x.beginPath(); x.moveTo(0,0); x.lineTo(w,0);
+  let px=w;
+  for(let i=0;i<=8;i++){ px=w-i*(w/8);
+    x.lineTo(px,h*(.55+Math.random()*.45)); }
+  x.closePath(); x.fill();
+});
+const CLOTHED=/chest|abdomen|upperArm|thigh|pelvis/;
+Fighter.prototype.addOpenWound=function(partKey,worldPt,severity){
+  this._openW=(this._openW||0);
+  if(this._openW>=14)return;
+  const part=this.parts[partKey]; if(!part)return;
+  this._openW++;
+  try{
+    const g=new THREE.Group();
+    const deep=severity!=='severe'?true:Math.random()<.5;
+    const clothed=CLOTHED.test(partKey);
+    /* torn cloth rim, in this fighter's own cloth color */
+    if(clothed&&this.palette){
+      const rim=jaggedCap(.052);
+      rim.traverse(o=>{ if(o.isMesh&&o.material){
+        o.material=stdMat(partKey==='chest'||/upperArm/.test(partKey)?
+          this.palette.kimono:this.palette.hakama,{roughness:.92,
+          side:THREE.DoubleSide}); } });
+      rim.scale.z=.4; g.add(rim);
+    }
+    /* the flesh beneath */
+    const meat=new THREE.Mesh(new THREE.SphereGeometry(.034,9,7),
+      stdMat(0x6e1414,{roughness:.3}));
+    meat.scale.set(1.2,.8,.45); g.add(meat);
+    const meat2=new THREE.Mesh(new THREE.SphereGeometry(.02,8,6),
+      stdMat(0x9c2820,{roughness:.2}));
+    meat2.scale.set(1.1,.7,.5); meat2.position.z=.008; g.add(meat2);
+    /* the bone, for the deep ones */
+    if(deep){
+      const bone=new THREE.Mesh(new THREE.CylinderGeometry(.007,.007,.05,6),
+        stdMat(0xe0d8c4,{roughness:.45}));
+      bone.rotation.z=Math.PI/2+rand(-.4,.4); bone.position.z=.012;
+      g.add(bone);
+    }
+    /* cloth flaps that hang and sway at the tear */
+    if(clothed&&this.palette){
+      this._flaps=this._flaps||[];
+      for(let i=0;i<2;i++){
+        const flap=new THREE.Mesh(new THREE.PlaneGeometry(.055,.09),
+          new THREE.MeshStandardMaterial({
+            color:partKey==='chest'?this.palette.kimono:this.palette.hakama,
+            roughness:.92,side:THREE.DoubleSide,
+            alphaMap:tearTex||null,transparent:!!tearTex,
+            alphaTest:tearTex?.4:0}));
+        flap.geometry.translate(0,-.045,0);      // hinge at the top edge
+        flap.position.set((i?1:-1)*.03,.03,.006);
+        flap.userData={ph:Math.random()*6.28,amp:.35+Math.random()*.4,
+          base:rand(-.3,.3)};
+        g.add(flap);
+        this._flaps.push(flap);
+      }
+    }
+    part.updateMatrixWorld(true);
+    g.position.copy(part.worldToLocal(worldPt.clone())).multiplyScalar(1.04);
+    g.lookAt(g.position.clone().multiplyScalar(3));
+    g.traverse(o=>{ if(o.isMesh){ o.renderOrder=3;
+      if(o.material){ o.material.polygonOffset=true;
+        o.material.polygonOffsetFactor=-4; } } });
+    part.add(g);
+  }catch(e){}
+};
 Fighter.prototype.addGash=function(partKey,worldPt,dir){
   this._gashes=this._gashes||0;
-  if(this._gashes>=12||!gashTex)return;
+  if(this._gashes>=20||!gashTex)return;
   const part=this.parts[partKey]; if(!part)return;
   this._gashes++;
   try{
@@ -3744,11 +3860,9 @@ function restart(){
   document.body.classList.remove('cine');
   document.getElementById('verdict').classList.add('hidden');
   setTimeout(grabPointer,60);
-  if(MODELPIPE.enabled&&MODELPIPE.current){
-    player.setModel(MODELPIPE.current); enemy.setModel(MODELPIPE.current);
-  } else if(MODELPIPE.enabled&&MODELPIPE.mode>0){
-    MODELPIPE.load(MODELPIPE.sources[MODELPIPE.mode-1],g=>{
-      if(g){ MODELPIPE.current=g; player.setModel(g); enemy.setModel(g); } });
+  if(MODELPIPE.enabled){
+    if(MODELPIPE.current.P)player.setModel(MODELPIPE.current.P);
+    if(MODELPIPE.current.E)enemy.setModel(MODELPIPE.current.E);
   }
   setup(); game.state='fight'; game.timeScale=1; game.duelTime=0;
 }
@@ -4010,7 +4124,7 @@ function frame(now){
           TMP1.addVectors(c.a,c.b).multiplyScalar(.5);
           emitBlood(TMP1,V3(rand(-.5,.5),1,rand(-.5,.5)),2.6,5); }
       }
-      if(!f.dead&&f.pool){ f.pool.r=Math.min(1.8,f.pool.r+f.bleedRate*dt*.0016);
+      if(!f.dead&&f.pool){ f.pool.r=Math.min(2.4,f.pool.r+f.bleedRate*dt*.0026);
         f.pool.mesh.position.set(f.pos.x,.007,f.pos.z); }
     }
 

@@ -73,6 +73,9 @@
     transition:height 1.1s cubic-bezier(.4,0,.2,1);pointer-events:none}
   #cine-top{top:0} #cine-bot{bottom:0}
   body.cine #cine-top,body.cine #cine-bot{height:7vh}
+  .selbtn{background:none;border:1px solid var(--dim);color:var(--fg);
+    cursor:pointer;padding:1px 8px;font-family:inherit}
+  .selbtn:hover{border-color:var(--fg)}
 </style>
 </head>
 <body>
@@ -103,6 +106,20 @@
   </div>
 
   <div id="log"></div>
+  <div id="select" style="margin:14px 0 4px;font-size:13px;letter-spacing:.08em">
+    <div style="margin:6px 0">
+      <span style="color:var(--dim)">YOUR FIGHTER&nbsp;</span>
+      <button class="selbtn" id="selP-prev">&#9664;</button>
+      <span id="selP-name" style="display:inline-block;min-width:220px">武 MUSASHI — classic</span>
+      <button class="selbtn" id="selP-next">&#9654;</button>
+    </div>
+    <div style="margin:6px 0">
+      <span style="color:var(--dim)">THE OPPONENT&nbsp;&nbsp;</span>
+      <button class="selbtn" id="selE-prev">&#9664;</button>
+      <span id="selE-name" style="display:inline-block;min-width:220px">武 MUSASHI — classic</span>
+      <button class="selbtn" id="selE-next">&#9654;</button>
+    </div>
+  </div>
   <div id="hint">move W A S D &nbsp;·&nbsp; cut — swing mouse &nbsp;·&nbsp; hold RMB — guard &nbsp;·&nbsp; hold SHIFT — thrust &nbsp;·&nbsp; R — again</div>
 </div>
 

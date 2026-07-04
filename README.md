@@ -409,6 +409,21 @@ The draw and sheath ritual clips ship alongside.
 - **Pools** — spread 1.8× faster and half again as wide. The floor gets
   painted.
 
+## v19 — choose your fighter
+
+The main menu now has two pickers: **YOUR FIGHTER** and **THE
+OPPONENT**. The roster is: 武 MUSASHI (the classic procedural samurai)
+plus every model the game can find — `samurai.fbx/.glb`, `Old Man.fbx`,
+`Zombiegirl W Kurniawan.fbx`, Xbot, Soldier, anything listed in
+`models/index.json`, and anything drag-and-dropped (drops join the
+roster and become your fighter). Any mix works: modeled vs procedural,
+Old Man vs Zombiegirl. In-game, **M** cycles your fighter and **N**
+cycles the opponent, mid-duel if you like. Selections persist across
+duels and the endless ladder; missing files show "(missing)" in the
+picker instead of failing silently. Duelist identities (KIYOMASA's
+aggression, SHIZUKA's speed) are unchanged — models are skins over the
+same souls.
+
 ## Headless tests
 
 `node test_harness.js` — jsdom + real three.js math, stubbed GPU/audio.
