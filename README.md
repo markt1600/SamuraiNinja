@@ -205,6 +205,34 @@ full duels, chest tracking error ~2cm.
   for the endless road). Skin has a subsurface-mottled, pored texture;
   kimono and hakama keep their weave and pleats.
 
+## v8 — pointer lock, honest hands, and the road to photoreal
+
+- **Pointer lock** — click to duel and the cursor is captured: relative
+  mouse deltas drive a virtual sword hand that cannot leave the browser.
+  Esc frees it; clicking takes up the sword again. Locked automatically
+  on BEGIN and after every restart.
+- **Arm & sword feel** — elbows are twice as taut; physics lag now
+  *yields to committed cuts* (arm blend scales down with blade speed, so
+  a swing is pure intent and the follow-through carries the weight); the
+  steel's motor answers the hand 2× faster and its momentum bends the
+  rendered line more subtly (swordBlend 0.16).
+- **Material realism** — procedural **normal maps** (Sobel-derived from
+  height fields) on the kimono weave, hakama pleats, skin pores, and
+  crystalline snow grain; a **roughness map** gives the snow its sparkle;
+  a canvas **environment cube** makes the blade, hamon, lacquer — and the
+  eyes — actually reflect the night. Moon shadows at 2048², tight frustum,
+  plus a cold rim light. Cloth/skin textures at 512².
+- **Faces v4** — rounded brow ridges, sphere-sculpted two-tone lips,
+  cheekbones that catch the moonlight, wet-glint eyes.
+- **Photoreal overrides (your ComfyUI rig's job)** — drop JPGs into
+  `/textures/` beside index.html and they silently replace the procedural
+  maps on load: `kimono.jpg`, `hakama.jpg`, `skin.jpg`. Suggested prompts:
+  seamless tileable indigo tsumugi silk weave macro, 1024²; seamless
+  tileable charcoal pleated hakama fabric; seamless tileable human skin
+  macro, pores, neutral tone. Flat lighting, "seamless texture" in the
+  prompt, and near-greyscale luminance works best (the game tints them
+  per duelist).
+
 ## Headless tests
 
 `node test_harness.js` — jsdom + real three.js math, stubbed GPU/audio.

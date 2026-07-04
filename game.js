@@ -325,6 +325,14 @@ function canTex(w,h,draw,opt){
 /* ------------------------------ lighting ------------------------------- */
 const moon=new THREE.DirectionalLight(SRGB(0xbdd0ec).getHex(),1.0);
 moon.position.set(-7,12,5); moon.castShadow=true;
+moon.intensity=1.15;
+moon.shadow.mapSize.set(2048,2048);
+moon.shadow.camera.left=-8; moon.shadow.camera.right=8;
+moon.shadow.camera.top=8; moon.shadow.camera.bottom=-8;
+moon.shadow.camera.near=2; moon.shadow.camera.far=30;
+moon.shadow.bias=-.0004;
+{ const rim=new THREE.DirectionalLight(SRGB(0x39496a).getHex(),.4);
+  rim.position.set(8,4,-9); scene.add(rim); }
 moon.shadow.mapSize.set(2048,2048);
 moon.shadow.camera.left=-8; moon.shadow.camera.right=8;
 moon.shadow.camera.top=8; moon.shadow.camera.bottom=-8;
@@ -433,8 +441,23 @@ const groundMark=(()=>{
     reset(){ base(); tex.needsUpdate=true; },
   };
 })();
-const ringGroundMat=groundMark?stdMat(0xffffff,{map:groundMark.tex,roughness:.97})
+const groundNrm=mkNormalTex(512,(x,w,h)=>{
+  x.fillStyle='#808080'; x.fillRect(0,0,w,h);
+  for(let i=0;i<9000;i++){
+    x.fillStyle=Math.random()<.5?'rgba(50,50,50,.4)':'rgba(210,210,210,.35)';
+    const s=Math.random()<.9?1:2;
+    x.fillRect(Math.random()*w,Math.random()*h,s,s);
+  }
+},1.4);
+const groundRough=canTex(512,512,(x,w,h)=>{
+  x.fillStyle='#ececec'; x.fillRect(0,0,w,h);   // snow: mostly diffuse...
+  x.fillStyle='#404040';                        // ...with crystalline sparks
+  for(let i=0;i<900;i++)x.fillRect(Math.random()*w,Math.random()*h,1,1);
+});
+const ringGroundMat=groundMark?stdMat(0xffffff,{map:groundMark.tex,roughness:1,
+    normalMap:groundNrm||null,roughnessMap:groundRough||null})
                            :stdMat(0xbfc6cc,{roughness:.97});
+if(ringGroundMat.normalMap)ringGroundMat.normalScale=new THREE.Vector2(.45,.45);
 const ringGround=new THREE.Mesh(new THREE.CircleGeometry(RING_R+.45,48),ringGroundMat);
 ringGround.rotation.x=-Math.PI/2; ringGround.position.y=.004; ringGround.receiveShadow=true;
 scene.add(ringGround);
@@ -909,9 +932,12 @@ function buildSkinnedBody(kimonoMat,hakamaMat){
 
 function katanaMesh(){
   const g=new THREE.Group();
-  const steel=stdMat(0xb9c4cf,{metalness:1,roughness:.28});
-  const hamon=stdMat(0xe9eff5,{metalness:.9,roughness:.14});
-  const lacquer=stdMat(0x14111a,{roughness:.32,metalness:.25});
+  const steel=stdMat(0xb9c4cf,{metalness:1,roughness:.22,
+    envMap:envCube||null,envMapIntensity:1.4});
+  const hamon=stdMat(0xe9eff5,{metalness:.9,roughness:.1,
+    envMap:envCube||null,envMapIntensity:1.7});
+  const lacquer=stdMat(0x14111a,{roughness:.28,metalness:.3,
+    envMap:envCube||null,envMapIntensity:.8});
   const wrap=stdMat(0x22252d,{roughness:.85});
   const brass=stdMat(0x8f7442,{metalness:1,roughness:.4});
   const grip=new THREE.Mesh(new THREE.CylinderGeometry(.0135,.0155,.25,10),wrap);
@@ -995,9 +1021,13 @@ class Fighter{
     this.atRope=false;
 
     /* materials */
-    const kimono=stdMat(palette.kimono,{roughness:.9,map:kimonoTex||null});
-    const hakama=stdMat(palette.hakama,{roughness:.94,map:hakamaTex||null});
-    const skin=stdMat(palette.skin,{roughness:.58,map:skinTex||null});
+    const kimono=stdMat(palette.kimono,{roughness:.9,map:kimonoTex||null,
+      normalMap:kimonoNrm||null});
+    const hakama=stdMat(palette.hakama,{roughness:.94,map:hakamaTex||null,
+      normalMap:hakamaNrm||null});
+    const skin=stdMat(palette.skin,{roughness:.55,map:skinTex||null,
+      normalMap:skinNrm||null});
+    if(skin.normalMap)skin.normalScale=new THREE.Vector2(.6,.6);
     const hairM=stdMat(0x14110d,{roughness:.9});
     const obiM=stdMat(palette.obi,{roughness:.8});
     const accentM=stdMat(palette.accent,{roughness:.75});
@@ -1059,8 +1089,8 @@ class Fighter{
       mage.position.set(0,.095,-.02); mage.rotation.x=1.1;
       /* the face — built, not painted, so it cannot misalign */
       const F=[];
-      const darkM=stdMat(0x17110d,{roughness:.4});
-      const whiteM=stdMat(0xd8d2c4,{roughness:.35});
+      const darkM=stdMat(0x17110d,{roughness:.18,envMap:envCube||null,envMapIntensity:.9});
+      const whiteM=stdMat(0xd8d2c4,{roughness:.2,envMap:envCube||null,envMapIntensity:.5});
       const mkEye=(sx)=>{
         const sc=new THREE.Mesh(new THREE.SphereGeometry(.0145,10,8),whiteM);
         sc.position.set(sx*.033,.006,D.headR*.82); sc.scale.set(1.25,.72,.5);
@@ -1072,9 +1102,10 @@ class Fighter{
       };
       mkEye(1); mkEye(-1);
       const mkBrow=(sx)=>{
-        const ridge=new THREE.Mesh(new THREE.BoxGeometry(.042,.012,.014),skin);
-        ridge.position.set(sx*.034,.035,D.headR*.83); ridge.rotation.z=sx*-.12;
-        const hair=new THREE.Mesh(new THREE.BoxGeometry(.038,.007,.006),hairM);
+        const ridge=new THREE.Mesh(new THREE.SphereGeometry(.021,8,6),skin);
+        ridge.scale.set(1.05,.4,.5);
+        ridge.position.set(sx*.034,.034,D.headR*.83); ridge.rotation.z=sx*-.12;
+        const hair=new THREE.Mesh(new THREE.BoxGeometry(.036,.006,.006),hairM);
         hair.position.set(sx*.034,.037,D.headR*.9); hair.rotation.z=sx*-.2;
         F.push(ridge,hair);
       };
@@ -1083,12 +1114,15 @@ class Fighter{
       bridge.position.set(0,.008,D.headR*.9); bridge.rotation.x=.16;
       const noseTip=new THREE.Mesh(new THREE.SphereGeometry(.013,8,6),skin);
       noseTip.position.set(0,-.018,D.headR*.96); noseTip.scale.set(1.15,.85,.8);
-      const lipU=new THREE.Mesh(new THREE.BoxGeometry(.031,.005,.008),
-        stdMat(0x8a5a4c,{roughness:.65}));
-      lipU.position.set(0,-.055,D.headR*.87);
-      const lipL=new THREE.Mesh(new THREE.BoxGeometry(.026,.007,.009),
-        stdMat(0x966352,{roughness:.6}));
-      lipL.position.set(0,-.065,D.headR*.86);
+      const lipU=new THREE.Mesh(new THREE.SphereGeometry(.016,8,6),
+        stdMat(0x8a5a4c,{roughness:.55}));
+      lipU.position.set(0,-.055,D.headR*.87); lipU.scale.set(1.95,.32,.55);
+      const lipL=new THREE.Mesh(new THREE.SphereGeometry(.015,8,6),
+        stdMat(0x966352,{roughness:.5}));
+      lipL.position.set(0,-.066,D.headR*.86); lipL.scale.set(1.65,.45,.6);
+      /* cheekbones catch the moonlight */
+      for(const sx of [1,-1]){ const ch=new THREE.Mesh(new THREE.SphereGeometry(.02,8,6),skin);
+        ch.position.set(sx*.036,-.02,D.headR*.72); ch.scale.set(1.1,.9,.7); F.push(ch); }
       const mkEar=(sx)=>{ const e=new THREE.Mesh(new THREE.SphereGeometry(.02,8,6),skin);
         e.position.set(sx*D.headR*.9,-.005,0); e.scale.set(.4,1,.72); F.push(e); };
       mkEar(1); mkEar(-1);
@@ -1471,7 +1505,7 @@ class Fighter{
    1 = pure physics. PHYS.assist: how hard the balance hand-of-god holds
    the pelvis. Death-by-motor-cutoff is staged for v2; Verlet death stays. */
 const PHYS=(typeof ZPhys!=='undefined')?{
-  engine:new ZPhys.Engine(), blend:.5, assist:.005, swordBlend:.3, enabled:true,
+  engine:new ZPhys.Engine(), blend:.5, assist:.005, swordBlend:.16, enabled:true,
 }:{enabled:false};
 if(PHYS.enabled){ PHYS.engine.g.set(0,-9.81,0); PHYS.engine.substeps=6; PHYS.engine.iters=3; }
 
@@ -1527,8 +1561,8 @@ Fighter.prototype.buildPhys=function(kin){
       sw.noCollide=true; sw.group=PHYS._grp; sw.name=this.name+'.sword';
       E.add(sw); B.sword=sw;
       E.joint(B.faR,sw,grip);
-      M.sword=E.motor(sw); M.sword.compliance=.0022; M.sword.maxCorr=.5;
-      M.sword._c0=.0022; M.sword._m0=.5;
+      M.sword=E.motor(sw); M.sword.compliance=.0011; M.sword.maxCorr=.6;
+      M.sword._c0=.0011; M.sword._m0=.6;
     }
   }
   const A=E.anchor(B.pelvis,V3(0,0,0)); A.compliance=PHYS.assist;
@@ -1677,7 +1711,11 @@ Fighter.prototype.soften=function(k,v,rate,dt){
   /* the torque-driven body's opinion blends into the target;
      the trunk stays taut, the limbs carry the physics */
   if(PHYS.enabled&&this.phys&&this.alive&&this.physJoint(k,_pj)){
-    const wgt=(k==='chestB'||k==='chestT'||k==='neckT')?.35:1;
+    let wgt=(k==='chestB'||k==='chestT'||k==='neckT')?.35:1;
+    /* a committed cut is pure intent: physics lag yields to the swing,
+       then reclaims the follow-through and the quiet moments */
+    if(k==='elR'||k==='elL'||k==='shR'||k==='shL')
+      wgt*=1-clamp(this.bladeSpeed/9,0,.8);
     if(_pj.distanceToSquared(v)<.36)v.lerp(_pj,PHYS.blend*wgt);
   }
   const S=this.soft||(this.soft={});
@@ -1966,7 +2004,7 @@ Fighter.prototype.updateAlive=function(dt,opponent){
     const handL=handle.clone().addScaledVector(bladeDir,.10);
     const hintR=rightC.clone().multiplyScalar(.85).addScaledVector(fwdC,-.3); hintR.y=-.55;
     solveIK(shR,handR,D.upperArm,D.foreArm,hintR,elR);
-    this.soften('elR',elR,17,dt);
+    this.soften('elR',elR,34,dt);
     this._K.elR.copy(elR); this._K.haR.copy(handR);
     aimLimb(P.upperArmR,shR,elR); aimLimb(P.forearmR,elR,handR);
     this.setBone('uaR',shR,elR);
@@ -1975,7 +2013,7 @@ Fighter.prototype.updateAlive=function(dt,opponent){
     if(!this.disabled.armL&&!this.severed.armL){
       const hintL=rightC.clone().multiplyScalar(-.85).addScaledVector(fwdC,-.3); hintL.y=-.55;
       solveIK(shL,handL,D.upperArm,D.foreArm,hintL,elL);
-      this.soften('elL',elL,17,dt);
+      this.soften('elL',elL,34,dt);
       this._K.elL.copy(elL); this._K.haL.copy(handL);
       aimLimb(P.upperArmL,shL,elL); aimLimb(P.forearmL,elL,handL);
       this.setBone('uaL',shL,elL);
@@ -2074,7 +2112,27 @@ addEventListener('keydown',e=>{ input.keys[e.code]=true;
   if(e.code==='KeyR'&&game.state!=='menu')restart(); });
 addEventListener('keyup',e=>{ input.keys[e.code]=false;
   if(e.code==='ShiftLeft'||e.code==='ShiftRight')input.shift=false; });
-addEventListener('mousemove',e=>{ input.mx=e.clientX/innerWidth*2-1; input.my=-(e.clientY/innerHeight*2-1); });
+/* pointer lock: the sword hand cannot leave the ring.
+   locked → relative deltas accumulate into a virtual cursor;
+   unlocked (menus) → absolute position as before. */
+addEventListener('mousemove',e=>{
+  if(document.pointerLockElement){
+    input.mx=clamp(input.mx+e.movementX/innerWidth*2.2,-1.35,1.35);
+    input.my=clamp(input.my-e.movementY/innerHeight*2.2,-1.15,1.15);
+  } else {
+    input.mx=e.clientX/innerWidth*2-1;
+    input.my=-(e.clientY/innerHeight*2-1);
+  }
+});
+function grabPointer(){
+  try{ if(!document.pointerLockElement&&game.state==='fight')
+    renderer.domElement.requestPointerLock(); }catch(e){}
+}
+addEventListener('mousedown',grabPointer);
+document.addEventListener('pointerlockchange',()=>{
+  if(!document.pointerLockElement&&game.state==='fight')
+    log('pointer freed — click to take up the sword again',false);
+});
 addEventListener('mousedown',e=>{ if(e.button===2)input.rmb=true; });
 addEventListener('mouseup',e=>{ if(e.button===2)input.rmb=false; });
 addEventListener('contextmenu',e=>e.preventDefault());
@@ -2462,6 +2520,61 @@ let player,enemy,enemyAI;
 function shake(v){ game.shake=Math.max(game.shake,v); }
 function slowmo(){ game.timeScale=.22; game.slowT=1.5; }
 
+/* ============== MATERIAL REALISM: normals, reflections, overrides ======
+   Normal maps computed from procedural height fields (Sobel gradients);
+   a canvas cube environment so steel reflects the night; and a texture
+   override system: drop photoreal maps in /textures/ (e.g. generated on
+   a local ComfyUI rig) and they replace the procedural ones on load. */
+function mkNormalTex(size,heightDraw,strength){
+  try{
+    const c=document.createElement('canvas'); c.width=c.height=size;
+    const x=c.getContext('2d'); if(!x)return null;
+    heightDraw(x,size,size);
+    const d=x.getImageData(0,0,size,size).data;
+    const out=document.createElement('canvas'); out.width=out.height=size;
+    const ox=out.getContext('2d'), o=ox.createImageData(size,size);
+    const H=(i,j)=>d[(((j+size)%size)*size+((i+size)%size))*4]/255;
+    for(let j=0;j<size;j++)for(let i=0;i<size;i++){
+      const dx=(H(i+1,j)-H(i-1,j))*strength, dy=(H(i,j+1)-H(i,j-1))*strength;
+      const il=1/Math.sqrt(dx*dx+dy*dy+1), k=(j*size+i)*4;
+      o.data[k]=(-dx*il*.5+.5)*255; o.data[k+1]=(-dy*il*.5+.5)*255;
+      o.data[k+2]=(il*.5+.5)*255; o.data[k+3]=255;
+    }
+    ox.putImageData(o,0,0);
+    const t=new THREE.CanvasTexture(out);
+    t.wrapS=t.wrapT=THREE.RepeatWrapping;
+    return t;
+  }catch(e){ return null; }
+}
+const envCube=(()=>{
+  try{
+    const face=(draw)=>{ const c=document.createElement('canvas');
+      c.width=c.height=64; const x=c.getContext('2d');
+      if(!x)throw 0; draw(x,64,64); return c; };
+    const side=()=>face((x,w,h)=>{
+      const g=x.createLinearGradient(0,0,0,h);
+      g.addColorStop(0,'#070b14'); g.addColorStop(.62,'#101a2a');
+      g.addColorStop(.72,'#1c2838'); g.addColorStop(.78,'#8d99a8');
+      g.addColorStop(1,'#a8b2bf');
+      x.fillStyle=g; x.fillRect(0,0,w,h); });
+    const top=face((x,w,h)=>{ x.fillStyle='#05070d'; x.fillRect(0,0,w,h);
+      x.fillStyle='#c8d4ea';
+      for(let i=0;i<26;i++)x.fillRect(Math.random()*w,Math.random()*h,1,1); });
+    const bot=face((x,w,h)=>{ x.fillStyle='#9aa4b0'; x.fillRect(0,0,w,h); });
+    const t=new THREE.CubeTexture([side(),side(),top,bot,side(),side()]);
+    t.needsUpdate=true; return t;
+  }catch(e){ return null; }
+})();
+/* photoreal override: /textures/<name>.jpg quietly replaces procedural */
+function overrideTex(name,apply){
+  if(typeof process!=='undefined')return;   // browser only
+  try{
+    new THREE.TextureLoader().load('textures/'+name+'.jpg',
+      t=>{ t.wrapS=t.wrapT=THREE.RepeatWrapping; t.encoding=THREE.sRGBEncoding;
+        apply(t); },undefined,()=>{});
+  }catch(e){}
+}
+
 /* ----------------- the ground fights too: depth and ice ---------------- */
 function snowDepth(x,z){
   const r=Math.hypot(x,z);
@@ -2524,7 +2637,7 @@ function placeIce(){
 const onIce=(p)=>game.ice&&Math.hypot(p.x-game.ice.x,p.z-game.ice.z)<game.ice.r;
 
 /* ------------------ cloth: woven kimono, pleated hakama ---------------- */
-const kimonoTex=canTex(256,256,(ctx,w,h)=>{
+const kimonoTex=canTex(512,512,(ctx,w,h)=>{
   ctx.fillStyle='#d8d8d8'; ctx.fillRect(0,0,w,h);
   /* tsumugi weave: fine cross-hatch with slub irregularities */
   for(let y=0;y<h;y+=2){ ctx.fillStyle='rgba(0,0,0,'+(.045+Math.random()*.05)+')';
@@ -2535,7 +2648,13 @@ const kimonoTex=canTex(256,256,(ctx,w,h)=>{
     ctx.fillRect(Math.random()*w,Math.random()*h,1+Math.random()*3,1); }
 });
 if(kimonoTex){ kimonoTex.wrapS=kimonoTex.wrapT=THREE.RepeatWrapping; kimonoTex.repeat.set(3,3); }
-const skinTex=canTex(256,256,(ctx,w,h)=>{
+const kimonoNrm=mkNormalTex(256,(x,w,h)=>{
+  x.fillStyle='#808080'; x.fillRect(0,0,w,h);
+  for(let y=0;y<h;y+=2){ x.fillStyle='rgba(0,0,0,.5)'; x.fillRect(0,y,w,1); }
+  for(let i=0;i<w;i+=2){ x.fillStyle='rgba(255,255,255,.3)'; x.fillRect(i,0,1,h); }
+},2.2);
+if(kimonoNrm)kimonoNrm.repeat.set(3,3);
+const skinTex=canTex(512,512,(ctx,w,h)=>{
   ctx.fillStyle='#d9d2ca'; ctx.fillRect(0,0,w,h);
   /* subsurface mottle: warm and cool blotches, very soft */
   for(let i=0;i<140;i++){
@@ -2553,7 +2672,18 @@ const skinTex=canTex(256,256,(ctx,w,h)=>{
   }
 });
 if(skinTex){ skinTex.wrapS=skinTex.wrapT=THREE.RepeatWrapping; skinTex.repeat.set(2,2); }
-const hakamaTex=canTex(256,256,(ctx,w,h)=>{
+const skinNrm=mkNormalTex(256,(x,w,h)=>{
+  x.fillStyle='#808080'; x.fillRect(0,0,w,h);
+  for(let i=0;i<3200;i++){ const v=Math.random()<.5;
+    x.fillStyle=v?'rgba(60,60,60,.5)':'rgba(190,190,190,.35)';
+    const s=Math.random()<.85?1:2;
+    x.fillRect(Math.random()*w,Math.random()*h,s,s); }
+},1.1);
+if(skinNrm)skinNrm.repeat.set(2,2);
+overrideTex('kimono',t=>{ t.repeat.set(3,3); kimonoTex&&(kimonoTex.image=t.image,kimonoTex.needsUpdate=true); });
+overrideTex('hakama',t=>{ t.repeat.set(4,1.6); hakamaTex&&(hakamaTex.image=t.image,hakamaTex.needsUpdate=true); });
+overrideTex('skin',t=>{ t.repeat.set(2,2); skinTex&&(skinTex.image=t.image,skinTex.needsUpdate=true); });
+const hakamaTex=canTex(512,512,(ctx,w,h)=>{
   ctx.fillStyle='#d2d2d2'; ctx.fillRect(0,0,w,h);
   /* pleats: broad vertical bands, each shaded across its width */
   const P=5, bw=w/P;
@@ -2569,6 +2699,16 @@ const hakamaTex=canTex(256,256,(ctx,w,h)=>{
     ctx.fillRect(0,y,w,1); }
 });
 if(hakamaTex){ hakamaTex.wrapS=hakamaTex.wrapT=THREE.RepeatWrapping; hakamaTex.repeat.set(4,1.6); }
+const hakamaNrm=mkNormalTex(256,(x,w,h)=>{
+  const P=5,bw=w/P;
+  for(let i=0;i<P;i++){
+    const g=x.createLinearGradient(i*bw,0,(i+1)*bw,0);
+    g.addColorStop(0,'#b0b0b0'); g.addColorStop(.5,'#707070');
+    g.addColorStop(.94,'#404040'); g.addColorStop(1,'#c0c0c0');
+    x.fillStyle=g; x.fillRect(i*bw,0,bw,h);
+  }
+},3);
+if(hakamaNrm)hakamaNrm.repeat.set(4,1.6);
 
 /* ---------------- kamae: the five guards, as tip targets --------------- */
 const KAMAE={
@@ -2672,6 +2812,7 @@ function restart(){
   game.bind=null; game._bindN=0; placeIce();
   document.body.classList.remove('cine');
   document.getElementById('verdict').classList.add('hidden');
+  setTimeout(grabPointer,60);
   setup(); game.state='fight'; game.timeScale=1; game.duelTime=0;
 }
 function endDuel(){
@@ -2711,6 +2852,7 @@ function endDuel(){
     (player.parries?'. Parries: '+player.parries:'')+'.'
   ;
   setTimeout(()=>v.classList.remove('hidden'),1400);
+  try{ document.exitPointerLock&&document.exitPointerLock(); }catch(e){}
   beginKillCam(won?enemy:player, won?player:enemy);
 }
 
@@ -2718,6 +2860,7 @@ document.getElementById('btn-begin').addEventListener('click',()=>{
   Sound.ac().resume&&Sound.ac().resume();
   Sound.startWind();
   document.getElementById('menu').classList.add('hidden');
+  setTimeout(grabPointer,60);
   restart();
 });
 document.getElementById('btn-again').addEventListener('click',restart);
