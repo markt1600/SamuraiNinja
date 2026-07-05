@@ -529,6 +529,57 @@ const ringGround=new THREE.Mesh(new THREE.CircleGeometry(RING_R+.45,48),ringGrou
 ringGround.rotation.x=-Math.PI/2; ringGround.position.y=.004; ringGround.receiveShadow=true;
 scene.add(ringGround);
 
+/* ---- snow glitter: per-cell crystal facets that catch moon + view ----
+   a random micro-normal per 1cm cell; when it aligns with the half-vector
+   the crystal flares (into HDR, so the bloom catches the strong ones) */
+const GLINTMATS=[];
+function snowGlintify(m,cellScale,strength){
+  m.onBeforeCompile=s=>{
+    s.uniforms.uGlintT={value:0}; GLINTMATS.push(s);
+    s.vertexShader=s.vertexShader
+      .replace('#include <common>','#include <common>\nvarying vec3 vWp;')
+      .replace('#include <worldpos_vertex>',
+        '#include <worldpos_vertex>\nvWp=(modelMatrix*vec4(transformed,1.)).xyz;');
+    s.fragmentShader=s.fragmentShader
+      .replace('#include <common>',
+        '#include <common>\nvarying vec3 vWp; uniform float uGlintT;\n'+
+        'float zhash(vec2 p){return fract(sin(dot(p,vec2(127.1,311.7)))*43758.5453);}')
+      .replace('#include <emissivemap_fragment>',
+        '#include <emissivemap_fragment>\n'+
+        '{ vec2 cell=floor(vWp.xz*'+cellScale+');\n'+
+        '  float sel=zhash(cell+31.7);\n'+
+        '  if(sel>.85){\n'+
+        '    vec3 gn=normalize(vec3(zhash(cell)*2.-1.,2.1,zhash(cell+7.3)*2.-1.));\n'+
+        '    vec3 Vw=normalize(cameraPosition-vWp);\n'+
+        '    vec3 Hw=normalize(normalize(vec3(-7.,12.,5.))+Vw);\n'+
+        '    float g=pow(max(dot(gn,Hw),0.),130.);\n'+
+        '    g*=.7+.3*sin(uGlintT*5.+sel*47.);\n'+           // crystals twinkle
+        '    g*=1.-smoothstep(9.,16.,length(cameraPosition-vWp));\n'+ // near field only
+        '    totalEmissiveRadiance+=vec3(.9,1.,1.3)*g*'+strength+'; }\n'+
+        '}');
+  };
+}
+snowGlintify(ringGroundMat,'92.','2.6');
+snowGlintify(groundMat,'70.','1.7');
+
+/* ---- contact shadows: a soft dark pool that keeps a body ON the snow
+   (the moon's shadow map alone leaves feet floating on bright ground) */
+const blobShadowTex=canTex(128,128,(ctx,w,h)=>{
+  const g=ctx.createRadialGradient(64,64,6,64,64,62);
+  g.addColorStop(0,'rgba(9,12,20,.52)');
+  g.addColorStop(.55,'rgba(9,12,20,.27)');
+  g.addColorStop(1,'rgba(9,12,20,0)');
+  ctx.fillStyle=g; ctx.fillRect(0,0,w,h);
+},{srgb:false});
+let _blobN=0;
+function mkContactShadow(){
+  const m=new THREE.MeshBasicMaterial({map:blobShadowTex||null,transparent:true,
+    opacity:.5,depthWrite:false});
+  const p=new THREE.Mesh(new THREE.PlaneGeometry(1.2,1.2),m);
+  p.rotation.x=-Math.PI/2; p.position.y=.0052+(_blobN++%7)*.0004;
+  p.renderOrder=1; scene.add(p); return p;
+}
+
 /* the rope: posts, sagging shimenawa, paper shide */
 (function buildRope(){
   const wood=stdMat(0x2c241c,{roughness:.9});
@@ -1367,6 +1418,8 @@ class Fighter{
     scene.add(this.skin.mesh);
     this.buildCloth(rimify(stdMat(this.palette.hakama,{roughness:.94,
       side:THREE.DoubleSide,map:hakamaTex||null}),.3,.38,.58,3,.4));
+    this.buildSleeves(rimify(stdMat(this.palette.kimono,{roughness:.9,
+      side:THREE.DoubleSide,map:kimonoTex||null}),.32,.42,.62,3,.5));
     this.skinKimono=this.skin.kimono;
     const hideIn=(g,keep)=>g.traverse(o=>{
       if(o.isMesh&&!(keep&&keep(o)))o.visible=false; });
@@ -1737,7 +1790,7 @@ class Fighter{
    1 = pure physics. PHYS.assist: how hard the balance hand-of-god holds
    the pelvis. Death-by-motor-cutoff is staged for v2; Verlet death stays. */
 const PHYS=(typeof ZPhys!=='undefined')?{
-  engine:new ZPhys.Engine(), blend:.5, assist:.005, swordBlend:.16, enabled:true,
+  engine:new ZPhys.Engine(), blend:.6, assist:.005, swordBlend:.2, enabled:true,
 }:{enabled:false};
 if(PHYS.enabled){ PHYS.engine.g.set(0,-9.81,0); PHYS.engine.substeps=6; PHYS.engine.iters=3; }
 
@@ -2383,6 +2436,7 @@ Fighter.prototype.updateDeadPhys=function(dt){
   }
   this.renderJoints(_dj);
   this.tickCloth(dt,_dj);
+  this.tickSleeves(dt,_dj);
   /* pools follow the corpse */
   this.pos.set(_dj.pelvis.x,0,_dj.pelvis.z);
   if(this.model){
@@ -2468,7 +2522,10 @@ Fighter.prototype.soften=function(k,v,rate,dt){
        then reclaims the follow-through and the quiet moments */
     if(k==='elR'||k==='elL'||k==='shR'||k==='shL')
       wgt*=1-clamp(this.bladeSpeed/9,0,.8);
-    if(_pj.distanceToSquared(v)<.36)v.lerp(_pj,PHYS.blend*wgt);
+    /* under a fresh impact or a stagger the ragdoll speaks louder —
+       real momentum, not scripted offsets */
+    wgt*=1+clamp(this.stagger||0,0,1)*.9+clamp(this.flinch.lengthSq()*22,0,.5);
+    if(_pj.distanceToSquared(v)<.36)v.lerp(_pj,Math.min(.85,PHYS.blend*wgt));
   }
   const S=this.soft||(this.soft={});
   let s=S[k]; if(!s){ s=S[k]={p:v.clone(),vel:V3()}; }
@@ -2540,10 +2597,17 @@ Fighter.prototype.updateAlive=function(dt,opponent){
   const D=this.dims,P=this.parts;
   this.breath+=dt;
 
-  /* facing: the body turns with inertia, the eyes are instant */
+  /* facing: the body turns with inertia, the eyes are instant.
+     PIVOT WEIGHT: with both feet planted a man can only wind his hips so
+     far — the real turn happens over a stepping foot. Slow the planted
+     turn; let it flow when a foot is in flight (the step system already
+     fires a step when yaw error builds, so turns become footwork). */
   const toOpp=TMP1.subVectors(opponent.pos,this.pos); toOpp.y=0;
   this.yaw=Math.atan2(toOpp.x,toOpp.z);
-  this.bodyYaw=lerpAngle(this.bodyYaw,this.yaw,clamp(dt*6*Math.max(this.mobility,.3),0,1));
+  const inFlight=this.feet&&(this.feet.R.swing>0||this.feet.L.swing>0);
+  this._pivot=lerp(this._pivot===undefined?1:this._pivot,inFlight?1.3:.45,clamp(dt*9,0,1));
+  this.bodyYaw=lerpAngle(this.bodyYaw,this.yaw,
+    clamp(dt*6*this._pivot*Math.max(this.mobility,.3),0,1));
 
   /* locomotion + separation + THE RING */
   this.pos.addScaledVector(this.vel,dt); this.pos.y=0;
@@ -2655,11 +2719,21 @@ Fighter.prototype.updateAlive=function(dt,opponent){
     this._nextShift=this.idleT+4+Math.random()*3.5;
     this.vel.x+=rand(-.3,.3); this.vel.z+=rand(-.22,.22);
   }
-  const pelvisY=D.pelvisY-hurtSag-(stepping?.02:0)+Math.sin(this.breath*1.6)*.007+(this.previewBob||0);
+  /* stride mechanics: the weight rides the planted foot, the pelvis dips
+     through mid-swing, and the shoulders counter-rotate against the hips */
+  let wshift=0, stepDip=0, strideCtr=0;
+  if(ft.R.swing>0&&ft.L.swing===0){ wshift=-1;
+    stepDip=Math.sin(Math.min(ft.R.swing,1)*Math.PI); strideCtr=ft.R.swing-.5; }
+  else if(ft.L.swing>0&&ft.R.swing===0){ wshift=1;
+    stepDip=Math.sin(Math.min(ft.L.swing,1)*Math.PI); strideCtr=.5-ft.L.swing; }
+  this._wshift=lerp(this._wshift||0,wshift*.034,clamp(dt*9,0,1));
+  this._ctr=lerp(this._ctr||0,strideCtr*.16*clamp(speed2d,0,1.4),clamp(dt*9,0,1));
+  const pelvisY=D.pelvisY-hurtSag-stepDip*.024-(stepping?.008:0)
+    +Math.sin(this.breath*1.6)*.007+(this.previewBob||0);
   const pelvis=V3(lerp(feetMid.x,this.pos.x,.55),pelvisY,lerp(feetMid.z,this.pos.z,.55));
-  const pelvisYawA=this.bodyYaw+this.twist*.3;
+  const pelvisYawA=this.bodyYaw+this.twist*.3-this._ctr*.7;
   const fwdP=DIRY(pelvisYawA), rightP=V3(fwdP.z,0,-fwdP.x);
-  pelvis.addScaledVector(rightP,this._sway||0);
+  pelvis.addScaledVector(rightP,(this._sway||0)+this._wshift);
 
   /* flinch spring: hits ripple through the trunk */
   this.flinchV.addScaledVector(this.flinch,-140*dt).addScaledVector(this.flinchV,-12*dt);
@@ -2667,7 +2741,7 @@ Fighter.prototype.updateAlive=function(dt,opponent){
 
   /* spine: pelvis → abdomen → chest, distributing lean and twist */
   const lean=clamp(.04+this.tipVel.length()*.007+speed2d*.016,0,.12);
-  const chestYawA=this.bodyYaw+this.twist*.8;
+  const chestYawA=this.bodyYaw+this.twist*.8+this._ctr;
   const fwdC=DIRY(chestYawA), rightC=V3(fwdC.z,0,-fwdC.x);
   const chestB=pelvis.clone().addScaledVector(fwdP,.03+lean*.3)
     .addScaledVector(this.flinch,.6).addScaledVector(this.leanV,.45);
@@ -2899,6 +2973,7 @@ Fighter.prototype.updateAlive=function(dt,opponent){
     if(!MODELPIPE.tickClips(this,dt))MODELPIPE.drive(this,this._K);
   }
   this.tickCloth(dt,this._K);
+  this.tickSleeves(dt,this._K);
   this.tickFingers(dt);
   aimLimb(P.thighR,hipR,knR); aimLimb(P.shinR,knR,ankR);
   aimLimb(P.thighL,hipL,knL); aimLimb(P.shinL,knL,ankL);
@@ -4333,7 +4408,8 @@ function rimify(m,r,g,b,power,strength){
 /* ================= CLOTH: the hakama obeys gravity ==================
    Verlet panels pinned at the waist, colliding with the legs, settling
    over the corpse. Real fabric, ~60 points per fighter. */
-function mkClothPanel(cols,rows,mat){
+function mkClothPanel(cols,rows,mat,w0,w1,rowL){
+  w0=w0||.062; w1=w1||.088; rowL=rowL||.1;           // defaults: the hakama
   const geo=new THREE.PlaneGeometry(1,1,cols-1,rows-1);
   const mesh=new THREE.Mesh(geo,mat);
   mesh.frustumCulled=false; mesh.castShadow=true;
@@ -4343,10 +4419,10 @@ function mkClothPanel(cols,rows,mat){
   const cons=[];
   const idx=(r,c)=>r*cols+c;
   for(let r=0;r<rows;r++)for(let c=0;c<cols;c++){
-    const wSp=lerp(.062,.088,r/(rows-1));            // hakama flares
+    const wSp=lerp(w0,w1,r/(rows-1));                // the garment flares
     if(c+1<cols)cons.push([idx(r,c),idx(r,c+1),wSp]);
-    if(r+1<rows)cons.push([idx(r,c),idx(r+1,c),.1]);
-    if(c+1<cols&&r+1<rows)cons.push([idx(r,c),idx(r+1,c+1),Math.hypot(wSp,.1)*1.02]);
+    if(r+1<rows)cons.push([idx(r,c),idx(r+1,c),rowL]);
+    if(c+1<cols&&r+1<rows)cons.push([idx(r,c),idx(r+1,c+1),Math.hypot(wSp,rowL)*1.02]);
   }
   return {mesh,pts,cons,cols,rows,ni:0};
 }
@@ -4372,6 +4448,64 @@ Fighter.prototype.buildCloth=function(hakamaMat){
   }
   if(this.skirtF)this.skirtF.visible=false;
   if(this.skirtB)this.skirtB.visible=false;
+};
+/* kimono sleeves: small verlet panels pinned along each upper arm —
+   they swing with the cut and drape when the arms hang */
+Fighter.prototype.buildSleeves=function(mat){
+  if(this.build.cloth===false||this.build.bare)return;
+  this.sleeves=[];
+  for(const side of ['R','L']){
+    const P=mkClothPanel(4,3,mat,.075,.09,.085);
+    P.arm=side; scene.add(P.mesh);
+    for(const q of P.pts){ q.p.set(this.pos.x,1.2,this.pos.z); q.pp.copy(q.p); }
+    this.sleeves.push(P);
+  }
+};
+const _slA=V3(),_slB=V3(),_slO=V3();
+Fighter.prototype.tickSleeves=function(dt,J){
+  if(!this.sleeves)return;
+  dt=Math.min(dt,.033);
+  for(const P of this.sleeves){
+    const sh=P.arm==='R'?J.shR:J.shL, el=P.arm==='R'?J.elR:J.elL,
+          ha=P.arm==='R'?J.haR:J.haL;
+    /* pin the top row along the shoulder→elbow line, pushed outward */
+    _slO.subVectors(P.arm==='R'?J.shR:J.shL,J.chestT).setY(0);
+    if(_slO.lengthSq()<1e-6)_slO.set(1,0,0); _slO.normalize();
+    for(let c=0;c<P.cols;c++){
+      const q=P.pts[c], t=c/(P.cols-1);
+      q.p.lerpVectors(sh,el,t*.9).addScaledVector(_slO,.055);
+      q.p.y+=.02;
+      q.pp.copy(q.p);
+    }
+    for(let i=P.cols;i<P.pts.length;i++){
+      const q=P.pts[i];
+      TMP2.subVectors(q.p,q.pp).multiplyScalar(.94);
+      q.pp.copy(q.p);
+      q.p.add(TMP2);
+      q.p.y-=6.5*dt*dt;
+      q.p.addScaledVector(this.vel,-dt*.2);
+    }
+    for(let it=0;it<3;it++){
+      for(const [a,b,rest] of P.cons){
+        const A=P.pts[a],B=P.pts[b];
+        TMP2.subVectors(B.p,A.p);
+        const d=TMP2.length(); if(d<1e-6)continue;
+        const diff=(d-rest)/d*.5;
+        if(!A.pin)A.p.addScaledVector(TMP2,diff*(B.pin?2:1));
+        if(!B.pin)B.p.addScaledVector(TMP2,-diff*(A.pin?2:1));
+      }
+      for(let i=P.cols;i<P.pts.length;i++){
+        const q=P.pts[i];
+        segPush(q.p,sh,el,.075); segPush(q.p,el,ha,.06);
+        if(q.p.y<.015)q.p.y=.015;
+      }
+    }
+    const pos=P.mesh.geometry.attributes.position;
+    for(let i=0;i<P.pts.length;i++)
+      pos.setXYZ(i,P.pts[i].p.x,P.pts[i].p.y,P.pts[i].p.z);
+    pos.needsUpdate=true;
+    if((P.ni++&1)===0)P.mesh.geometry.computeVertexNormals();
+  }
 };
 Fighter.prototype.tickCloth=function(dt,J){
   if(!this.cloth)return;
@@ -4530,9 +4664,11 @@ function setup(){
 }
 function disposeFighter(f){
   if(f.cloth)for(const P of f.cloth)scene.remove(P.mesh);
+  if(f.sleeves)for(const P of f.sleeves)scene.remove(P.mesh);
   scene.remove(f.root); scene.remove(f.katana); scene.remove(f.trailMesh);
   if(f.skin)scene.remove(f.skin.mesh);
   if(f.glint)scene.remove(f.glint);
+  if(f.cshadow)scene.remove(f.cshadow);
   if(f.blobs)for(const b of f.blobs)scene.remove(b);
   f._asleep=false; f._calm=0;
   f.disposePhys&&f.disposePhys();
@@ -4971,6 +5107,7 @@ function frame(now){
   }
   for(const L of lanterns)
     L.light.intensity=L.base*(0.82+0.22*Math.sin(now*.011+L.seed)+0.1*Math.sin(now*.037+L.seed*2.7));
+  for(const s of GLINTMATS)s.uniforms.uGlintT.value=now*.001;
 
   if(game.state==='menu'&&typeof process==='undefined'&&typeof player!=='undefined'&&player&&enemy){
     /* RESPONSIVE TABLEAU: marks derive from the camera frustum, and the
@@ -5061,6 +5198,14 @@ function frame(now){
   if(PHYS.enabled&&player&&player.phys)PHYS.engine.step(Math.min(dt,.033));
   for(const f of [player,enemy]){
     if(!f)continue;
+    /* contact shadow: follows the pelvis, spreads when the body goes down */
+    if(!f.cshadow)f.cshadow=mkContactShadow();
+    { const pv=f.parts.pelvis.position;
+      const lowness=clamp(1-pv.y/.92,0,1);
+      f.cshadow.position.x=pv.x; f.cshadow.position.z=pv.z;
+      const cs=1+lowness*1.2;
+      f.cshadow.scale.set(cs,cs,1);
+      f.cshadow.material.opacity=.5-lowness*.16; }
     /* moon glint when steel rises */
     if(!f.glint)f.glint=mkGlint();
     const up=f.hasSword&&f.bladeB&&f.bladeB.y>1.6&&f.alive;
