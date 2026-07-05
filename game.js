@@ -1272,6 +1272,7 @@ class Fighter{
       const palm=new THREE.Mesh(new THREE.BoxGeometry(.052,.075,.03),skin);
       palm.position.z=-.006; g.add(palm);
       const curl=pose==='fist'?1.9:1.25;      // radians of finger wrap
+      g.userData.joints=[];
       for(let i=0;i<4;i++){
         const fx=(i-1.5)*.014*s;
         const seg1=new THREE.Mesh(new THREE.BoxGeometry(.0115,.036,.013),skin);
@@ -1283,6 +1284,7 @@ class Fighter{
         const seg2=new THREE.Mesh(new THREE.BoxGeometry(.0105,.03,.012),skin);
         seg2.position.y=.015; j2.add(seg2); j1.add(j2);
         g.add(j1);
+        g.userData.joints.push({j1,j2,ph:i*.7});
       }
       const tj=new THREE.Group();
       tj.position.set(.028*s,-.006,.012);
@@ -1332,6 +1334,8 @@ class Fighter{
     /* continuous skinned body over torso, upper arms, legs */
     this.skin=buildSkinnedBody(this.build.bare?skin:kimono,hakama,this.build);
     scene.add(this.skin.mesh);
+    this.buildCloth(rimify(stdMat(this.palette.hakama,{roughness:.94,
+      side:THREE.DoubleSide,map:hakamaTex||null}),.3,.38,.58,3,.4));
     this.skinKimono=this.skin.kimono;
     const hideIn=(g,keep)=>g.traverse(o=>{
       if(o.isMesh&&!(keep&&keep(o)))o.visible=false; });
@@ -1707,7 +1711,7 @@ const PHYS=(typeof ZPhys!=='undefined')?{
 if(PHYS.enabled){ PHYS.engine.g.set(0,-9.81,0); PHYS.engine.substeps=6; PHYS.engine.iters=3; }
 
 
-const ZAN_VERSION='v35';
+const ZAN_VERSION='v36';
 console.log('%c斬 ZAN '+ZAN_VERSION,'font-size:16px');
 
 /* =========================================================================
@@ -1731,18 +1735,18 @@ const BUILDS={
     palette:{kimono:0x8a6a48,hakama:0x5a4028,obi:0x3a2a18,skin:0xc09068,
       accent:0xb89858,face:{stubble:true}}},
   sumo:{label:'雷 RAIDEN — sumo',
-    sh:1.2, waist:1.62, hip:1.5, limb:1.35, hair:'topknot', bare:true, mass:1.55,
+    sh:1.2, waist:1.62, hip:1.5, limb:1.35, hair:'topknot', bare:true, mass:1.55, cloth:false,
     palette:{kimono:0xd8a880,hakama:0xd8a880,obi:0x1a2a4a,skin:0xd8a880,
       accent:0x1a2a4a,face:{stubble:true}}}};
 const WEAPONS={
   katana:    {label:'刀 KATANA',    len:.93, cutFrom:.12, speed:1.0,  maxSpd:1.0,
-              effMass:1.0, dmg:1.0, parryWin:1.0, blunt:false},
+              effMass:1.0, dmg:1.0, parryWin:1.0, blunt:false, curl:1.28},
   broadsword:{label:'劍 BROADSWORD',len:.99, cutFrom:.14, speed:.76,  maxSpd:.88,
-              effMass:1.55,dmg:1.3, parryWin:.85, blunt:false},
+              effMass:1.55,dmg:1.3, parryWin:.85, blunt:false, curl:1.24},
   axe:       {label:'斧 AXE',       len:.74, cutFrom:.42, speed:.58,  maxSpd:.8,
-              effMass:2.3, dmg:1.8, parryWin:.6,  blunt:false},
+              effMass:2.3, dmg:1.8, parryWin:.6,  blunt:false, curl:1.12},
   bare:      {label:'拳 BARE HANDS',len:.16, cutFrom:0,   speed:1.35, maxSpd:1.2,
-              effMass:.9,  dmg:.9, parryWin:1.15, blunt:true}};
+              effMass:.9,  dmg:.9, parryWin:1.15, blunt:true, curl:1.9}};
 const SELECT={P:'musashi',E:'musashi',WP:'katana',WE:'katana'};
 function pickdbg(t){
   try{ const el=document.getElementById('pickdbg'); if(el)el.textContent=t; }catch(e){}
@@ -2343,6 +2347,7 @@ Fighter.prototype.updateDeadPhys=function(dt){
       _dj[k].lerpVectors(this._lastPup[k],_dj[k],this._deathBlend);
   }
   this.renderJoints(_dj);
+  this.tickCloth(dt,_dj);
   /* pools follow the corpse */
   this.pos.set(_dj.pelvis.x,0,_dj.pelvis.z);
   if(this.model){
@@ -2372,6 +2377,24 @@ Fighter.prototype.setModel=function(gltf){
   this.katana.visible=true;            // ...but the steel is always ours
 };
 Fighter.prototype._bob=function(y){ return y+(this.previewBob||0); };
+Fighter.prototype.tickFingers=function(dt){
+  const W=this.weapon||WEAPONS.katana;
+  const effort=clamp(this.bladeSpeed/9,0,1)*.28;         // hard swings squeeze
+  const clutch=(this._ritualGrabL||this._ritualGrabR)?.5:0;   // taking the head
+  const dying=1-clamp(this.consciousness/100,.2,1);
+  let target=(W.curl||1.28)+effort+clutch-dying*.45;     // dying hands loosen
+  target=clamp(target,.55,2.0);
+  const k=clamp(dt*9,0,1);
+  for(const hand of [this.parts.handR,this.parts.handL]){
+    const J=hand&&hand.userData&&hand.userData.joints;
+    if(!J)continue;
+    for(const f of J){
+      const t=target+Math.sin(this.breath*2.1+f.ph)*.03; // fingers are never still
+      f.j1.rotation.x+=(t*.55-f.j1.rotation.x)*k;
+      f.j2.rotation.x+=(t*.7-f.j2.rotation.x)*k;
+    }
+  }
+};
 Fighter.prototype.physJoint=function(k,out){
   const j=this.phys&&this.phys.L[k];
   if(!j)return null;
@@ -2834,6 +2857,8 @@ Fighter.prototype.updateAlive=function(dt,opponent){
   if(this.model){
     if(!MODELPIPE.tickClips(this,dt))MODELPIPE.drive(this,this._K);
   }
+  this.tickCloth(dt,this._K);
+  this.tickFingers(dt);
   aimLimb(P.thighR,hipR,knR); aimLimb(P.shinR,knR,ankR);
   aimLimb(P.thighL,hipL,knL); aimLimb(P.shinL,knL,ankL);
   this.setBone('thR',hipR,knR); this.setBone('shR',knR,ankR);
@@ -4180,6 +4205,100 @@ function rimify(m,r,g,b,power,strength){
   return m;
 }
 
+/* ================= CLOTH: the hakama obeys gravity ==================
+   Verlet panels pinned at the waist, colliding with the legs, settling
+   over the corpse. Real fabric, ~60 points per fighter. */
+function mkClothPanel(cols,rows,mat){
+  const geo=new THREE.PlaneGeometry(1,1,cols-1,rows-1);
+  const mesh=new THREE.Mesh(geo,mat);
+  mesh.frustumCulled=false; mesh.castShadow=true;
+  const pts=[];
+  for(let r=0;r<rows;r++)for(let c=0;c<cols;c++)
+    pts.push({p:V3(),pp:V3(),pin:r===0});
+  const cons=[];
+  const idx=(r,c)=>r*cols+c;
+  for(let r=0;r<rows;r++)for(let c=0;c<cols;c++){
+    const wSp=lerp(.062,.088,r/(rows-1));            // hakama flares
+    if(c+1<cols)cons.push([idx(r,c),idx(r,c+1),wSp]);
+    if(r+1<rows)cons.push([idx(r,c),idx(r+1,c),.1]);
+    if(c+1<cols&&r+1<rows)cons.push([idx(r,c),idx(r+1,c+1),Math.hypot(wSp,.1)*1.02]);
+  }
+  return {mesh,pts,cons,cols,rows,ni:0};
+}
+const _cp=V3(), _cq=V3();
+function segPush(pt,a,b,rad){
+  _cp.subVectors(b,a);
+  const L2=_cp.lengthSq(); if(L2<1e-8)return;
+  let t=_cq.subVectors(pt,a).dot(_cp)/L2; t=clamp(t,0,1);
+  _cq.copy(a).addScaledVector(_cp,t);
+  const d=pt.distanceTo(_cq);
+  if(d<rad&&d>1e-6)pt.addScaledVector(TMP1.subVectors(pt,_cq).divideScalar(d),rad-d);
+}
+Fighter.prototype.buildCloth=function(hakamaMat){
+  if(this.build.cloth===false)return;
+  this.cloth=[];
+  for(const side of [1,-1]){   // front, back
+    const P=mkClothPanel(6,5,hakamaMat);
+    P.side=side;
+    scene.add(P.mesh);
+    /* start points near the pelvis so the first frames don't explode */
+    for(const q of P.pts){ q.p.set(this.pos.x,0.7,this.pos.z); q.pp.copy(q.p); }
+    this.cloth.push(P);
+  }
+  if(this.skirtF)this.skirtF.visible=false;
+  if(this.skirtB)this.skirtB.visible=false;
+};
+Fighter.prototype.tickCloth=function(dt,J){
+  if(!this.cloth)return;
+  dt=Math.min(dt,.033);
+  const yaw=this.bodyYaw||0, fwd=DIRY(yaw), right=V3(fwd.z,0,-fwd.x);
+  for(const P of this.cloth){
+    /* pin the waistband */
+    for(let c=0;c<P.cols;c++){
+      const q=P.pts[c];
+      const lx=(c/(P.cols-1)-.5)*.3;
+      q.p.copy(J.pelvis)
+        .addScaledVector(right,lx)
+        .addScaledVector(fwd,P.side*.125);
+      q.p.y=J.pelvis.y-.06;
+      q.pp.copy(q.p);
+    }
+    /* verlet */
+    for(let i=P.cols;i<P.pts.length;i++){
+      const q=P.pts[i];
+      TMP2.subVectors(q.p,q.pp).multiplyScalar(.965);
+      q.pp.copy(q.p);
+      q.p.add(TMP2);
+      q.p.y-=5.4*dt*dt;                                   // gravity (verlet form)
+      q.p.addScaledVector(fwd,Math.sin(performance.now()*.0012+i)*.0004);
+      q.p.addScaledVector(this.vel,-dt*.25);              // drag from movement
+    }
+    for(let it=0;it<3;it++){
+      for(const [a,b,rest] of P.cons){
+        const A=P.pts[a],B=P.pts[b];
+        TMP2.subVectors(B.p,A.p);
+        const d=TMP2.length(); if(d<1e-6)continue;
+        const diff=(d-rest)/d*.5;
+        if(!A.pin)A.p.addScaledVector(TMP2,diff*(B.pin?2:1));
+        if(!B.pin)B.p.addScaledVector(TMP2,-diff*(A.pin?2:1));
+      }
+      /* the legs are inside the garment */
+      for(let i=P.cols;i<P.pts.length;i++){
+        const q=P.pts[i];
+        segPush(q.p,J.hipR,J.knR,.1); segPush(q.p,J.knR,J.ankR,.085);
+        segPush(q.p,J.hipL,J.knL,.1); segPush(q.p,J.knL,J.ankL,.085);
+        if(q.p.y<.015)q.p.y=.015;
+      }
+    }
+    /* write to the mesh */
+    const pos=P.mesh.geometry.attributes.position;
+    for(let i=0;i<P.pts.length;i++)
+      pos.setXYZ(i,P.pts[i].p.x,P.pts[i].p.y,P.pts[i].p.z);
+    pos.needsUpdate=true;
+    if((P.ni++&1)===0)P.mesh.geometry.computeVertexNormals();
+  }
+};
+
 /* THE GRIP CONE — a two-handed katana has a hard orientation envelope:
    up to full jodan overhead (even cocked slightly back), down to a deep
    gedan (~46° below), out to waki at the flank — but never inverted, and
@@ -4285,6 +4404,7 @@ function setup(){
   logEl.innerHTML='';
 }
 function disposeFighter(f){
+  if(f.cloth)for(const P of f.cloth)scene.remove(P.mesh);
   scene.remove(f.root); scene.remove(f.katana); scene.remove(f.trailMesh);
   if(f.skin)scene.remove(f.skin.mesh);
   if(f.glint)scene.remove(f.glint);
