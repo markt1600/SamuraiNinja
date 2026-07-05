@@ -219,7 +219,6 @@ renderer.setSize(innerWidth,innerHeight);
 renderer.setPixelRatio(Math.min(devicePixelRatio,2));
 renderer.shadowMap.enabled=true;
 renderer.shadowMap.type=THREE.PCFSoftShadowMap;
-renderer.shadowMap.type=THREE.PCFSoftShadowMap;
 renderer.outputEncoding=THREE.sRGBEncoding;
 renderer.toneMapping=THREE.ACESFilmicToneMapping;
 renderer.toneMappingExposure=1.12;
@@ -270,14 +269,18 @@ camera.position.set(0,2.1,6.4);
    gaussian at half res → additive composite with manual sRGB out.      */
 const POST=(()=>{
   try{
-    const mkRT=(w,h)=>new THREE.WebGLRenderTarget(w,h,{
+    /* HalfFloat targets: the scene stays linear HDR until the composite —
+       lanterns, moon and steel can be brighter than white, so the bloom
+       has real energy to work with. */
+    const mkRT=(w,h,depth)=>new THREE.WebGLRenderTarget(w,h,{
       minFilter:THREE.LinearFilter,magFilter:THREE.LinearFilter,
-      format:THREE.RGBAFormat,depthBuffer:true,stencilBuffer:false});
+      format:THREE.RGBAFormat,type:THREE.HalfFloatType,
+      depthBuffer:!!depth,stencilBuffer:false});
     const SS=IS_TOUCH?1.0:1.4;          // phones skip the supersample
     let W=innerWidth,H=innerHeight;
-    const rtScene=mkRT(Math.round(W*SS),Math.round(H*SS)),
-          rtA=mkRT(W>>1,H>>1), rtB=mkRT(W>>1,H>>1);
-    rtA.depthBuffer=rtB.depthBuffer=false;
+    const rtScene=mkRT(Math.round(W*SS),Math.round(H*SS),true),
+          rtA=mkRT(W>>1,H>>1), rtB=mkRT(W>>1,H>>1),      // tight halo, half res
+          rtC=mkRT(W>>2,H>>2), rtD=mkRT(W>>2,H>>2);      // wide glow, quarter res
     const quadGeo=new THREE.PlaneGeometry(2,2);
     const VS='varying vec2 vUv; void main(){ vUv=uv; gl_Position=vec4(position.xy,0.,1.); }';
     const mat=(fs,uniforms)=>{ const m=new THREE.ShaderMaterial({
@@ -287,8 +290,12 @@ const POST=(()=>{
       'uniform sampler2D tex; varying vec2 vUv;'+
       'void main(){ vec3 c=texture2D(tex,vUv).rgb;'+
       ' float l=dot(c,vec3(.2126,.7152,.0722));'+
-      ' gl_FragColor=vec4(c*smoothstep(.62,.95,l),1.);}',
+      ' gl_FragColor=vec4(c*smoothstep(.9,1.9,l),1.);}',   // HDR threshold: only true emitters bloom
       {tex:{value:rtScene.texture}});
+    const copy=mat(
+      'uniform sampler2D tex; varying vec2 vUv;'+
+      'void main(){ gl_FragColor=vec4(texture2D(tex,vUv).rgb,1.); }',
+      {tex:{value:rtA.texture}});
     const blurFS=
       'uniform sampler2D tex; uniform vec2 dir; varying vec2 vUv;'+
       'void main(){ vec3 s=texture2D(tex,vUv).rgb*.227;'+
@@ -300,21 +307,24 @@ const POST=(()=>{
     const blurH=mat(blurFS,{tex:{value:rtA.texture},dir:{value:new THREE.Vector2(1/(W>>1),0)}});
     const blurV=mat(blurFS,{tex:{value:rtB.texture},dir:{value:new THREE.Vector2(0,1/(H>>1))}});
     const comp=mat(
-      'uniform sampler2D scene; uniform sampler2D bloom; varying vec2 vUv;'+
+      'uniform sampler2D scene; uniform sampler2D bloom; uniform sampler2D bloom2; varying vec2 vUv;'+
       'uniform float uDesat; uniform float uVig; uniform float uAdren; uniform float uTime;'+
+      'uniform float uExposure;'+
       'void main(){'+
       ' vec2 cc=vUv-.5; float rr=dot(cc,cc);'+
       ' vec2 ca=cc*rr*.028;'+                                 // chromatic fringe
       ' vec3 c; c.r=texture2D(scene,vUv+ca).r;'+
       ' c.g=texture2D(scene,vUv).g;'+
       ' c.b=texture2D(scene,vUv-ca).b;'+
-      ' c+=texture2D(bloom,vUv).rgb*1.15;'+
+      ' c+=texture2D(bloom,vUv).rgb*.85;'+                    // tight halo
+      ' c+=texture2D(bloom2,vUv).rgb*1.2;'+                   // wide atmospheric glow
+      ' c*=uExposure;'+
       ' float l=dot(c,vec3(.2126,.7152,.0722));'+
       ' c=mix(c,vec3(l),uDesat);'+                              // life drains the colour
       ' c=mix(c,c*vec3(1.06,1.0,.94)*1.05,uAdren);'+            // adrenaline warmth
       ' float d=distance(vUv,vec2(.5));'+
       ' c*=1.-smoothstep(.62-uVig*.42,.98-uVig*.3,d)*(.55+uVig*.45);'+ // the world closes in
-      ' c=max(vec3(0.),(c*(2.51*c+.03))/(c*(2.43*c+.59)+.14));'+  // ACES filmic
+      ' c=max(vec3(0.),(c*(2.51*c+.03))/(c*(2.43*c+.59)+.14));'+  // ACES filmic (the ONLY tonemap)
       ' c=(c-.5)*1.04+.5+.004;'+                             // gentle grade over ACES
       ' float l2=dot(c,vec3(.2126,.7152,.0722));'+
       ' c=mix(vec3(l2),c,1.12);'+                              // saturation
@@ -322,34 +332,45 @@ const POST=(()=>{
       ' c+=(gr-.5)*.028;'+                                     // film grain
       ' c=pow(clamp(c,0.,1.),vec3(1./2.2));'+
       ' gl_FragColor=vec4(c,1.);}',
-      {scene:{value:rtScene.texture},bloom:{value:rtA.texture},
-       uDesat:{value:0},uVig:{value:0},uAdren:{value:0},uTime:{value:0}});
+      {scene:{value:rtScene.texture},bloom:{value:rtA.texture},bloom2:{value:rtC.texture},
+       uDesat:{value:0},uVig:{value:0},uAdren:{value:0},uTime:{value:0},
+       uExposure:{value:1.12}});
     const quadScene=new THREE.Scene();
     const quad=new THREE.Mesh(quadGeo,bright); quad.frustumCulled=false;
     quadScene.add(quad);
     const oCam=new THREE.OrthographicCamera(-1,1,1,-1,0,1);
     const pass=(m,target)=>{ quad.material=m;
       renderer.setRenderTarget(target); renderer.render(quadScene,oCam); };
+    const blurPair=(rt,tmp,w,h,n)=>{ for(let i=0;i<n;i++){
+      blurH.uniforms.dir.value.set(1/w,0);
+      blurH.uniforms.tex.value=rt.texture; pass(blurH,tmp);
+      blurV.uniforms.dir.value.set(0,1/h);
+      blurV.uniforms.tex.value=tmp.texture; pass(blurV,rt);
+    } };
     return {
       comp,
       render(){
         renderer.setRenderTarget(rtScene); renderer.render(scene,camera);
         pass(bright,rtA);
-        blurH.uniforms.tex.value=rtA.texture; pass(blurH,rtB);
-        blurV.uniforms.tex.value=rtB.texture; pass(blurV,rtA);
-        blurH.uniforms.tex.value=rtA.texture; pass(blurH,rtB);
-        blurV.uniforms.tex.value=rtB.texture; pass(blurV,rtA);
+        blurPair(rtA,rtB,W>>1,H>>1,2);
+        copy.uniforms.tex.value=rtA.texture; pass(copy,rtC);   // downsample the halo
+        blurPair(rtC,rtD,W>>2,H>>2,2);                          // and let it breathe
         comp.uniforms.bloom.value=rtA.texture;
+        comp.uniforms.bloom2.value=rtC.texture;
         renderer.setRenderTarget(null); pass(comp,null);
       },
       resize(w,h){ W=w;H=h; rtScene.setSize(Math.round(w*SS),Math.round(h*SS));
         rtA.setSize(w>>1,h>>1); rtB.setSize(w>>1,h>>1);
-        blurH.uniforms.dir.value.set(1/(w>>1),0); blurV.uniforms.dir.value.set(0,1/(h>>1)); },
+        rtC.setSize(w>>2,h>>2); rtD.setSize(w>>2,h>>2); },
     };
   }catch(e){ return null; }
 })();
-/* scene renders linear into the RT; composite does the sRGB conversion */
-if(POST)renderer.outputEncoding=THREE.LinearEncoding;
+/* scene renders linear HDR into the RT; the composite is the single place
+   where exposure, ACES and the sRGB conversion happen */
+if(POST){
+  renderer.outputEncoding=THREE.LinearEncoding;
+  renderer.toneMapping=THREE.NoToneMapping;
+}
 
 addEventListener('resize',()=>{ camera.aspect=innerWidth/innerHeight;
   camera.updateProjectionMatrix(); renderer.setSize(innerWidth,innerHeight);
@@ -381,10 +402,6 @@ moon.shadow.camera.near=2; moon.shadow.camera.far=30;
 moon.shadow.bias=-.0004;
 { const rim=new THREE.DirectionalLight(SRGB(0x39496a).getHex(),.4);
   rim.position.set(8,4,-9); scene.add(rim); }
-moon.shadow.mapSize.set(2048,2048);
-moon.shadow.camera.left=-8; moon.shadow.camera.right=8;
-moon.shadow.camera.top=8; moon.shadow.camera.bottom=-8;
-moon.shadow.bias=-.0004;
 scene.add(moon);
 scene.add(new THREE.HemisphereLight(SRGB(0x2c3a4e).getHex(),SRGB(0x0a0c10).getHex(),.6));
 
@@ -394,7 +411,8 @@ const RING_R=5.0;
 const lanterns=[];
 (function buildLanterns(){
   const stone=stdMat(0x565b60,{roughness:.95});
-  const flameM=new THREE.MeshBasicMaterial({color:SRGB(0xffc07a)});
+  /* HDR: flames emit brighter than white so the bloom sees them */
+  const flameM=new THREE.MeshBasicMaterial({color:SRGB(0xffc07a).multiplyScalar(2.6)});
   [[1,1],[-1,1],[1,-1],[-1,-1]].forEach(([sx,sz],i)=>{
     const g=new THREE.Group();
     const x=sx*(RING_R+1.5), z=sz*(RING_R+1.5);
@@ -580,7 +598,8 @@ scene.add(ringGround);
     ctx.fillStyle=g; ctx.fillRect(0,0,w,h);
   });
   const m=new THREE.Mesh(new THREE.PlaneGeometry(14,14),
-    new THREE.MeshBasicMaterial({map:glow||null,color:glow?0xffffff:SRGB(0xe8edf4).getHex(),
+    new THREE.MeshBasicMaterial({map:glow||null,
+      color:(glow?new THREE.Color(1,1,1):SRGB(0xe8edf4)).multiplyScalar(1.9),
       fog:false,transparent:true,opacity:.95,depthWrite:false}));
   m.position.set(-26,22,-48); m.lookAt(0,2,0); scene.add(m);
 })();
@@ -2270,7 +2289,11 @@ const _pj2={};
   .split(' ').forEach(k=>_pj2[k]=V3());
 Fighter.prototype.renderJoints=function(_dj){
   const P=this.parts, B=this.phys?this.phys.B:null;
-  P.pelvis.position.copy(_dj.pelvis); P.pelvis.quaternion.copy(B.pelvis.q);
+  P.pelvis.position.copy(_dj.pelvis);
+  if(B)P.pelvis.quaternion.copy(B.pelvis.q);
+  else{ /* no ragdoll yet (ritual before first fight frame): face the hip line */
+    TMP1.subVectors(_dj.hipR,_dj.hipL);
+    P.pelvis.quaternion.setFromAxisAngle(UPY,Math.atan2(-TMP1.z,TMP1.x)); }
   aimLimb(P.abdomen,_dj.chestB,_dj.pelvis);
   aimLimb(P.chest,_dj.chestT,_dj.chestB);
   aimLimb(P.neck,_dj.neckT,_dj.chestT);
@@ -2292,7 +2315,7 @@ Fighter.prototype.renderJoints=function(_dj){
   this.setBone('thR',_dj.hipR,_dj.knR); this.setBone('shR',_dj.knR,_dj.ankR);
   this.setBone('thL',_dj.hipL,_dj.knL); this.setBone('shL',_dj.knL,_dj.ankL);
   /* the sword falls with the hand that held it */
-  if(B.sword&&this.hasSword){
+  if(B&&B.sword&&this.hasSword){
     this.katana.position.copy(_dj.haR);
     TMP1.set(0,1,0).applyQuaternion(B.sword.q);
     this.katana.quaternion.setFromUnitVectors(UPY,TMP1);
@@ -3511,6 +3534,7 @@ const glintTex=canTex(64,64,(ctx,w,h)=>{
 });
 function mkGlint(){
   const m=new THREE.SpriteMaterial({map:glintTex||null,transparent:true,
+    color:new THREE.Color(2.2,2.3,2.5),               // HDR: steel catches fire
     opacity:0,depthWrite:false,blending:THREE.AdditiveBlending});
   const s=new THREE.Sprite(m); s.scale.set(.5,.5,1); scene.add(s); return s;
 }
@@ -4283,9 +4307,11 @@ function addOutline(mesh,thick){
     const mat=new THREE.MeshBasicMaterial({color:0x04060b,side:THREE.BackSide});
     if(mesh.isSkinnedMesh)mat.skinning=true;
     const t=(thick||.007).toFixed(4);
+    /* MeshBasicMaterial has no objectNormal — displace along the raw
+       normal attribute (pre-skinning is fine for a hull this thin) */
     mat.onBeforeCompile=s=>{ s.vertexShader=s.vertexShader.replace(
       '#include <begin_vertex>',
-      '#include <begin_vertex>\ntransformed += objectNormal*'+t+';'); };
+      '#include <begin_vertex>\ntransformed += normal*'+t+';'); };
     let o;
     if(mesh.isSkinnedMesh){ o=new THREE.SkinnedMesh(mesh.geometry,mat);
       o.bind(mesh.skeleton,mesh.bindMatrix); }
