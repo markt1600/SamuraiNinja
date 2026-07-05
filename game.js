@@ -548,13 +548,13 @@ function snowGlintify(m,cellScale,strength){
         '#include <emissivemap_fragment>\n'+
         '{ vec2 cell=floor(vWp.xz*'+cellScale+');\n'+
         '  float sel=zhash(cell+31.7);\n'+
-        '  if(sel>.85){\n'+
-        '    vec3 gn=normalize(vec3(zhash(cell)*2.-1.,2.1,zhash(cell+7.3)*2.-1.));\n'+
+        '  if(sel>.94){\n'+                                  // sparse: ~6% of cells
+        '    vec3 gn=normalize(vec3(zhash(cell)*2.-1.,2.6,zhash(cell+7.3)*2.-1.));\n'+
         '    vec3 Vw=normalize(cameraPosition-vWp);\n'+
         '    vec3 Hw=normalize(normalize(vec3(-7.,12.,5.))+Vw);\n'+
-        '    float g=pow(max(dot(gn,Hw),0.),130.);\n'+
-        '    g*=.7+.3*sin(uGlintT*5.+sel*47.);\n'+           // crystals twinkle
-        '    g*=1.-smoothstep(9.,16.,length(cameraPosition-vWp));\n'+ // near field only
+        '    float g=pow(max(dot(gn,Hw),0.),260.);\n'+       // hard pinprick flare
+        '    g*=.6+.4*sin(uGlintT*5.+sel*47.);\n'+           // crystals twinkle
+        '    g*=1.-smoothstep(7.,13.,length(cameraPosition-vWp));\n'+ // near field only
         '    totalEmissiveRadiance+=vec3(.9,1.,1.3)*g*'+strength+'; }\n'+
         '}');
   };
@@ -1959,7 +1959,8 @@ const MODELPIPE=(()=>{
     if(f.model){ scene.remove(f.model.root); }
     const root=THREE.SkeletonUtils?THREE.SkeletonUtils.clone(gltf.scene)
                                   :gltf.scene.clone(true);
-    /* scale to fighter height */
+    /* scale to fighter height (compose matrices first or the box is junk) */
+    root.updateMatrixWorld(true);
     const box=new THREE.Box3().setFromObject(root);
     const h=Math.max(box.max.y-box.min.y,.1);
     const s=1.72/h;
@@ -1967,6 +1968,10 @@ const MODELPIPE=(()=>{
     root.traverse(o=>{ if(o.isMesh){ o.castShadow=true; o.frustumCulled=false;
       if(o.material){
         const own=m=>{ const c=m.clone();
+          /* models that arrive without textures often read pitch black
+             under the moon — lift them to a dark steel that keeps shape */
+          if(!c.map&&c.color){ const hsl={h:0,s:0,l:0}; c.color.getHSL(hsl);
+            if(hsl.l<.06)c.color.setHSL(hsl.h,Math.min(hsl.s,.4),.16); }
           c._base=c.color?c.color.clone():null; return c; };
         o.material=Array.isArray(o.material)?o.material.map(own):own(o.material);
       } } });
@@ -1989,19 +1994,67 @@ const MODELPIPE=(()=>{
     if(!skinned)
       log('rig found but NO skinned mesh — on Mixamo download choose Skin: WITH SKIN',false);
     scene.add(root);
-    return {root,bones,scale:s,worldQ:{}};
+    /* keep the file's own animations: Idle/Walk/Run drive locomotion */
+    const anims=(gltf.animations&&gltf.animations.length?gltf.animations:
+                 (gltf.scene&&gltf.scene.animations)||[])||[];
+    return {root,bones,scale:s,worldQ:{},anims};
+  }
+  /* ---- locomotion: the model's own mocap breathes under the sim ----
+     Idle/Walk/Run clips (bundled Xbot/Soldier ship them) crossfade by
+     ground speed and play UNDER the joint drive; per-bone blend weights
+     let the clip show through the legs and spine while the sword arms
+     and the planted feet stay simulation-true. */
+  function tickLoco(f,dt){
+    const M=f.model; if(!M)return false;
+    if(!M.loco){
+      const A=M.anims||[];
+      const find=re=>A.find(a=>re.test(a.name));
+      const idle=find(/idle/i), walk=find(/walk/i), run=find(/run/i);
+      if(!walk&&!idle)M.loco={none:true};
+      else{
+        const mixer=new THREE.AnimationMixer(M.root);
+        const act=c=>{ if(!c)return null; const a=mixer.clipAction(c);
+          a.setLoop(THREE.LoopRepeat); a.play(); a.weight=0; return a; };
+        M.loco={mixer,idle:act(idle),walk:act(walk),run:act(run)};
+        log('locomotion clips: '+[idle&&'idle',walk&&'walk',run&&'run']
+          .filter(Boolean).join(' / '),false);
+      }
+    }
+    if(M.loco.none)return false;
+    const sp=Math.hypot(f.vel.x,f.vel.z);
+    const wRun=M.loco.run?clamp((sp-1.6)/1.4,0,1):0;
+    const wWalk=M.loco.walk?clamp(sp/.7,0,1)*(1-wRun):0;
+    const wIdle=M.loco.idle?Math.max(0,1-wWalk-wRun):0;
+    const k=clamp(dt*6,0,1);
+    const setA=(a,w)=>{ if(a)a.weight=lerp(a.weight,w,k); };
+    setA(M.loco.idle,wIdle); setA(M.loco.walk,wWalk); setA(M.loco.run,wRun);
+    /* stride cadence follows actual ground speed */
+    if(M.loco.walk)M.loco.walk.timeScale=clamp(sp/1.4,.5,1.8);
+    if(M.loco.run)M.loco.run.timeScale=clamp(sp/3,.6,1.6);
+    M.loco.mixer.update(dt);
+    const move=clamp(sp/.7,0,1);
+    MODELPIPE.blendMap={
+      Hips:1, RightFoot:1, LeftFoot:1,                  // anchors stay sim-true
+      Spine:lerp(.88,.7,move), Spine1:lerp(.88,.7,move), Spine2:lerp(.9,.75,move),
+      Neck:.92, Head:.95,
+      RightUpLeg:lerp(.9,.55,move), RightLeg:lerp(.9,.55,move),
+      LeftUpLeg:lerp(.9,.55,move), LeftLeg:lerp(.9,.55,move),
+    };
+    return true;
   }
   /* drive the rig from joint positions (alive: f._K + head; dead: _dj) */
   function drive(f,J){
     const M=f.model; if(!M)return;
     const fwd=DIRY(f.bodyYaw||0);
     const w=MODELPIPE.driveBlend===undefined?1:MODELPIPE.driveBlend;
+    const bm=MODELPIPE.blendMap;
     const setW=(name,q)=>{ const b=M.bones[name]; if(!b)return;
       const p=b.parent;
       p.getWorldQuaternion(_qp);
       _qp.invert().multiply(q);
-      if(w>=1)b.quaternion.copy(_qp);
-      else b.quaternion.slerp(_qp,w);
+      const ww=w*(bm&&bm[name]!==undefined?bm[name]:1);
+      if(ww>=1)b.quaternion.copy(_qp);
+      else b.quaternion.slerp(_qp,ww);
       b.updateMatrixWorld(true);
     };
     /* hips: world position + orientation */
@@ -2207,10 +2260,20 @@ const MODELPIPE=(()=>{
   }
   const current={P:null,E:null};
   return {enabled:true,sources,load,attach,drive,boneQuat,playClip,tickClips,clips,
+    tickLoco,blendMap:null,
     playPuppet,tickPuppet,current,
     _handFix:new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1,0,0),-Math.PI/2),
     mode:0};
 })();
+/* bundled character models join the picker (menu arrows, or M/N in-fight);
+   only files that actually exist appear */
+if(MODELPIPE.enabled&&typeof fetch!=='undefined')
+  MODELPIPE.sources.forEach(src=>{
+    fetch(src,{method:'HEAD'}).then(r=>{ if(!r.ok)return;
+      PICKER.roster.push({label:'⬢ '+src.split('/').pop()
+        .replace(/\.(glb|fbx)$/i,'').toUpperCase(),src});
+    }).catch(()=>{});
+  });
 
 const _pq=new THREE.Quaternion(), _pv=V3(), _pv2=V3();
 function mkTargetQ(from,to,q){ _pv.subVectors(to,from).normalize();
@@ -2970,7 +3033,11 @@ Fighter.prototype.updateAlive=function(dt,opponent){
     this.physTargets(this._K,dt);
   }
   if(this.model){
-    if(!MODELPIPE.tickClips(this,dt))MODELPIPE.drive(this,this._K);
+    if(!MODELPIPE.tickClips(this,dt)){
+      MODELPIPE.tickLoco(this,dt);          // mocap flavor under the sim
+      MODELPIPE.drive(this,this._K);
+      MODELPIPE.blendMap=null;              // loco weights live one frame
+    }
   }
   this.tickCloth(dt,this._K);
   this.tickSleeves(dt,this._K);
