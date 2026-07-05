@@ -1170,6 +1170,20 @@ class Fighter{
       parts.chest.add(yokeR,yokeL,collar); }
     parts.abdomen=limbMesh(D.torso*.38,.125,.135,kimono);
     parts.neck=limbMesh(D.neck,.043,.05,skin);
+    if(!this.build.bare){ /* the eri: crossed kimono collar */
+      const eriM=stdMat(this.palette.accent,{roughness:.85});
+      for(const s of [1,-1]){
+        const band=new THREE.Mesh(new THREE.BoxGeometry(.02,.15,.012),eriM);
+        band.position.set(s*.045,-.05,.062); band.rotation.z=s*.5;
+        band.rotation.x=-.15;
+        parts.neck.add(band);
+      }
+    }
+    /* elbow joints: the arm bends AROUND something */
+    const elbM=this.build.bare?skin:kimono;
+    parts.elbowR=new THREE.Mesh(new THREE.SphereGeometry(.036,8,7),elbM);
+    parts.elbowL=new THREE.Mesh(new THREE.SphereGeometry(.036,8,7),elbM);
+    parts.elbowR.castShadow=parts.elbowL.castShadow=true;
     /* head: skull, jaw, hair, topknot; player wears a hachimaki */
     parts.head=new THREE.Group();
     { const fTex=faceTex(palette.skin,palette.face);
@@ -1250,9 +1264,40 @@ class Fighter{
     const LB=this.build.limb;
     parts.forearmR=limbMesh(D.foreArm,.052*LB,.042*LB,skin);
     parts.forearmL=limbMesh(D.foreArm,.052*LB,.042*LB,skin);
-    parts.handR=new THREE.Mesh(new THREE.SphereGeometry(.037,8,7),skin);
-    parts.handR.scale.set(.8,1.15,.9); parts.handR.castShadow=true;
-    parts.handL=parts.handR.clone();
+    /* a HAND: palm, four curled fingers, an opposed thumb.
+       pose 'grip' wraps a handle along local +Y; 'fist' closes fully. */
+    const mkHand=(pose,mirror)=>{
+      const g=new THREE.Group();
+      const s=mirror?-1:1;
+      const palm=new THREE.Mesh(new THREE.BoxGeometry(.052,.075,.03),skin);
+      palm.position.z=-.006; g.add(palm);
+      const curl=pose==='fist'?1.9:1.25;      // radians of finger wrap
+      for(let i=0;i<4;i++){
+        const fx=(i-1.5)*.014*s;
+        const seg1=new THREE.Mesh(new THREE.BoxGeometry(.0115,.036,.013),skin);
+        const j1=new THREE.Group();
+        j1.position.set(fx,.038,.006); j1.rotation.x=curl*.55;
+        seg1.position.y=.018; j1.add(seg1);
+        const j2=new THREE.Group();
+        j2.position.y=.036; j2.rotation.x=curl*.7;
+        const seg2=new THREE.Mesh(new THREE.BoxGeometry(.0105,.03,.012),skin);
+        seg2.position.y=.015; j2.add(seg2); j1.add(j2);
+        g.add(j1);
+      }
+      const tj=new THREE.Group();
+      tj.position.set(.028*s,-.006,.012);
+      tj.rotation.set(pose==='fist'?1.1:.7,0,-.9*s);
+      const th1=new THREE.Mesh(new THREE.BoxGeometry(.013,.034,.014),skin);
+      th1.position.y=.017; tj.add(th1);
+      const th2=new THREE.Mesh(new THREE.BoxGeometry(.012,.026,.013),skin);
+      th2.position.y=.045; th2.rotation.x=pose==='fist'?.9:.6; tj.add(th2);
+      g.add(tj);
+      g.traverse(o=>{ if(o.isMesh)o.castShadow=true; });
+      return g;
+    };
+    const handPose=this.weapon&&this.weapon.blunt?'fist':'grip';
+    parts.handR=mkHand(handPose,false);
+    parts.handL=mkHand(handPose,true);
     /* legs: hakama — wide at the knee, gathered at the ankle */
     parts.thighR=limbMesh(D.thigh,.1,.14,hakama);
     parts.thighL=limbMesh(D.thigh,.1,.14,hakama);
@@ -1662,7 +1707,7 @@ const PHYS=(typeof ZPhys!=='undefined')?{
 if(PHYS.enabled){ PHYS.engine.g.set(0,-9.81,0); PHYS.engine.substeps=6; PHYS.engine.iters=3; }
 
 
-const ZAN_VERSION='v33';
+const ZAN_VERSION='v35';
 console.log('%c斬 ZAN '+ZAN_VERSION,'font-size:16px');
 
 /* =========================================================================
@@ -2542,10 +2587,21 @@ Fighter.prototype.updateAlive=function(dt,opponent){
   if(ft.L.swing>0)hurtSag+=this.legDamage.R*.055;
   if(ft.R.swing>0)hurtSag+=this.legDamage.L*.055;
   hurtSag+=(this.kneel||0)*.34;   // driven to a knee
+  /* nobody stands perfectly still: weight drifts foot to foot */
+  const spd2=Math.hypot(this.vel.x,this.vel.z);
+  const idle=spd2<.2&&this.tipVel.lengthSq()<4&&!this.stun;
+  this.idleT=idle?(this.idleT||0)+dt:0;
+  const swayT=idle?Math.sin(this.breath*.55)*.02+Math.sin(this.breath*.19)*.013:0;
+  this._sway=lerp(this._sway||0,swayT,clamp(dt*1.5,0,1));
+  if(this.idleT>(this._nextShift||5)){       // an honest little repositioning step
+    this._nextShift=this.idleT+4+Math.random()*3.5;
+    this.vel.x+=rand(-.3,.3); this.vel.z+=rand(-.22,.22);
+  }
   const pelvisY=D.pelvisY-hurtSag-(stepping?.02:0)+Math.sin(this.breath*1.6)*.007+(this.previewBob||0);
   const pelvis=V3(lerp(feetMid.x,this.pos.x,.55),pelvisY,lerp(feetMid.z,this.pos.z,.55));
   const pelvisYawA=this.bodyYaw+this.twist*.3;
   const fwdP=DIRY(pelvisYawA), rightP=V3(fwdP.z,0,-fwdP.x);
+  pelvis.addScaledVector(rightP,this._sway||0);
 
   /* flinch spring: hits ripple through the trunk */
   this.flinchV.addScaledVector(this.flinch,-140*dt).addScaledVector(this.flinchV,-12*dt);
@@ -2593,15 +2649,21 @@ Fighter.prototype.updateAlive=function(dt,opponent){
     P.head.lookAt(TMP3);
     _headQ.setFromAxisAngle(UPY,chestYawA);
     P.head.quaternion.slerp(_headQ,.35);
+    const droop=clamp((this.pain-22)/140,0,.42)
+               +clamp((78-this.consciousness)/170,0,.38);
+    if(droop>0){ _pq.setFromAxisAngle(rightC,droop*.6);
+      P.head.quaternion.premultiply(_pq); }
   }
 
   /* ---- sword: spring-driven tip, two-handed grip ---- */
+  const brRise=Math.sin(this.breath*1.6)*.0045;   // the shoulders breathe
   const shR=chestT.clone().addScaledVector(rightC,.185).addScaledVector(fwdC,.01);
+  shR.y+=brRise;
   this.soften('shR',shR,30,dt); this._K.shR.copy(shR);
   shR.y=chestT.y-.045;
   const shL=chestT.clone().addScaledVector(rightC,-.185).addScaledVector(fwdC,.01);
   this.soften('shL',shL,30,dt); this._K.shL.copy(shL);
-  shL.y=chestT.y-.045;
+  shL.y=chestT.y-.045+brRise;
   const ctrl=this.swordControl;
   if(this.hasSword){
     const W=this.weapon||WEAPONS.katana;
@@ -2694,7 +2756,8 @@ Fighter.prototype.updateAlive=function(dt,opponent){
 
     /* arms: two-bone IK with anatomical elbow hints */
     const elR=V3(),elL=V3();
-    const handR=handle.clone().addScaledVector(bladeDir,-.02);   // at the tsuba
+    let handR=handle.clone().addScaledVector(bladeDir,-.02);   // at the tsuba
+    if(this._ritualGrabR)handR=this._ritualGrabR.clone();
     /* on full extension the LEFT hand slides up the grip toward the
        tsuba rather than tearing off the pommel — as real hands do */
     let gripS=-.15;
@@ -2702,13 +2765,15 @@ Fighter.prototype.updateAlive=function(dt,opponent){
       while(gripS<-.03&&
         TMP4.copy(handle).addScaledVector(bladeDir,gripS).distanceTo(shL)>maxL)
         gripS+=.02; }
-    const handL=handle.clone().addScaledVector(bladeDir,gripS);
+    let handL=handle.clone().addScaledVector(bladeDir,gripS);
+    if(this._ritualGrabL)handL=this._ritualGrabL.clone();
     /* the elbows: down and in at guard, out and up through the raise */
     const rise=clamp((handle.y-shR.y+.18)*2.6,0,1);
     const hintR=rightC.clone().multiplyScalar(lerp(.85,1.2,rise))
       .addScaledVector(fwdC,lerp(-.3,.15,rise)); hintR.y=lerp(-.55,.5,rise);
     solveIK(shR,handR,D.upperArm,D.foreArm,hintR,elR);
     this._ikR=(this._ikR||elR.clone()).copy(elR);      // the exact IK answer
+    if(P.elbowR)P.elbowR.position.copy(elR);
     this.soften('elR',elR,34,dt);
     /* flesh may lag the bone by 7cm — never more; then exact length */
     TMP4.subVectors(elR,this._ikR);
@@ -2729,6 +2794,7 @@ Fighter.prototype.updateAlive=function(dt,opponent){
         .addScaledVector(fwdC,lerp(-.3,.15,rise)); hintL.y=lerp(-.55,.5,rise);
       solveIK(shL,handL,D.upperArm,D.foreArm,hintL,elL);
       this._ikL=(this._ikL||elL.clone()).copy(elL);
+      if(P.elbowL)P.elbowL.position.copy(elL);
       this.soften('elL',elL,34,dt);
       TMP4.subVectors(elL,this._ikL);
       if(TMP4.lengthSq()>.0049)elL.copy(this._ikL).addScaledVector(TMP4.clampLength(0,.07),1);
@@ -3213,6 +3279,13 @@ function updateLoose(f,dt){
       k.rotation.x=Math.PI/2*.96; f.droppedSword=null; }
   }
   if(f.severedPieces)for(const p of f.severedPieces){
+    if(p.held){                       // carried in the victor's hand
+      p.heldT-=dt;
+      const h=p.held.parts&&p.held.parts.handL;
+      if(h)p.mesh.position.copy(h.position);
+      if(p.heldT<=0){ p.held=null; p.vel=p.relVel||V3(2,3,0); }
+      continue;
+    }
     if(!p.vel)continue;
     if(p.cloth){ p.vel.y-=2.6*dt; p.vel.multiplyScalar(1-1.4*dt); }
     else p.vel.y-=9.8*dt;
@@ -4443,41 +4516,70 @@ function updateKillRitual(dt){
      and hurls it across the ring. Then, and only then, the sheathing. */
   const loser=vt.isPlayer?enemy:player;
   const headless=!loser||!loser.parts||loser.severed.head;
-  kc.sheathAt=headless||kc.beheadDone?Math.max(kc.sheathAt||1.1,kc.thrownAt?kc.thrownAt+.5:1.1):99;
-  if(!headless&&!kc.beheadDone&&loser.dead&&!vt.weapon.blunt){
+  const bare=!!(vt.weapon&&vt.weapon.blunt);
+  kc.sheathAt=(headless||kc.beheadDone)&&!bare
+    ?Math.max(kc.sheathAt||1.1,kc.thrownAt?kc.thrownAt+.7:1.1):99;
+  if(!headless&&loser.dead){
     const hp=loser.parts.head.position;
-    if(kc.ritual>1.2){
+    if(kc.ritual>1.2&&!kc.released){
       TMP1.set(hp.x-vt.pos.x,0,hp.z-vt.pos.z);
       const d=TMP1.length();
-      if(d>1.05&&kc.ritual<4.5){                 // walk to the body
+      if(d>.85&&!kc.chopT){                       // walk to the body
         TMP1.divideScalar(d);
         vt.vel.x=lerp(vt.vel.x,TMP1.x*1.1,clamp(dt*4,0,1));
         vt.vel.z=lerp(vt.vel.z,TMP1.z*1.1,clamp(dt*4,0,1));
         vt.yaw=vt.bodyYaw=Math.atan2(TMP1.x,TMP1.z);
         vt.tipTarget.copy(vt.pos).addScaledVector(DIRY(vt.bodyYaw),.9).setY(1.1);
-      } else {                                    // stand over it
+      } else {
         vt.vel.x*=Math.pow(.001,dt); vt.vel.z*=Math.pow(.001,dt);
         vt.yaw=vt.bodyYaw=Math.atan2(hp.x-vt.pos.x,hp.z-vt.pos.z);
         if(!kc.chopT)kc.chopT=kc.ritual;
         const ph=kc.ritual-kc.chopT;
-        if(ph<.45)vt.tipTarget.set(vt.pos.x,2.15,vt.pos.z)
-          .addScaledVector(DIRY(vt.bodyYaw),.3);          // the raise
-        else vt.tipTarget.set(hp.x,.25,hp.z);              // the fall
-        if(ph>.62&&!kc.beheadDone){
-          kc.beheadDone=true; kc.thrownAt=kc.ritual;
-          loser.wakeCorpse&&loser.wakeCorpse();
-          TMP2.set(-hp.x,0,-hp.z);
-          if(TMP2.lengthSq()<.01)TMP2.set(1,0,0);
-          TMP2.normalize();
-          loser.decapitate(hp.clone(),TMP2.clone());
-          const piece=(loser.severedPieces||[])
-            .find(p=>p.mesh===loser.parts.head);
-          if(piece&&piece.vel){                    // ACROSS the ring
-            piece.vel.set(TMP2.x*7.5,4.8,TMP2.z*7.5);
-            piece.ang.set(rand(-14,14),rand(-14,14),rand(-14,14));
+        const grabDur=bare?.9:.5;
+        if(!kc.beheadDone){
+          if(ph<grabDur){                          /* THE GRAB */
+            vt._ritualGrabL=vt._ritualGrabL||hp.clone();
+            vt._ritualGrabL.copy(hp);
+            if(bare){                              /* both hands; straining */
+              vt._ritualGrabR=vt._ritualGrabR||hp.clone();
+              vt._ritualGrabR.copy(hp);
+              vt._ritualGrabR.x+=.09; vt._ritualGrabL.x-=.09;
+              if(ph>grabDur*.4){ const j=Math.sin(ph*40)*.015;
+                vt._ritualGrabL.y+=j; vt._ritualGrabR.y-=j; }
+            } else {                               /* blade poised behind */
+              vt.tipTarget.copy(vt.pos)
+                .addScaledVector(DIRY(vt.bodyYaw+1.1),.7).setY(1.35);
+            }
+          } else {                                 /* SEVER — or TEAR */
+            kc.beheadDone=true; kc.thrownAt=kc.ritual;
+            loser.wakeCorpse&&loser.wakeCorpse();
+            TMP2.set(-hp.x,0,-hp.z);
+            if(TMP2.lengthSq()<.01)TMP2.set(1,0,0);
+            TMP2.normalize();
+            if(!bare)vt.tipTarget.copy(hp).addScaledVector(DIRY(vt.bodyYaw+2.6),.8);
+            loser.decapitate(hp.clone(),TMP2.clone());
+            if(bare){ emitBlood(hp,V3(0,1,0),5,40);
+              vt.pain=Math.min(100,vt.pain+4); }
+            const piece=(loser.severedPieces||[])
+              .find(p=>p.mesh===loser.parts.head);
+            if(piece){                             /* carried, then hurled */
+              piece.held=vt; piece.heldT=.5; piece.vel=null;
+              piece.relVel=V3(TMP2.x*(bare?6.4:7.5),bare?5.4:4.8,
+                              TMP2.z*(bare?6.4:7.5));
+              piece.ang.set(rand(-14,14),rand(-14,14),rand(-14,14));
+            }
+            game.shake=Math.max(game.shake,.9);
+            log(bare?'the head is TORN FREE \u2014 and hurled'
+                    :'the head is taken \u2014 and thrown across the snow',false);
           }
-          game.shake=Math.max(game.shake,.9);
-          log('the head is taken \u2014 and thrown across the snow',false);
+        } else {                                   /* raise it high, release */
+          const t2=kc.ritual-kc.thrownAt;
+          vt._ritualGrabL&&vt._ritualGrabL.copy(vt.pos)
+            .addScaledVector(DIRY(vt.bodyYaw),.35).setY(1.55+t2*.6);
+          if(bare&&vt._ritualGrabR)vt._ritualGrabR.copy(vt._ritualGrabL)
+            .setX(vt._ritualGrabL.x+.14);
+          if(t2>.55){ vt._ritualGrabL=null; vt._ritualGrabR=null;
+            kc.released=true; }
         }
       }
     }
