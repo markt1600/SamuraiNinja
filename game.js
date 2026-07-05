@@ -1268,9 +1268,15 @@ class Fighter{
        pose 'grip' wraps a handle along local +Y; 'fist' closes fully. */
     const mkHand=(pose,mirror)=>{
       const g=new THREE.Group();
+      const inner=new THREE.Group();
+      g.add(inner);
+      /* grip pose: rotate so the finger-curl axis runs ALONG the handle
+         (the weapon's +Y), so fingers wrap around it instead of across */
+      if(pose==='grip')inner.rotation.z=(mirror?-1:1)*Math.PI/2;
+      const gAdd=o=>inner.add(o);
       const s=mirror?-1:1;
       const palm=new THREE.Mesh(new THREE.BoxGeometry(.052,.075,.03),skin);
-      palm.position.z=-.006; g.add(palm);
+      palm.position.z=-.024; gAdd(palm);
       const curl=pose==='fist'?1.9:1.25;      // radians of finger wrap
       g.userData.joints=[];
       for(let i=0;i<4;i++){
@@ -1293,7 +1299,7 @@ class Fighter{
       th1.position.y=.017; tj.add(th1);
       const th2=new THREE.Mesh(new THREE.BoxGeometry(.012,.026,.013),skin);
       th2.position.y=.045; th2.rotation.x=pose==='fist'?.9:.6; tj.add(th2);
-      g.add(tj);
+      gAdd(tj);
       g.traverse(o=>{ if(o.isMesh)o.castShadow=true; });
       return g;
     };
@@ -1711,7 +1717,7 @@ const PHYS=(typeof ZPhys!=='undefined')?{
 if(PHYS.enabled){ PHYS.engine.g.set(0,-9.81,0); PHYS.engine.substeps=6; PHYS.engine.iters=3; }
 
 
-const ZAN_VERSION='v36';
+const ZAN_VERSION='v37';
 console.log('%c斬 ZAN '+ZAN_VERSION,'font-size:16px');
 
 /* =========================================================================
@@ -1735,7 +1741,7 @@ const BUILDS={
     palette:{kimono:0x8a6a48,hakama:0x5a4028,obi:0x3a2a18,skin:0xc09068,
       accent:0xb89858,face:{stubble:true}}},
   sumo:{label:'雷 RAIDEN — sumo',
-    sh:1.2, waist:1.62, hip:1.5, limb:1.35, hair:'topknot', bare:true, mass:1.55, cloth:false,
+    sh:1.3, waist:2.05, hip:1.85, limb:1.52, hair:'topknot', bare:true, mass:1.9, cloth:false,
     palette:{kimono:0xd8a880,hakama:0xd8a880,obi:0x1a2a4a,skin:0xd8a880,
       accent:0x1a2a4a,face:{stubble:true}}}};
 const WEAPONS={
@@ -1965,7 +1971,7 @@ const MODELPIPE=(()=>{
     }
     /* the cloth remembers the blood */
     if(f.kimonoMat&&M.root){
-      const soak=clamp((1-(f.bloodFrac||1))*1.4,0,.7);
+      const soak=clamp((1-(f.bloodFrac||1))*2.1,0,.85);
       M.root.traverse(o=>{ if(!o.isMesh||!o.material)return;
         const mats=Array.isArray(o.material)?o.material:[o.material];
         for(const m of mats)if(m._base&&m.color)
@@ -2728,8 +2734,9 @@ Fighter.prototype.updateAlive=function(dt,opponent){
        Raise the tip overhead and the blade cocks back (furikaburi);
        cut through and the tip snaps far ahead of the hands. The blade
        is no longer collinear with the arm — it is HELD, not pointed. */
-    const gripAnchor=chestB.clone().addScaledVector(fwdC,.14);
-    gripAnchor.y=chestB.y+.12;
+    const BL=this.weapon&&this.weapon.blunt;
+    const gripAnchor=chestB.clone().addScaledVector(fwdC,BL?.2:.14);
+    gripAnchor.y=chestB.y+(BL?.3:.12);      // fists ride high
     const toTip=TMP1.subVectors(this.tip,gripAnchor);
     const reach=Math.max(toTip.length(),.001); toTip.divideScalar(reach);
     TMP3.copy(fwdC).setY(-.18).normalize();          // neutral guard direction
@@ -2789,6 +2796,11 @@ Fighter.prototype.updateAlive=function(dt,opponent){
         TMP4.copy(handle).addScaledVector(bladeDir,gripS).distanceTo(shL)>maxL)
         gripS+=.02; }
     let handL=handle.clone().addScaledVector(bladeDir,gripS);
+    if(BL){ /* the rear fist guards the jaw — boxing, not prayer */
+      handL=chestT.clone().addScaledVector(fwdC,.26)
+        .addScaledVector(rightC,-.14);
+      handL.y=chestT.y+.14+Math.sin(this.breath*2.2)*.012;
+    }
     if(this._ritualGrabL)handL=this._ritualGrabL.clone();
     /* the elbows: down and in at guard, out and up through the raise */
     const rise=clamp((handle.y-shR.y+.18)*2.6,0,1);
@@ -3308,6 +3320,8 @@ function updateLoose(f,dt){
       p.heldT-=dt;
       const h=p.held.parts&&p.held.parts.handL;
       if(h)p.mesh.position.copy(h.position);
+      if(Math.random()<dt*14)
+        emitBlood(p.mesh.position,V3(rand(-.2,.2),-1,rand(-.2,.2)),1.4,3);
       if(p.heldT<=0){ p.held=null; p.vel=p.relVel||V3(2,3,0); }
       continue;
     }
@@ -3841,7 +3855,7 @@ Fighter.prototype.addOpenWound=function(partKey,worldPt,severity){
   try{
     const g=new THREE.Group();
     const deep=severity!=='severe'?true:Math.random()<.6;
-    const big=severity==='mortal'?2.2:(severity==='severe'?1.5:1);
+    const big=severity==='mortal'?3.0:(severity==='severe'?2.1:1.4);
     const clothed=CLOTHED.test(partKey);
     /* torn cloth rim, in this fighter's own cloth color */
     if(clothed&&this.palette){
@@ -3889,7 +3903,7 @@ Fighter.prototype.addOpenWound=function(partKey,worldPt,severity){
       }
     }
     part.updateMatrixWorld(true);
-    g.position.copy(part.worldToLocal(worldPt.clone())).multiplyScalar(1.04);
+    g.position.copy(part.worldToLocal(worldPt.clone())).multiplyScalar(1.07);
     g.lookAt(g.position.clone().multiplyScalar(3));
     g.traverse(o=>{ if(o.isMesh){ o.renderOrder=3;
       if(o.material){ o.material.polygonOffset=true;
@@ -3904,7 +3918,7 @@ Fighter.prototype.addGash=function(partKey,worldPt,dir){
   this._gashes++;
   try{
     const g=new THREE.Group();
-    const m=new THREE.Mesh(new THREE.PlaneGeometry(.14,.06),
+    const m=new THREE.Mesh(new THREE.PlaneGeometry(.21,.09),
       new THREE.MeshBasicMaterial({map:gashTex,transparent:true,
         depthWrite:false,polygonOffset:true,polygonOffsetFactor:-2}));
     /* parted flesh: two raised lips flanking the cut, wet interior */
@@ -4568,6 +4582,9 @@ function updateBind(dt){
     game._bindN=game._bindTouch?(game._bindN||0)+1:0;
     game._bindTouch=false;
     if(game._bindN>=8&&game.state==='fight'){
+      if((player.weapon&&player.weapon.blunt)||(enemy.weapon&&enemy.weapon.blunt)){
+        game._bindN=0;   // there is no bind without two blades
+      } else
       game.bind={t:0,pr:0,pt:game._bindPt.clone(),scr:0,yielding:false};
       /* the Mirror yields on purpose, to whirl and counter */
       if(enemyAI.P.kamae==='seigan'&&Math.random()<.6)game.bind.yielding=true;
@@ -4638,7 +4655,7 @@ function updateKillRitual(dt){
   const headless=!loser||!loser.parts||loser.severed.head;
   const bare=!!(vt.weapon&&vt.weapon.blunt);
   kc.sheathAt=(headless||kc.beheadDone)&&!bare
-    ?Math.max(kc.sheathAt||1.1,kc.thrownAt?kc.thrownAt+.7:1.1):99;
+    ?Math.max(kc.sheathAt||1.1,kc.thrownAt?kc.thrownAt+1.7:1.1):99;
   if(!headless&&loser.dead){
     const hp=loser.parts.head.position;
     if(kc.ritual>1.2&&!kc.released){
@@ -4682,8 +4699,13 @@ function updateKillRitual(dt){
               vt.pain=Math.min(100,vt.pain+4); }
             const piece=(loser.severedPieces||[])
               .find(p=>p.mesh===loser.parts.head);
+            /* the stump ERUPTS — a fountain no one can miss */
+            addSquirt(loser,'neck',hp.clone(),6.5,3.6);
+            addSquirt(loser,'chest',hp.clone().setY(hp.y-.2),4,2.2);
+            emitBlood(hp,V3(0,1,0),7,90);
+            game.timeScale=.28; game.slowT=.7;
             if(piece){                             /* carried, then hurled */
-              piece.held=vt; piece.heldT=.5; piece.vel=null;
+              piece.held=vt; piece.heldT=1.5; piece.vel=null;
               piece.relVel=V3(TMP2.x*(bare?6.4:7.5),bare?5.4:4.8,
                               TMP2.z*(bare?6.4:7.5));
               piece.ang.set(rand(-14,14),rand(-14,14),rand(-14,14));
@@ -4698,7 +4720,7 @@ function updateKillRitual(dt){
             .addScaledVector(DIRY(vt.bodyYaw),.35).setY(1.55+t2*.6);
           if(bare&&vt._ritualGrabR)vt._ritualGrabR.copy(vt._ritualGrabL)
             .setX(vt._ritualGrabL.x+.14);
-          if(t2>.55){ vt._ritualGrabL=null; vt._ritualGrabR=null;
+          if(t2>1.45){ vt._ritualGrabL=null; vt._ritualGrabR=null;
             kc.released=true; }
         }
       }
@@ -4872,7 +4894,7 @@ function frame(now){
     if(game.introT>0)game.introT-=dt;
     const introHold=game.introT>0;
     const ritualHold=(killCam&&killCam.victor===player&&
-      killCam.ritual<(killCam.beheadDone?killCam.thrownAt+1.6:5.2))||introHold;
+      killCam.ritual<(killCam.beheadDone?killCam.thrownAt+2.6:5.2))||introHold;
     if(player.alive&&game.state==='fight'&&!introHold)playerIntent(player,enemy);
     else if(player.alive&&!ritualHold)playerIntent(player,enemy);
     updateKillRitual(dt);
