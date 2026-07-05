@@ -192,12 +192,28 @@
   <button class="begin" id="btn-again">AGAIN&nbsp;&nbsp;·&nbsp;&nbsp;R</button>
 </div>
 
-<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
-<script src="fflate.min.js?v=v40"></script>
-<script src="GLTFLoader.js?v=v40"></script>
-<script src="FBXLoader.js?v=v40"></script>
-<script src="SkeletonUtils.js?v=v40"></script>
-<script src="physics.js?v=v40"></script>
-<script src="game.js?v=v40"></script>
+<script type="importmap">
+{ "imports": { "three": "./vendor/three.module.js?v=v41",
+               "three/addons/": "./vendor/addons/" } }
+</script>
+<script type="module">
+/* modern three (r164) is ESM-only; the game scripts are classic scripts that
+   expect a global THREE — build one namespace with the addons attached,
+   then load physics + game in order. */
+import * as THREE from 'three';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { FBXLoader } from 'three/addons/loaders/FBXLoader.js';
+import * as SkeletonUtils from 'three/addons/utils/SkeletonUtils.js';
+/* the game manages color spaces by hand (its own linear pipeline + sRGB
+   composite); keep r128-era color semantics */
+THREE.ColorManagement.enabled = false;
+window.THREE = Object.assign({}, THREE, { GLTFLoader, FBXLoader, SkeletonUtils });
+for (const src of ['physics.js?v=v41', 'game.js?v=v41'])
+  await new Promise((ok, fail) => {
+    const s = document.createElement('script');
+    s.src = src; s.onload = ok; s.onerror = fail;
+    document.body.appendChild(s);
+  });
+</script>
 </body>
 </html>

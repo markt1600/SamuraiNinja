@@ -219,7 +219,7 @@ renderer.setSize(innerWidth,innerHeight);
 renderer.setPixelRatio(Math.min(devicePixelRatio,2));
 renderer.shadowMap.enabled=true;
 renderer.shadowMap.type=THREE.PCFSoftShadowMap;
-renderer.outputEncoding=THREE.sRGBEncoding;
+renderer.outputColorSpace=THREE.SRGBColorSpace;
 renderer.toneMapping=THREE.ACESFilmicToneMapping;
 renderer.toneMappingExposure=1.12;
 document.body.appendChild(renderer.domElement);
@@ -368,7 +368,7 @@ const POST=(()=>{
 /* scene renders linear HDR into the RT; the composite is the single place
    where exposure, ACES and the sRGB conversion happen */
 if(POST){
-  renderer.outputEncoding=THREE.LinearEncoding;
+  renderer.outputColorSpace=THREE.LinearSRGBColorSpace;
   renderer.toneMapping=THREE.NoToneMapping;
 }
 
@@ -384,7 +384,7 @@ function canTex(w,h,draw,opt){
     const ctx=c.getContext('2d'); if(!ctx)return null;
     draw(ctx,w,h);
     const t=new THREE.CanvasTexture(c);
-    if(opt.srgb!==false)t.encoding=THREE.sRGBEncoding;
+    if(opt.srgb!==false)t.colorSpace=THREE.SRGBColorSpace;
     if(opt.repeat){ t.wrapS=t.wrapT=THREE.RepeatWrapping; t.repeat.set(opt.repeat,opt.repeat); }
     t.anisotropy=4;
     return t;
@@ -428,9 +428,10 @@ const lanterns=[];
     g.position.set(x,0,z);
     g.traverse(o=>{ if(o.isMesh)o.castShadow=true; });
     scene.add(g);
-    const light=new THREE.PointLight(SRGB(0xffb168).getHex(),.85,9,2);
+    /* r155+ physical falloff: point intensity is candela (inverse-square) */
+    const light=new THREE.PointLight(SRGB(0xffb168).getHex(),2.8,9,2);
     light.position.set(x,1.25,z); scene.add(light);
-    lanterns.push({light,base:.85,seed:i*2.3});
+    lanterns.push({light,base:2.8,seed:i*2.3});
   });
 })();
 
@@ -473,7 +474,7 @@ const groundMark=(()=>{
     }
   }
   base();
-  tex=new THREE.CanvasTexture(canvas); tex.encoding=THREE.sRGBEncoding; tex.anisotropy=4;
+  tex=new THREE.CanvasTexture(canvas); tex.colorSpace=THREE.SRGBColorSpace; tex.anisotropy=4;
   const px=(wx)=>(wx/(2*R)+.5)*S, py=(wz)=>(wz/(2*R)+.5)*S;
   const inRing=(x,z)=>Math.hypot(x,z)<R-.05;
   let dirty=false;
@@ -1741,7 +1742,7 @@ const PHYS=(typeof ZPhys!=='undefined')?{
 if(PHYS.enabled){ PHYS.engine.g.set(0,-9.81,0); PHYS.engine.substeps=6; PHYS.engine.iters=3; }
 
 
-const ZAN_VERSION='v40';
+const ZAN_VERSION='v41';
 console.log('%c斬 ZAN '+ZAN_VERSION,'font-size:16px');
 
 /* =========================================================================
@@ -3511,7 +3512,7 @@ function overrideTex(name,apply){
   if(typeof process!=='undefined')return;   // browser only
   try{
     new THREE.TextureLoader().load('textures/'+name+'.jpg',
-      t=>{ t.wrapS=t.wrapT=THREE.RepeatWrapping; t.encoding=THREE.sRGBEncoding;
+      t=>{ t.wrapS=t.wrapT=THREE.RepeatWrapping; t.colorSpace=THREE.SRGBColorSpace;
         apply(t); },undefined,()=>{});
   }catch(e){}
 }
