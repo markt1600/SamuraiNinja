@@ -1602,7 +1602,7 @@ const PHYS=(typeof ZPhys!=='undefined')?{
 if(PHYS.enabled){ PHYS.engine.g.set(0,-9.81,0); PHYS.engine.substeps=6; PHYS.engine.iters=3; }
 
 
-const ZAN_VERSION='v24';
+const ZAN_VERSION='v25';
 console.log('%c斬 ZAN '+ZAN_VERSION,'font-size:16px');
 
 /* =========================================================================
@@ -1611,6 +1611,22 @@ console.log('%c斬 ZAN '+ZAN_VERSION,'font-size:16px');
    our IK + physics joints drive its skeleton in world space every frame.
    Press M to cycle: procedural samurai → loaded models. Browser only.
    ========================================================================= */
+/* ================== BUILDS: three fighters, all procedural ============== */
+const BUILDS={
+  musashi:{label:'武 MUSASHI — ronin',
+    sh:1, waist:1, hip:1, limb:1, hair:'topknot', bare:false,
+    palette:{kimono:0x2a4a78,hakama:0x18263e,obi:0xe8ddc0,skin:0xd0a684,
+      accent:0xf2eee2,face:{}}},
+  onna:{label:'鈴 SUZUME — onna-musha',
+    sh:.86, waist:.84, hip:1.06, limb:.88, hair:'pony', bare:false,
+    palette:{kimono:0x5e2440,hakama:0x241020,obi:0xd8c890,skin:0xdbb394,
+      accent:0xf0e6da,face:{feminine:true}}},
+  gladiator:{label:'Ω BRUTUS — gladiator',
+    sh:1.16, waist:1.06, hip:1.02, limb:1.18, hair:'helmet', bare:true,
+    palette:{kimono:0x8a6a48,hakama:0x5a4028,obi:0x3a2a18,skin:0xc09068,
+      accent:0xb89858,face:{stubble:true}}}};
+const SELECT={P:'musashi',E:'musashi'};
+
 const MODELPIPE=(()=>{
   const _m=new THREE.Matrix4(), _x=V3(), _y=V3(), _z=V3();
   function boneQuat(from,to,hint,out){
@@ -1941,6 +1957,7 @@ const MODELPIPE=(()=>{
     if(nameEl)nameEl.textContent=entry.label;
     if(entry.build){ current[slot]=null; SELECT[slot]=entry.build;
       if(f)f.setModel(null);
+      if(MODELPIPE.onBuildPick)MODELPIPE.onBuildPick(slot);
       return; }
     if(!entry.src){ current[slot]=null; if(f)f.setModel(null); return; }
     if(nameEl)nameEl.textContent=entry.label+' …';
@@ -2213,6 +2230,7 @@ Fighter.prototype.setModel=function(gltf){
   if(this.skin)this.skin.mesh.visible=false;
   this.katana.visible=true;            // ...but the steel is always ours
 };
+Fighter.prototype._bob=function(y){ return y+(this.previewBob||0); };
 Fighter.prototype.physJoint=function(k,out){
   const j=this.phys&&this.phys.L[k];
   if(!j)return null;
@@ -2427,7 +2445,7 @@ Fighter.prototype.updateAlive=function(dt,opponent){
   if(ft.L.swing>0)hurtSag+=this.legDamage.R*.055;
   if(ft.R.swing>0)hurtSag+=this.legDamage.L*.055;
   hurtSag+=(this.kneel||0)*.34;   // driven to a knee
-  const pelvisY=D.pelvisY-hurtSag-(stepping?.02:0)+Math.sin(this.breath*1.6)*.007;
+  const pelvisY=D.pelvisY-hurtSag-(stepping?.02:0)+Math.sin(this.breath*1.6)*.007+(this.previewBob||0);
   const pelvis=V3(lerp(feetMid.x,this.pos.x,.55),pelvisY,lerp(feetMid.z,this.pos.z,.55));
   const pelvisYawA=this.bodyYaw+this.twist*.3;
   const fwdP=DIRY(pelvisYawA), rightP=V3(fwdP.z,0,-fwdP.x);
@@ -3998,21 +4016,7 @@ function clampBladeDir(d,fwd,right){
   return d.set(0,ly,0).addScaledVector(right,lx).addScaledVector(fwd,lz).normalize();
 }
 
-/* ================== BUILDS: three fighters, all procedural ============== */
-const BUILDS={
-  musashi:{label:'武 MUSASHI — ronin',
-    sh:1, waist:1, hip:1, limb:1, hair:'topknot', bare:false,
-    palette:{kimono:0x2a4a78,hakama:0x18263e,obi:0xe8ddc0,skin:0xd0a684,
-      accent:0xf2eee2,face:{}}},
-  onna:{label:'鈴 SUZUME — onna-musha',
-    sh:.86, waist:.84, hip:1.06, limb:.88, hair:'pony', bare:false,
-    palette:{kimono:0x5e2440,hakama:0x241020,obi:0xd8c890,skin:0xdbb394,
-      accent:0xf0e6da,face:{feminine:true}}},
-  gladiator:{label:'Ω BRUTUS — gladiator',
-    sh:1.16, waist:1.06, hip:1.02, limb:1.18, hair:'helmet', bare:true,
-    palette:{kimono:0x8a6a48,hakama:0x5a4028,obi:0x3a2a18,skin:0xc09068,
-      accent:0xb89858,face:{stubble:true}}}};
-const SELECT={P:'musashi',E:'musashi'};
+
 
 /* ---------------- kamae: the five guards, as tip targets --------------- */
 const KAMAE={
@@ -4176,20 +4180,50 @@ function endDuel(){
   beginKillCam(won?enemy:player, won?player:enemy);
 }
 
+/* ---- menu previews: the picks stand at their marks, lightly alive ---- */
+const PREVIEW={P:null,E:null};
+function killPreview(s){
+  const f=PREVIEW[s]; if(!f)return;
+  try{
+    scene.remove(f.root); if(f.katana)scene.remove(f.katana);
+    if(f.blobs)for(const b of f.blobs)scene.remove(b);
+    if(f.model)scene.remove(f.model.root);
+    f.disposePhys&&f.disposePhys();
+  }catch(e){}
+  PREVIEW[s]=null;
+}
+function makePreview(s){
+  killPreview(s);
+  try{
+    const x=s==='P'?-1.6:1.6;
+    const f=new Fighter('preview',null,x,s==='P'?1:-1,false,SELECT[s]);
+    f.preview=true;
+    PREVIEW[s]=f;
+  }catch(e){}
+}
+function updatePreviews(dt){
+  for(const s of ['P','E']){
+    const f=PREVIEW[s]; if(!f)continue;
+    try{
+      f.previewT=(f.previewT||0)+dt;
+      /* face the camera; breathe; a light arcade bounce */
+      f.yaw=f.bodyYaw=Math.atan2(camera.position.x-f.pos.x,
+                                 camera.position.z-f.pos.z);
+      f.previewBob=Math.abs(Math.sin(f.previewT*2.6))*.045;
+      if(f.tipTarget)f.tipTarget.copy(f.pos)
+        .addScaledVector(DIRY(f.bodyYaw),.95)
+        .setY(1.15+Math.sin(f.previewT*1.6)*.12);
+      f.updateAlive(dt);
+    }catch(e){}
+  }
+}
+MODELPIPE.onBuildPick=s=>{ if(game.state==='menu')makePreview(s); };
 document.getElementById('btn-begin').addEventListener('click',()=>{
+  killPreview('P'); killPreview('E');
   Sound.ac().resume&&Sound.ac().resume();
   Sound.startWind();
   document.getElementById('menu').classList.add('hidden');
   setTimeout(grabPointer,60);
-  /* if you provided a samurai, wear it from the first duel */
-  if(MODELPIPE.enabled&&MODELPIPE.mode===0){
-    MODELPIPE.load('models/samurai.glb',g=>{
-      if(!g)return;
-      player.setModel(g); enemy.setModel(g);
-      if(player.model){ MODELPIPE.mode=1;
-        log('models/samurai.glb — loaded and retargeted (M to cycle)',false); }
-    });
-  }
   restart();
 });
 document.getElementById('btn-again').addEventListener('click',restart);
@@ -4373,6 +4407,11 @@ function frame(now){
 
   if(game.state==='fight'||game.state==='over'){
     game.state==='fight'&&(game.duelTime+=dt);
+    if(game.state==='menu'){
+      if(!PREVIEW.P)makePreview('P');
+      if(!PREVIEW.E)makePreview('E');
+      updatePreviews(dt);
+    }
     if(game.introT>0)game.introT-=dt;
     const introHold=game.introT>0;
     const ritualHold=(killCam&&killCam.ritual<2.8&&killCam.victor===player)||introHold;
