@@ -80,6 +80,27 @@
   .selbtn{background:none;border:1px solid var(--dim);color:var(--fg);
     cursor:pointer;padding:3px 12px;font-size:14px;font-family:inherit}
   .selbtn:hover{border-color:var(--fg);background:rgba(255,255,255,.06)}
+  /* ---- touch controls ---- */
+  #touchui{display:none;position:fixed;inset:0;z-index:14;pointer-events:none;
+    -webkit-user-select:none;user-select:none}
+  body.touch #touchui{display:block}
+  #joy{position:absolute;left:26px;bottom:30px;width:120px;height:120px;
+    border:1px solid rgba(255,255,255,.22);border-radius:50%;
+    pointer-events:auto;touch-action:none}
+  #joynub{position:absolute;left:38px;top:38px;width:44px;height:44px;
+    border-radius:50%;background:rgba(255,255,255,.16);
+    border:1px solid rgba(255,255,255,.3)}
+  #swordzone{position:absolute;right:0;top:0;width:56%;height:100%;
+    pointer-events:auto;touch-action:none}
+  .tbtn{position:absolute;width:74px;height:74px;border-radius:50%;
+    border:1px solid rgba(255,255,255,.3);color:rgba(255,255,255,.75);
+    background:rgba(20,24,34,.35);font-family:inherit;font-size:11px;
+    letter-spacing:.12em;pointer-events:auto;touch-action:none;
+    display:flex;align-items:center;justify-content:center}
+  .tbtn.on{background:rgba(255,255,255,.25);color:#fff}
+  #btn-guard{left:34px;bottom:172px}
+  #btn-thrust{left:118px;bottom:210px}
+  body.touch #hint{display:none}
 </style>
 </head>
 <body>
@@ -87,6 +108,12 @@
 <div class="cine-bar" id="cine-bot"></div>
 <div id="vignette"></div>
 
+<div id="touchui">
+  <div id="joy"><div id="joynub"></div></div>
+  <div id="swordzone"></div>
+  <button class="tbtn" id="btn-guard">守<br>GUARD</button>
+  <button class="tbtn" id="btn-thrust">突<br>THRUST</button>
+</div>
 <div id="hud">
   <div class="blood-col" id="blood-player"><div class="blood-fill" id="bloodfill-player"></div></div>
   <div class="blood-col" id="blood-enemy"><div class="blood-fill" id="bloodfill-enemy"></div></div>
@@ -134,14 +161,26 @@
       <button class="selbtn" id="selP-next">&#9654;</button>
     </div>
     <div class="selrow">
+      <div class="sellabel">YOUR WEAPON</div>
+      <button class="selbtn" id="selWP-prev">&#9664;</button>
+      <span class="selname" id="selWP-name">刀 KATANA</span>
+      <button class="selbtn" id="selWP-next">&#9654;</button>
+    </div>
+    <div class="selrow">
       <div class="sellabel">OPPONENT</div>
       <button class="selbtn" id="selE-prev">&#9664;</button>
       <span class="selname" id="selE-name">武 MUSASHI — ronin</span>
       <button class="selbtn" id="selE-next">&#9654;</button>
     </div>
+    <div class="selrow">
+      <div class="sellabel">THEIR WEAPON</div>
+      <button class="selbtn" id="selWE-prev">&#9664;</button>
+      <span class="selname" id="selWE-name">刀 KATANA</span>
+      <button class="selbtn" id="selWE-next">&#9654;</button>
+    </div>
   </div>
   <button class="begin" id="btn-begin">BEGIN</button>
-  <div style="margin-top:12px;font-size:10px;color:var(--dim);letter-spacing:.25em">BUILD V31</div>
+  <div style="margin-top:12px;font-size:10px;color:var(--dim);letter-spacing:.25em">BUILD V33</div>
   <div id="pickdbg" style="margin-top:4px;font-size:10px;color:var(--dim);letter-spacing:.1em"></div>
   <div class="warn">no health bar · anatomy is the health bar · a severed artery ends the duel</div>
 </div>
@@ -154,11 +193,11 @@
 </div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
-<script src="fflate.min.js?v=v31"></script>
-<script src="GLTFLoader.js?v=v31"></script>
-<script src="FBXLoader.js?v=v31"></script>
-<script src="SkeletonUtils.js?v=v31"></script>
-<script src="physics.js?v=v31"></script>
-<script src="game.js?v=v31"></script>
+<script src="fflate.min.js?v=v33"></script>
+<script src="GLTFLoader.js?v=v33"></script>
+<script src="FBXLoader.js?v=v33"></script>
+<script src="SkeletonUtils.js?v=v33"></script>
+<script src="physics.js?v=v33"></script>
+<script src="game.js?v=v33"></script>
 </body>
 </html>

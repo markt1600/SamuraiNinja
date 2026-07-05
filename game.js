@@ -15,6 +15,8 @@ const minJerk=t=>{ t=clamp(t,0,1); return t*t*t*(10+t*(-15+6*t)); };
 const minJerkBell=t=>{ t=clamp(t,0,1); return 16*t*t*(1-t)*(1-t); }; // 0→1→0, peak .5
 const rand=(a,b)=>a+Math.random()*(b-a);
 const TMP1=V3(), TMP2=V3(), TMP3=V3(), TMP4=V3();
+const IS_TOUCH=(typeof process==='undefined')&&(typeof window!=='undefined')&&
+  (('ontouchstart' in window)||((typeof navigator!=='undefined'&&navigator.maxTouchPoints)|0)>0);
 const DIRY=(y)=>V3(Math.sin(y),0,Math.cos(y));
 function lerpAngle(a,b,t){ let d=b-a;
   while(d>Math.PI)d-=Math.PI*2; while(d<-Math.PI)d+=Math.PI*2; return a+d*t; }
@@ -267,7 +269,7 @@ const POST=(()=>{
     const mkRT=(w,h)=>new THREE.WebGLRenderTarget(w,h,{
       minFilter:THREE.LinearFilter,magFilter:THREE.LinearFilter,
       format:THREE.RGBAFormat,depthBuffer:true,stencilBuffer:false});
-    const SS=1.4;                       // supersample: the honest anti-alias
+    const SS=IS_TOUCH?1.0:1.4;          // phones skip the supersample
     let W=innerWidth,H=innerHeight;
     const rtScene=mkRT(Math.round(W*SS),Math.round(H*SS)),
           rtA=mkRT(W>>1,H>>1), rtB=mkRT(W>>1,H>>1);
@@ -980,6 +982,40 @@ function buildSkinnedBody(kimonoMat,hakamaMat,B){
 }
 
 
+function weaponMesh(w){
+  if(!w||w===WEAPONS.katana||(!w.blunt&&w.len>.9&&w.effMass<1.2))return katanaMesh();
+  const g=new THREE.Group();
+  try{
+    const steel=stdMat(0xb9c4cf,{metalness:1,roughness:.24,
+      envMap:envCube||null,envMapIntensity:1.3});
+    const wood=stdMat(0x4a3420,{roughness:.85});
+    if(w.blunt){ /* bare hands: nothing to carry */
+      g.visible=false; return g; }
+    if(w===WEAPONS.axe){
+      const shaft=new THREE.Mesh(new THREE.CylinderGeometry(.016,.019,w.len,8),wood);
+      shaft.position.y=w.len*.5-.1; g.add(shaft);
+      const head=new THREE.Mesh(new THREE.BoxGeometry(.05,.2,.02),steel);
+      head.position.set(.09,w.len-.2,0); g.add(head);
+      const edge=new THREE.Mesh(new THREE.BoxGeometry(.10,.2,.008),steel);
+      edge.position.set(.14,w.len-.2,0); edge.scale.z=.6; g.add(edge);
+      const spike=new THREE.Mesh(new THREE.ConeGeometry(.014,.09,6),steel);
+      spike.rotation.z=Math.PI/2; spike.position.set(-.07,w.len-.2,0); g.add(spike);
+    } else { /* broadsword */
+      const blade=new THREE.Mesh(new THREE.BoxGeometry(.052,w.len-.16,.012),steel);
+      blade.position.y=(w.len-.16)*.5+.14; g.add(blade);
+      const tipm=new THREE.Mesh(new THREE.ConeGeometry(.028,.1,4),steel);
+      tipm.position.y=w.len+.02; tipm.scale.z=.4; g.add(tipm);
+      const guard=new THREE.Mesh(new THREE.BoxGeometry(.2,.02,.03),steel);
+      guard.position.y=.12; g.add(guard);
+      const grip=new THREE.Mesh(new THREE.CylinderGeometry(.016,.016,.2,8),wood);
+      grip.position.y=0; g.add(grip);
+      const pommel=new THREE.Mesh(new THREE.SphereGeometry(.026,8,8),steel);
+      pommel.position.y=-.11; g.add(pommel);
+    }
+    g.traverse(o=>{ if(o.isMesh)o.castShadow=true; });
+  }catch(e){}
+  return g;
+}
 function katanaMesh(){
   const g=new THREE.Group();
   const steel=stdMat(0xb9c4cf,{metalness:1,roughness:.22,
@@ -1049,6 +1085,7 @@ class Fighter{
     palette=Object.assign({},this.build.palette,
       {face:Object.assign({},this.build.palette.face,(palette&&palette.face)||{})});
     this.name=name; this.isPlayer=isPlayer; this.palette=palette;
+    this.weapon=WEAPONS[(isPlayer?SELECT.WP:SELECT.WE)]||WEAPONS.katana;
     this.pos=V3(x,0,0); this.vel=V3();
     this.facing=facing;
     this.dead=false; this.downed=false; this.deathCause=null;
@@ -1245,7 +1282,7 @@ class Fighter{
     parts.footR=buildFootMesh(); parts.footL=buildFootMesh();
     for(const k in parts)this.root.add(parts[k]);
 
-    this.katana=katanaMesh(); scene.add(this.katana);
+    this.katana=weaponMesh(this.weapon); scene.add(this.katana);
 
     /* continuous skinned body over torso, upper arms, legs */
     this.skin=buildSkinnedBody(this.build.bare?skin:kimono,hakama,this.build);
@@ -1625,7 +1662,7 @@ const PHYS=(typeof ZPhys!=='undefined')?{
 if(PHYS.enabled){ PHYS.engine.g.set(0,-9.81,0); PHYS.engine.substeps=6; PHYS.engine.iters=3; }
 
 
-const ZAN_VERSION='v31';
+const ZAN_VERSION='v33';
 console.log('%c斬 ZAN '+ZAN_VERSION,'font-size:16px');
 
 /* =========================================================================
@@ -1647,13 +1684,37 @@ const BUILDS={
   gladiator:{label:'Ω BRUTUS — gladiator',
     sh:1.16, waist:1.06, hip:1.02, limb:1.18, hair:'helmet', bare:true,
     palette:{kimono:0x8a6a48,hakama:0x5a4028,obi:0x3a2a18,skin:0xc09068,
-      accent:0xb89858,face:{stubble:true}}}};
-const SELECT={P:'musashi',E:'musashi'};
+      accent:0xb89858,face:{stubble:true}}},
+  sumo:{label:'雷 RAIDEN — sumo',
+    sh:1.2, waist:1.62, hip:1.5, limb:1.35, hair:'topknot', bare:true, mass:1.55,
+    palette:{kimono:0xd8a880,hakama:0xd8a880,obi:0x1a2a4a,skin:0xd8a880,
+      accent:0x1a2a4a,face:{stubble:true}}}};
+const WEAPONS={
+  katana:    {label:'刀 KATANA',    len:.93, cutFrom:.12, speed:1.0,  maxSpd:1.0,
+              effMass:1.0, dmg:1.0, parryWin:1.0, blunt:false},
+  broadsword:{label:'劍 BROADSWORD',len:.99, cutFrom:.14, speed:.76,  maxSpd:.88,
+              effMass:1.55,dmg:1.3, parryWin:.85, blunt:false},
+  axe:       {label:'斧 AXE',       len:.74, cutFrom:.42, speed:.58,  maxSpd:.8,
+              effMass:2.3, dmg:1.8, parryWin:.6,  blunt:false},
+  bare:      {label:'拳 BARE HANDS',len:.16, cutFrom:0,   speed:1.35, maxSpd:1.2,
+              effMass:.9,  dmg:.9, parryWin:1.15, blunt:true}};
+const SELECT={P:'musashi',E:'musashi',WP:'katana',WE:'katana'};
 function pickdbg(t){
   try{ const el=document.getElementById('pickdbg'); if(el)el.textContent=t; }catch(e){}
 }
+const WLIST=['katana','broadsword','axe','bare'];
 const PICKER={
   idx:{P:0,E:0},
+  wIdx:{P:0,E:0},
+  cycleW(slot,dir){
+    this.wIdx[slot]=(this.wIdx[slot]+dir+WLIST.length)%WLIST.length;
+    const key=WLIST[this.wIdx[slot]];
+    SELECT[slot==='P'?'WP':'WE']=key;
+    try{ document.querySelectorAll('[id="selW'+slot+'-name"]')
+      .forEach(n=>n.textContent=WEAPONS[key].label); }catch(e){}
+    try{ if(game.state==='menu')this.rebuild(slot); }catch(e){}
+    pickdbg(slot+' weapon \u2192 '+WEAPONS[key].label);
+  },
   rebuild(slot){
     try{
       const isP=slot==='P';
@@ -1673,7 +1734,8 @@ const PICKER={
   roster:[
     {label:BUILDS.musashi.label,build:'musashi'},
     {label:BUILDS.onna.label,build:'onna'},
-    {label:BUILDS.gladiator.label,build:'gladiator'}],
+    {label:BUILDS.gladiator.label,build:'gladiator'},
+    {label:BUILDS.sumo.label,build:'sumo'}],
   cycle(slot,dir){
     this.idx[slot]=(this.idx[slot]+dir+this.roster.length)%this.roster.length;
     this.apply(slot);
@@ -2081,6 +2143,8 @@ Fighter.prototype.buildPhys=function(kin){
   cap('shR',B.chest,K.shR); cap('shL',B.chest,K.shL);
   cap('elR',B.faR,K.elR); cap('elL',B.faL,K.elL);
   cap('knR',B.shR,K.knR); cap('knL',B.shL,K.knL);
+  { const bm=(this.build&&this.build.mass)||1;
+    if(bm!==1)for(const k in B)if(k!=='sword'&&B[k].invMass>0)B[k].invMass/=bm; }
   this.phys={B,M,A,L};
 };
 const _com=V3(), _cv=V3(), _be=V3(), _bq=new THREE.Quaternion();
@@ -2197,7 +2261,8 @@ Fighter.prototype.updateDeadPhys=function(dt){
     for(const k in B){ const b=B[k];
       v2=Math.max(v2,b.vel.lengthSq()); }
     this._calm=(v2<.09)?(this._calm||0)+dt:0;
-    if(this._calm>.8&&!this._deathClip)this.sleepCorpse();
+    /* only a FALLEN body sleeps — never freeze a corpse on its feet */
+    if(this._calm>.8&&!this._deathClip&&B.pelvis.pos.y<.5)this.sleepCorpse();
   }
   /* procedural performance: puppet drives the joints over the sim */
   if(!this.model&&this._deathClip){
@@ -2412,7 +2477,8 @@ Fighter.prototype.updateAlive=function(dt,opponent){
   /* guard freshness: a block raised in the last instant is a PARRY */
   if(this.guarding&&!this._wasGuard)this.guardStart=performance.now();
   this._wasGuard=this.guarding;
-  this.guardFresh=this.guarding&&(performance.now()-this.guardStart)<185;
+  this.guardFresh=this.guarding&&(performance.now()-this.guardStart)
+    <185*((this.weapon&&this.weapon.parryWin)||1);
 
   /* hip drive: lateral sword momentum rotates the trunk */
   const latV=this.tipVel.dot(right);
@@ -2538,14 +2604,16 @@ Fighter.prototype.updateAlive=function(dt,opponent){
   shL.y=chestT.y-.045;
   const ctrl=this.swordControl;
   if(this.hasSword){
-    let K=this.thrust?150:110; const DAMP=this.thrust?16:10.5;
+    const W=this.weapon||WEAPONS.katana;
+    let K=(this.thrust?150:110)*W.speed;
+    const DAMP=(this.thrust?16:10.5)*(1+(W.effMass-1)*.35);
     if(this.isPlayer){
       K*=lerp(.45,1,clamp(this.consciousness/100,0,1));  // dying hands are slow
       if(game.adrenaline>0&&this.bloodFrac>.6)K*=1.08;
     }
     if(this.kneel)K*=1-this.kneel*.62;
     const skill=this.isPlayer?1:(this.speedMul||.85);
-    const maxSpd=((this.thrust?11:14)*ctrl+2)*skill;
+    const maxSpd=((this.thrust?11:14)*ctrl+2)*skill*W.maxSpd;
     TMP1.subVectors(this.tipTarget,this.tip);
     this.tipVel.addScaledVector(TMP1,K*dt*Math.max(ctrl,.15));
     this.tipVel.multiplyScalar(Math.pow(1/(1+DAMP),dt*3));
@@ -2619,8 +2687,10 @@ Fighter.prototype.updateAlive=function(dt,opponent){
     /* keep previous segment for swept collision */
     if(this.bladeA){ this.prevBladeA.copy(this.bladeA); this.prevBladeB.copy(this.bladeB); this.hadPrev=true; }
     else this.hadPrev=false;
-    this.bladeA=handle.clone().addScaledVector(bladeDir,.12);
-    this.bladeB=handle.clone().addScaledVector(bladeDir,.93);
+    this.bladeA=handle.clone().addScaledVector(bladeDir,
+      (this.weapon&&this.weapon.cutFrom)||.12);
+    this.bladeB=handle.clone().addScaledVector(bladeDir,
+      (this.weapon&&this.weapon.len)||.93);
 
     /* arms: two-bone IK with anatomical elbow hints */
     const elR=V3(),elL=V3();
@@ -2792,7 +2862,7 @@ function grabPointer(){
   try{ if(!document.pointerLockElement&&game.state==='fight')
     renderer.domElement.requestPointerLock(); }catch(e){}
 }
-addEventListener('mousedown',grabPointer);
+if(!IS_TOUCH)addEventListener('mousedown',grabPointer);
 document.addEventListener('pointerlockchange',()=>{
   if(!document.pointerLockElement&&game.state==='fight')
     log('pointer freed — click to take up the sword again',false);
@@ -3031,10 +3101,17 @@ function bladeVsBody(att,def,log){
          part in the same swing sees a much slower edge */
       const spd=att.tipVel.length()*att.swordControl;
       if(spd<2.2)break;
-      const energy=.5*BLADE_EFF_MASS*spd*spd*(att.chainMul||1);
+      const AW=att.weapon||WEAPONS.katana;
+      const energy=.5*BLADE_EFF_MASS*AW.effMass*spd*spd*(att.chainMul||1)*AW.dmg;
+      const align=AW.blunt?Math.min(att.alignment,.07):att.alignment;
       const dir=TMP1.copy(att.tipVel).normalize();
       def.lastHitDir=dir.clone();
-      const res=def.applyCut(key,energy,att.alignment,att.thrust,hitTmpB.clone(),dir.clone(),log);
+      const res=def.applyCut(key,energy,align,att.thrust,hitTmpB.clone(),dir.clone(),log);
+      if(AW.blunt){ /* the fist SHOVES: mass through the target */
+        def.physImpulse&&def.physImpulse(key,dir,Math.min(energy*.9,260));
+        def.stun=Math.max(def.stun,Math.min(energy/900,.5));
+        def.pain=Math.min(100,def.pain+energy*.04);
+      }
       if(res){
         /* blade loses energy in the body — realistic drag */
         att.tipVel.multiplyScalar(res==='blunt'?.55:.35);
@@ -4215,14 +4292,76 @@ document.getElementById('btn-begin').addEventListener('click',()=>{
   restart();
 });
 document.getElementById('btn-again').addEventListener('click',restart);
+
+/* ==================== TOUCH CONTROLS ====================
+   Left thumb: footwork joystick. Right half: the SWORD — your finger
+   position is the tip, exactly as the mouse is on desktop.
+   Hold GUARD / THRUST buttons. */
+if(IS_TOUCH){
+  document.body.classList.add('touch');
+  const joy=document.getElementById('joy'),
+        nub=document.getElementById('joynub'),
+        zone=document.getElementById('swordzone');
+  let joyId=null, swId=null;
+  const setKeys=(x,y)=>{           // analog → the same keys combat reads
+    input.keys.KeyW=y>.3;  input.keys.KeyS=y<-.3;
+    input.keys.KeyD=x>.3;  input.keys.KeyA=x<-.3;
+  };
+  const joyAt=(t)=>{
+    const r=joy.getBoundingClientRect();
+    let dx=(t.clientX-(r.left+r.width/2))/(r.width/2),
+        dy=((r.top+r.height/2)-t.clientY)/(r.height/2);
+    const m=Math.hypot(dx,dy); if(m>1){ dx/=m; dy/=m; }
+    nub.style.left=(38+dx*38)+'px'; nub.style.top=(38-dy*38)+'px';
+    setKeys(dx,dy);
+  };
+  const swordAt=(t)=>{
+    const r=zone.getBoundingClientRect();
+    const nx=((t.clientX-r.left)/r.width)*2-1;          // -1..1 across zone
+    const ny=1-((t.clientY-r.top)/r.height);            // 0 bottom..1 top
+    input.mx=clamp(nx*1.5,-1.3,1.3);
+    input.my=clamp(ny*1.45-.15,-.1,1.25);
+  };
+  joy.addEventListener('touchstart',e=>{ e.preventDefault();
+    const t=e.changedTouches[0]; joyId=t.identifier; joyAt(t); },{passive:false});
+  zone.addEventListener('touchstart',e=>{ e.preventDefault();
+    const t=e.changedTouches[0]; swId=t.identifier; swordAt(t); },{passive:false});
+  addEventListener('touchmove',e=>{
+    for(const t of e.changedTouches){
+      if(t.identifier===joyId)joyAt(t);
+      else if(t.identifier===swId)swordAt(t);
+    }
+    if(joyId!==null||swId!==null)e.preventDefault();
+  },{passive:false});
+  addEventListener('touchend',e=>{
+    for(const t of e.changedTouches){
+      if(t.identifier===joyId){ joyId=null;
+        nub.style.left='38px'; nub.style.top='38px'; setKeys(0,0); }
+      if(t.identifier===swId)swId=null;   // blade rests where you left it
+    }
+  });
+  const hold=(id,fn)=>{
+    const b=document.getElementById(id);
+    b.addEventListener('touchstart',e=>{ e.preventDefault();
+      b.classList.add('on'); fn(true); },{passive:false});
+    b.addEventListener('touchend',e=>{ e.preventDefault();
+      b.classList.remove('on'); fn(false); },{passive:false});
+  };
+  hold('btn-guard',v=>input.rmb=v);
+  hold('btn-thrust',v=>input.shift=v);
+  document.addEventListener('contextmenu',e=>e.preventDefault());
+}
 document.addEventListener('click',ev=>{
   const b=ev.target&&ev.target.closest?ev.target.closest('.selbtn'):null;
   if(!b)return;
   ev.stopPropagation();
   const map={'selP-prev':['P',-1],'selP-next':['P',1],
              'selE-prev':['E',-1],'selE-next':['E',1]};
-  const m=map[b.id];
+  const wmap={'selWP-prev':['P',-1],'selWP-next':['P',1],
+              'selWE-prev':['E',-1],'selWE-next':['E',1]};
+  const m=map[b.id], wm=wmap[b.id];
   if(m)PICKER.cycle(m[0],m[1]);
+  if(wm)PICKER.cycleW(wm[0],wm[1]);
 },true);
 pickdbg('picker ready \u00b7 click the arrows');
 
@@ -4300,15 +4439,58 @@ function updateKillRitual(dt){
   const kc=killCam; kc.ritual+=dt;
   const vt=kc.victor;
   if(!vt.alive)return;
+  /* THE TAKING: the victor walks to the fallen, takes the head,
+     and hurls it across the ring. Then, and only then, the sheathing. */
+  const loser=vt.isPlayer?enemy:player;
+  const headless=!loser||!loser.parts||loser.severed.head;
+  kc.sheathAt=headless||kc.beheadDone?Math.max(kc.sheathAt||1.1,kc.thrownAt?kc.thrownAt+.5:1.1):99;
+  if(!headless&&!kc.beheadDone&&loser.dead&&!vt.weapon.blunt){
+    const hp=loser.parts.head.position;
+    if(kc.ritual>1.2){
+      TMP1.set(hp.x-vt.pos.x,0,hp.z-vt.pos.z);
+      const d=TMP1.length();
+      if(d>1.05&&kc.ritual<4.5){                 // walk to the body
+        TMP1.divideScalar(d);
+        vt.vel.x=lerp(vt.vel.x,TMP1.x*1.1,clamp(dt*4,0,1));
+        vt.vel.z=lerp(vt.vel.z,TMP1.z*1.1,clamp(dt*4,0,1));
+        vt.yaw=vt.bodyYaw=Math.atan2(TMP1.x,TMP1.z);
+        vt.tipTarget.copy(vt.pos).addScaledVector(DIRY(vt.bodyYaw),.9).setY(1.1);
+      } else {                                    // stand over it
+        vt.vel.x*=Math.pow(.001,dt); vt.vel.z*=Math.pow(.001,dt);
+        vt.yaw=vt.bodyYaw=Math.atan2(hp.x-vt.pos.x,hp.z-vt.pos.z);
+        if(!kc.chopT)kc.chopT=kc.ritual;
+        const ph=kc.ritual-kc.chopT;
+        if(ph<.45)vt.tipTarget.set(vt.pos.x,2.15,vt.pos.z)
+          .addScaledVector(DIRY(vt.bodyYaw),.3);          // the raise
+        else vt.tipTarget.set(hp.x,.25,hp.z);              // the fall
+        if(ph>.62&&!kc.beheadDone){
+          kc.beheadDone=true; kc.thrownAt=kc.ritual;
+          loser.wakeCorpse&&loser.wakeCorpse();
+          TMP2.set(-hp.x,0,-hp.z);
+          if(TMP2.lengthSq()<.01)TMP2.set(1,0,0);
+          TMP2.normalize();
+          loser.decapitate(hp.clone(),TMP2.clone());
+          const piece=(loser.severedPieces||[])
+            .find(p=>p.mesh===loser.parts.head);
+          if(piece&&piece.vel){                    // ACROSS the ring
+            piece.vel.set(TMP2.x*7.5,4.8,TMP2.z*7.5);
+            piece.ang.set(rand(-14,14),rand(-14,14),rand(-14,14));
+          }
+          game.shake=Math.max(game.shake,.9);
+          log('the head is taken \u2014 and thrown across the snow',false);
+        }
+      }
+    }
+  }
   /* procedural victor: puppet performs the noto */
   if(!vt.model&&MODELPIPE.clips&&MODELPIPE.clips.sheath){
-    if(!kc.clipStarted&&kc.ritual>1.1){ kc.clipStarted=true;
+    if(!kc.clipStarted&&kc.ritual>(kc.sheathAt||1.1)){ kc.clipStarted=true;
       MODELPIPE.playPuppet(vt,'sheath'); }
     if(kc.clipStarted&&vt._pupPlay)return;   // updateAlive renders the puppet
   }
   /* mocap noto: the clip owns the body; the sim stands aside */
   if(vt.model&&MODELPIPE.clips&&MODELPIPE.clips.sheath){
-    if(!kc.clipStarted&&kc.ritual>1.1){ kc.clipStarted=true;
+    if(!kc.clipStarted&&kc.ritual>(kc.sheathAt||1.1)){ kc.clipStarted=true;
       MODELPIPE.playClip(vt,'sheath',.25); }
     if(kc.clipStarted){ vt.vel.multiplyScalar(Math.pow(.001,dt));
       MODELPIPE.tickClips(vt,dt); return; }
@@ -4467,7 +4649,8 @@ function frame(now){
     game.state==='fight'&&(game.duelTime+=dt);
     if(game.introT>0)game.introT-=dt;
     const introHold=game.introT>0;
-    const ritualHold=(killCam&&killCam.ritual<2.8&&killCam.victor===player)||introHold;
+    const ritualHold=(killCam&&killCam.victor===player&&
+      killCam.ritual<(killCam.beheadDone?killCam.thrownAt+1.6:5.2))||introHold;
     if(player.alive&&game.state==='fight'&&!introHold)playerIntent(player,enemy);
     else if(player.alive&&!ritualHold)playerIntent(player,enemy);
     updateKillRitual(dt);
