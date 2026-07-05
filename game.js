@@ -219,6 +219,7 @@ renderer.setSize(innerWidth,innerHeight);
 renderer.setPixelRatio(Math.min(devicePixelRatio,2));
 renderer.shadowMap.enabled=true;
 renderer.shadowMap.type=THREE.PCFSoftShadowMap;
+renderer.shadowMap.type=THREE.PCFSoftShadowMap;
 renderer.outputEncoding=THREE.sRGBEncoding;
 renderer.toneMapping=THREE.ACESFilmicToneMapping;
 renderer.toneMappingExposure=1.12;
@@ -229,6 +230,9 @@ const stdMat=(hex,opts)=>new THREE.MeshStandardMaterial(Object.assign({color:SRG
 
 const scene=new THREE.Scene();
 scene.background=SRGB(0x0c0f14);
+/* the kicker: a cool fill from the off side, cinema's second light */
+{ const kick=new THREE.DirectionalLight(0x8fb0e8,.32);
+  kick.position.set(14,9,-10); scene.add(kick); }
 /* no fog: the night is clear and deep */
 
 /* IBL: prefilter a lighting-only scene (sky, snowfield, moon) into an
@@ -310,7 +314,8 @@ const POST=(()=>{
       ' c=mix(c,c*vec3(1.06,1.0,.94)*1.05,uAdren);'+            // adrenaline warmth
       ' float d=distance(vUv,vec2(.5));'+
       ' c*=1.-smoothstep(.62-uVig*.42,.98-uVig*.3,d)*(.55+uVig*.45);'+ // the world closes in
-      ' c=(c-.5)*1.07+.5+.006;'+                             // grade: contrast lift
+      ' c=max(vec3(0.),(c*(2.51*c+.03))/(c*(2.43*c+.59)+.14));'+  // ACES filmic
+      ' c=(c-.5)*1.04+.5+.004;'+                             // gentle grade over ACES
       ' float l2=dot(c,vec3(.2126,.7152,.0722));'+
       ' c=mix(vec3(l2),c,1.12);'+                              // saturation
       ' float gr=fract(sin(dot(vUv*vec2(917.,761.)+uTime,vec2(12.9898,78.233)))*43758.5);'+
@@ -1717,7 +1722,7 @@ const PHYS=(typeof ZPhys!=='undefined')?{
 if(PHYS.enabled){ PHYS.engine.g.set(0,-9.81,0); PHYS.engine.substeps=6; PHYS.engine.iters=3; }
 
 
-const ZAN_VERSION='v39';
+const ZAN_VERSION='v40';
 console.log('%c斬 ZAN '+ZAN_VERSION,'font-size:16px');
 
 /* =========================================================================
@@ -3884,12 +3889,12 @@ const splatTex=canTex(128,128,(x,w,h)=>{
 });
 Fighter.prototype.addHitMark=function(partKey,worldPt,hitDir,severity,blunt){
   this._marks=(this._marks||0);
-  if(this._marks>=24)return;
+  if(this._marks>=32)return;
   const part=this.parts[partKey]; if(!part)return;
   this._marks++;
   try{
     const onCloth=!this.build.bare&&CLOTHED.test(partKey);
-    const size=(severity==='mortal'?.23:severity==='severe'?.18:.13);
+    const size=(severity==='mortal'?.46:severity==='severe'?.34:.24);
     const tex=blunt?null:(onCloth?splatTex:brightGashTex);
     const mat=new THREE.MeshBasicMaterial({
       map:tex||null,transparent:!!tex,depthWrite:false,
@@ -3903,11 +3908,27 @@ Fighter.prototype.addHitMark=function(partKey,worldPt,hitDir,severity,blunt){
     m.lookAt(m.position.clone().multiplyScalar(3));
     m.renderOrder=4;
     /* the stripe follows the cut's line */
-    if(!onCloth&&!blunt&&hitDir)
+    if(!blunt&&hitDir)
       m.rotation.z=-Math.atan2(hitDir.y,
-        Math.hypot(hitDir.x,hitDir.z)+.001)*1.1+rand(-.3,.3);
+        Math.hypot(hitDir.x,hitDir.z)+.001)*1.1+rand(-.25,.25);
     else m.rotation.z=Math.random()*Math.PI;
     part.add(m);
+    /* the exit spray: satellites thrown ALONG the cut's travel */
+    if(!blunt&&hitDir&&severity!=='minor'){
+      for(let k=1;k<=2;k++){
+        const s2=new THREE.Mesh(new THREE.PlaneGeometry(size*.4,size*.4),
+          new THREE.MeshBasicMaterial({map:splatTex||null,transparent:true,
+            depthWrite:false,polygonOffset:true,polygonOffsetFactor:-5,
+            opacity:.9}));
+        const wp=worldPt.clone().addScaledVector(hitDir,.1*k)
+          .add(V3(rand(-.03,.03),rand(-.03,.03),rand(-.03,.03)));
+        s2.position.copy(part.worldToLocal(wp)).multiplyScalar(1.08);
+        s2.lookAt(s2.position.clone().multiplyScalar(3));
+        s2.rotation.z=Math.random()*Math.PI;
+        s2.renderOrder=4;
+        part.add(s2);
+      }
+    }
   }catch(e){}
 };
 Fighter.prototype.addOpenWound=function(partKey,worldPt,severity){
@@ -4719,7 +4740,7 @@ function updateKillRitual(dt){
   const bare=!!(vt.weapon&&vt.weapon.blunt);
   kc.sheathAt=(headless||kc.beheadDone)&&!bare
     ?Math.max(kc.sheathAt||1.1,kc.thrownAt?kc.thrownAt+1.7:1.1):99;
-  if(!headless&&loser.dead){
+  if(loser&&loser.dead&&(!headless||kc.beheadDone)){
     const hp=loser.parts.head.position;
     if(kc.ritual>1.2&&!kc.released){
       TMP1.set(hp.x-vt.pos.x,0,hp.z-vt.pos.z);
@@ -4871,7 +4892,9 @@ function updateCamera(dt){
     camera.lookAt(camTarget);
     return;
   }
-  if(killCam&&killCam.t>=6){ killCam=null; document.body.classList.remove('cine'); }
+  if(killCam&&(killCam.released?killCam.ritual>killCam.thrownAt+3.2
+             :killCam.ritual>=12)){
+    killCam=null; document.body.classList.remove('cine'); }
   const mid=TMP1.addVectors(player.pos,enemy.pos).multiplyScalar(.5); mid.y=1.15;
   /* maai: when both wait, the camera settles into a long wide */
   const calm=player.bladeSpeed<4&&enemy.bladeSpeed<4&&player.pos.distanceTo(enemy.pos)>3;
