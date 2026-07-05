@@ -1625,7 +1625,7 @@ const PHYS=(typeof ZPhys!=='undefined')?{
 if(PHYS.enabled){ PHYS.engine.g.set(0,-9.81,0); PHYS.engine.substeps=6; PHYS.engine.iters=3; }
 
 
-const ZAN_VERSION='v30';
+const ZAN_VERSION='v31';
 console.log('%c斬 ZAN '+ZAN_VERSION,'font-size:16px');
 
 /* =========================================================================
@@ -4413,24 +4413,48 @@ function frame(now){
     L.light.intensity=L.base*(0.82+0.22*Math.sin(now*.011+L.seed)+0.1*Math.sin(now*.037+L.seed*2.7));
 
   if(game.state==='menu'&&typeof process==='undefined'&&typeof player!=='undefined'&&player&&enemy){
-    /* fixed tableau marks: YOU screen-left, OPPONENT screen-right */
+    /* RESPONSIVE TABLEAU: marks derive from the camera frustum, and the
+       fighters WALK to them — resize the window and they stroll to their
+       new spots, spreading on wide screens, drawing in on narrow ones. */
+    const viewD=Math.max(camera.position.z-3.0,1.2);
+    const halfW=Math.tan((camera.fov||50)*Math.PI/360)*viewD*(camera.aspect||1.6);
+    const lat=clamp(halfW*.62,.95,2.7);
+    const depth=3.0-clamp(1.25-lat,0,1)*1.5;   // recede when squeezed
     for(const f of [player,enemy]){
       try{
-        const spot=TMP3.set(f.isPlayer?-1.8:1.8,0,3.0);
-        if(f.pos.distanceTo(spot)>.03){
+        const spot=TMP3.set(f.isPlayer?-lat:lat,0,depth);
+        TMP4.subVectors(spot,f.pos); TMP4.y=0;
+        const dist=TMP4.length();
+        if(dist>6){                     // absurd displacement: just appear
           f.pos.copy(spot);
+          f.vel.set(0,0,0);
           f.yaw=f.bodyYaw=Math.atan2(camera.position.x-spot.x,
                                      camera.position.z-spot.z);
-          const fr=DIRY(f.bodyYaw), rt=TMP1.set(fr.z,0,-fr.x);
           if(f.feet){
+            const fr=DIRY(f.bodyYaw), rt=TMP1.set(fr.z,0,-fr.x);
             f.feet.R.p.set(spot.x+rt.x*.13,0,spot.z+rt.z*.13);
             f.feet.L.p.set(spot.x-rt.x*.13,0,spot.z-rt.z*.13);
             f.feet.R.yaw=f.feet.L.yaw=f.bodyYaw;
             f.feet.R.swing=f.feet.L.swing=0;
           }
+        } else if(dist>.09){            // walk there — the feet do the work
+          TMP4.divideScalar(dist);
+          const sp=Math.min(1.35,dist*2.2);
+          f.vel.x=lerp(f.vel.x,TMP4.x*sp,clamp(dt*5,0,1));
+          f.vel.z=lerp(f.vel.z,TMP4.z*sp,clamp(dt*5,0,1));
+          const wy=Math.atan2(TMP4.x,TMP4.z);
+          f.bodyYaw+=angDiff(wy,f.bodyYaw)*clamp(dt*7,0,1);
+          f.yaw=f.bodyYaw;
+        } else {                        // arrived: settle, face the lens
+          f.vel.x*=Math.pow(.002,dt); f.vel.z*=Math.pow(.002,dt);
+          const cy=Math.atan2(camera.position.x-f.pos.x,
+                              camera.position.z-f.pos.z);
+          f.bodyYaw+=angDiff(cy,f.bodyYaw)*clamp(dt*6,0,1);
+          f.yaw=f.bodyYaw;
         }
         f.previewT=(f.previewT||0)+dt;
-        f.previewBob=Math.abs(Math.sin(f.previewT*2.6+(f.isPlayer?0:1.35)))*.05;
+        const still=clamp(1-Math.hypot(f.vel.x,f.vel.z)*1.6,0,1);
+        f.previewBob=Math.abs(Math.sin(f.previewT*2.6+(f.isPlayer?0:1.35)))*.05*still;
         if(f.tipTarget)f.tipTarget.copy(f.pos)
           .addScaledVector(DIRY(f.bodyYaw),.95)
           .setY(1.15+Math.sin(f.previewT*1.5+(f.isPlayer?0:.8))*.1);
