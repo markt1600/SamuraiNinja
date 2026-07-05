@@ -1625,7 +1625,7 @@ const PHYS=(typeof ZPhys!=='undefined')?{
 if(PHYS.enabled){ PHYS.engine.g.set(0,-9.81,0); PHYS.engine.substeps=6; PHYS.engine.iters=3; }
 
 
-const ZAN_VERSION='v29';
+const ZAN_VERSION='v30';
 console.log('%c斬 ZAN '+ZAN_VERSION,'font-size:16px');
 
 /* =========================================================================
@@ -4332,6 +4332,15 @@ function updateKillRitual(dt){
 const camTarget=V3(0,1.2,0);
 function updateCamera(dt){
   if(!player)return;
+  /* MENU TABLEAU: fixed shot, no feedback with the fighters */
+  if(game.state==='menu'){
+    TMP1.set(0,1.05,0);
+    camTarget.lerp(TMP1,clamp(dt*3,0,1));
+    TMP2.set(0,1.55,5.7);
+    camera.position.lerp(TMP2,clamp(dt*3,0,1));
+    camera.lookAt(camTarget);
+    return;
+  }
   /* kill cam: drop low, push in, hold the stillness */
   if(killCam&&killCam.t<6){
     killCam.t+=dt;
@@ -4404,14 +4413,10 @@ function frame(now){
     L.light.intensity=L.base*(0.82+0.22*Math.sin(now*.011+L.seed)+0.1*Math.sin(now*.037+L.seed*2.7));
 
   if(game.state==='menu'&&typeof process==='undefined'&&typeof player!=='undefined'&&player&&enemy){
-    /* stage the picks LEFT and RIGHT of the menu text, facing the lens */
-    const mFwd=TMP3.set(0,0,-1).applyQuaternion(camera.quaternion);
-    mFwd.y=0; if(mFwd.lengthSq()<.01)mFwd.set(0,0,-1); mFwd.normalize();
-    const mRight=TMP4.set(mFwd.z,0,-mFwd.x);
+    /* fixed tableau marks: YOU screen-left, OPPONENT screen-right */
     for(const f of [player,enemy]){
       try{
-        const spot=camera.position.clone().addScaledVector(mFwd,4.4)
-          .addScaledVector(mRight,f.isPlayer?-1.85:1.85).setY(0);
+        const spot=TMP3.set(f.isPlayer?-1.8:1.8,0,3.0);
         if(f.pos.distanceTo(spot)>.03){
           f.pos.copy(spot);
           f.yaw=f.bodyYaw=Math.atan2(camera.position.x-spot.x,
