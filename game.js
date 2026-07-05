@@ -908,7 +908,13 @@ function buildSkinnedBody(kimonoMat,hakamaMat,B){
       [1.02,.134,.81],[1.07,.127,.79],[1.12,.128,.79],[1.18,.134,.79],
       [1.24,.146,.80],[1.30,.158,.82],[1.36,.170,.85],[1.41,.172,.87],
       [1.45,.148,.88],[1.475,.120,.88]];
-    const shape=y=>y>1.22?B.sh:(y>.98&&y<1.16?B.waist:(y<.92?B.hip:1));
+    const sm=(a,b,t)=>{ t=clamp((t-a)/(b-a),0,1); return t*t*(3-2*t); };
+    const shape=y=>{
+      const wS=sm(.92,1.0,y)*(1-sm(1.14,1.24,y));     // waist influence, feathered
+      const sS=sm(1.2,1.34,y);                          // shoulder influence
+      const hS=1-sm(.86,.96,y);                         // hip influence
+      return 1+(B.waist-1)*wS+(B.sh-1)*sS+(B.hip-1)*hS;
+    };
     const rings=prof.map(([y,r0,szz])=>{
       const r=r0*shape(y);
       let skin;
@@ -1216,10 +1222,27 @@ class Fighter{
     parts.shinR=limbMesh(D.shin,.135,.055,hakama);
     parts.shinL=limbMesh(D.shin,.135,.055,hakama);
     /* tabi feet */
-    const footGeo=new THREE.BoxGeometry(.085,.05,.21);
     const tabiM=stdMat(0xd9d5cb,{roughness:.85});
-    parts.footR=new THREE.Mesh(footGeo,tabiM); parts.footR.castShadow=true;
-    parts.footL=new THREE.Mesh(footGeo,tabiM); parts.footL.castShadow=true;
+    const strawM=stdMat(0x8a7448,{roughness:.95});
+    const buildFootMesh=()=>{
+      const g=new THREE.Group();
+      /* the foot: instep + rounded heel + toe block, on a sandal sole */
+      const instep=new THREE.Mesh(new THREE.BoxGeometry(.088,.055,.16),tabiM);
+      instep.position.set(0,.012,.035);
+      const heel=new THREE.Mesh(new THREE.SphereGeometry(.045,8,7),tabiM);
+      heel.scale.set(.95,.8,1); heel.position.set(0,.012,-.05);
+      const toe=new THREE.Mesh(new THREE.BoxGeometry(.082,.042,.06),tabiM);
+      toe.position.set(0,.002,.125);
+      const sole=new THREE.Mesh(new THREE.BoxGeometry(.095,.016,.24),strawM);
+      sole.position.set(0,-.022,.04);
+      /* the cuff: rises to tuck under the hakama — no gap, ever */
+      const cuff=new THREE.Mesh(new THREE.CylinderGeometry(.052,.058,.13,10),tabiM);
+      cuff.position.set(0,.09,-.02);
+      g.add(instep,heel,toe,sole,cuff);
+      g.traverse(o=>{ if(o.isMesh)o.castShadow=true; });
+      return g;
+    };
+    parts.footR=buildFootMesh(); parts.footL=buildFootMesh();
     for(const k in parts)this.root.add(parts[k]);
 
     this.katana=katanaMesh(); scene.add(this.katana);
@@ -1602,7 +1625,7 @@ const PHYS=(typeof ZPhys!=='undefined')?{
 if(PHYS.enabled){ PHYS.engine.g.set(0,-9.81,0); PHYS.engine.substeps=6; PHYS.engine.iters=3; }
 
 
-const ZAN_VERSION='v25';
+const ZAN_VERSION='v26';
 console.log('%c斬 ZAN '+ZAN_VERSION,'font-size:16px');
 
 /* =========================================================================
@@ -1618,7 +1641,7 @@ const BUILDS={
     palette:{kimono:0x2a4a78,hakama:0x18263e,obi:0xe8ddc0,skin:0xd0a684,
       accent:0xf2eee2,face:{}}},
   onna:{label:'鈴 SUZUME — onna-musha',
-    sh:.86, waist:.84, hip:1.06, limb:.88, hair:'pony', bare:false,
+    sh:.87, waist:.90, hip:1.05, limb:.9, hair:'pony', bare:false,
     palette:{kimono:0x5e2440,hakama:0x241020,obi:0xd8c890,skin:0xdbb394,
       accent:0xf0e6da,face:{feminine:true}}},
   gladiator:{label:'Ω BRUTUS — gladiator',
@@ -4405,13 +4428,13 @@ function frame(now){
   for(const L of lanterns)
     L.light.intensity=L.base*(0.82+0.22*Math.sin(now*.011+L.seed)+0.1*Math.sin(now*.037+L.seed*2.7));
 
+  if(game.state==='menu'){
+    if(!PREVIEW.P)makePreview('P');
+    if(!PREVIEW.E)makePreview('E');
+    updatePreviews(dt);
+  }
   if(game.state==='fight'||game.state==='over'){
     game.state==='fight'&&(game.duelTime+=dt);
-    if(game.state==='menu'){
-      if(!PREVIEW.P)makePreview('P');
-      if(!PREVIEW.E)makePreview('E');
-      updatePreviews(dt);
-    }
     if(game.introT>0)game.introT-=dt;
     const introHold=game.introT>0;
     const ritualHold=(killCam&&killCam.ritual<2.8&&killCam.victor===player)||introHold;
