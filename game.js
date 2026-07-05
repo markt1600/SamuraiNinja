@@ -1625,7 +1625,7 @@ const PHYS=(typeof ZPhys!=='undefined')?{
 if(PHYS.enabled){ PHYS.engine.g.set(0,-9.81,0); PHYS.engine.substeps=6; PHYS.engine.iters=3; }
 
 
-const ZAN_VERSION='v26';
+const ZAN_VERSION='v27';
 console.log('%c斬 ZAN '+ZAN_VERSION,'font-size:16px');
 
 /* =========================================================================
@@ -1649,6 +1649,40 @@ const BUILDS={
     palette:{kimono:0x8a6a48,hakama:0x5a4028,obi:0x3a2a18,skin:0xc09068,
       accent:0xb89858,face:{stubble:true}}}};
 const SELECT={P:'musashi',E:'musashi'};
+const PICKER={
+  idx:{P:0,E:0},
+  roster:[
+    {label:BUILDS.musashi.label,build:'musashi'},
+    {label:BUILDS.onna.label,build:'onna'},
+    {label:BUILDS.gladiator.label,build:'gladiator'}],
+  cycle(slot,dir){
+    this.idx[slot]=(this.idx[slot]+dir+this.roster.length)%this.roster.length;
+    this.apply(slot);
+  },
+  apply(slot){
+    const e=this.roster[this.idx[slot]];
+    const el=document.getElementById('sel'+slot+'-name');
+    if(el)el.textContent=e.label;
+    if(e.build){
+      SELECT[slot]=e.build;
+      try{
+        if(typeof MODELPIPE!=='undefined'&&MODELPIPE.current)
+          MODELPIPE.current[slot]=null;
+        const f=slot==='P'?(typeof player!=='undefined'&&player)
+                          :(typeof enemy!=='undefined'&&enemy);
+        if(f&&f.setModel)f.setModel(null);
+        if(typeof makePreview==='function'&&game.state==='menu')makePreview(slot);
+      }catch(err){}
+    } else if(e.src&&typeof MODELPIPE!=='undefined'&&MODELPIPE.enabled){
+      MODELPIPE.load(e.src,g=>{
+        if(!g){ if(el)el.textContent=e.label+' (missing)'; return; }
+        MODELPIPE.current[slot]=g;
+        const f=slot==='P'?player:enemy;
+        if(f)f.setModel(g);
+      });
+    }
+  }
+};
 
 const MODELPIPE=(()=>{
   const _m=new THREE.Matrix4(), _x=V3(), _y=V3(), _z=V3();
@@ -1662,28 +1696,15 @@ const MODELPIPE=(()=>{
     return out.setFromRotationMatrix(_m);
   }
   if(typeof process!=='undefined'||typeof THREE.GLTFLoader==='undefined')
-    return {enabled:false,cycle(){},drive(){},sources:[],boneQuat,
+    return {enabled:false,drive(){},sources:[],boneQuat,
       playClip:()=>false,tickClips:()=>false,playPuppet:()=>false,
-      tickPuppet:()=>false,clips:{},roster:[],pick:{P:0,E:0},
-      current:{P:null,E:null},applyPick(){}};
+      tickPuppet:()=>false,clips:{},current:{P:null,E:null},load(u,cb){cb(null);}};
   const sources=['models/samurai.fbx','models/samurai.glb',
     'models/Old Man.fbx','models/Zombiegirl W Kurniawan.fbx',
     'models/samurai2.glb','models/fighter.glb',
     'models/Xbot.glb','models/Soldier.glb'];
-  /* the roster: the three procedural fighters. Dropped files (the back
-     door) join the list at runtime. */
-  const roster=[
-    {label:BUILDS.musashi.label,build:'musashi'},
-    {label:BUILDS.onna.label,build:'onna'},
-    {label:BUILDS.gladiator.label,build:'gladiator'}];
+
   /* models/index.json (["file.glb",...]) prepends to the cycle */
-  try{ fetch('models/index.json').then(r=>r.ok?r.json():null).then(list=>{
-    if(Array.isArray(list))for(const f of list){
-      const src='models/'+String(f).replace(/^models\//,'');
-      if(!roster.find(r=>r.src===src))
-        roster.push({label:src.split('/').pop().replace(/\.(glb|fbx)$/i,'').toUpperCase(),src});
-    }
-  }).catch(()=>{}); }catch(e){}
   const cache={};
   function load(url,cb){
     if(cache[url])return cb(cache[url]);
@@ -1832,15 +1853,15 @@ const MODELPIPE=(()=>{
     const isFbx=/\.fbx$/i.test(f.name);
     const rd=new FileReader();
     const use=g=>{ cache['drop:'+f.name]=g;
-      roster.push({label:f.name.replace(/\.(glb|fbx)$/i,'').toUpperCase(),
+      PICKER.roster.push({label:f.name.replace(/\.(glb|fbx)$/i,'').toUpperCase(),
         src:'drop:'+f.name});
-      pick.P=roster.length-1; current.P=g;
+      PICKER.idx.P=PICKER.roster.length-1; current.P=g;
       if(typeof player!=='undefined'&&player){
         player.setModel(g);
         if(player.model)log('dropped: '+f.name+' — you fight as this now',false);
       }
       const nameEl=document.getElementById('selP-name');
-      if(nameEl)nameEl.textContent=roster[pick.P].label;
+      if(nameEl)nameEl.textContent=PICKER.roster[PICKER.idx.P].label;
     };
     rd.onload=()=>{
       try{
@@ -1971,40 +1992,9 @@ const MODELPIPE=(()=>{
     }
     return true;
   }
-  const pick={P:0,E:0}, current={P:null,E:null};
-  function applyPick(slot){
-    const f=slot==='P'?(typeof player!=='undefined'&&player):
-                       (typeof enemy!=='undefined'&&enemy);
-    const entry=roster[pick[slot]];
-    const nameEl=document.getElementById('sel'+slot+'-name');
-    if(nameEl)nameEl.textContent=entry.label;
-    if(entry.build){ current[slot]=null; SELECT[slot]=entry.build;
-      if(f)f.setModel(null);
-      if(MODELPIPE.onBuildPick)MODELPIPE.onBuildPick(slot);
-      return; }
-    if(!entry.src){ current[slot]=null; if(f)f.setModel(null); return; }
-    if(nameEl)nameEl.textContent=entry.label+' …';
-    load(entry.src,g=>{
-      if(!g){ if(nameEl)nameEl.textContent=entry.label+' (missing)'; return; }
-      if(nameEl)nameEl.textContent=entry.label;
-      current[slot]=g;
-      const ff=slot==='P'?player:enemy;
-      if(ff&&roster[pick[slot]]===entry)ff.setModel(g);
-    });
-  }
-  function cycle(slot,dir){
-    pick[slot]=(pick[slot]+dir+roster.length)%roster.length;
-    applyPick(slot);
-  }
-  setTimeout(()=>{
-    for(const [id,slot,dir] of [['selP-prev','P',-1],['selP-next','P',1],
-                                ['selE-prev','E',-1],['selE-next','E',1]]){
-      const el=document.getElementById(id);
-      if(el)el.addEventListener('click',e=>{ e.stopPropagation(); cycle(slot,dir); });
-    }
-  },0);
+  const current={P:null,E:null};
   return {enabled:true,sources,load,attach,drive,boneQuat,playClip,tickClips,clips,
-    playPuppet,tickPuppet,roster,pick,current,applyPick,cycle,
+    playPuppet,tickPuppet,current,
     _handFix:new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1,0,0),-Math.PI/2),
     mode:0};
 })();
@@ -2747,14 +2737,10 @@ addEventListener('keydown',e=>{ input.keys[e.code]=true;
   if(e.code==='KeyO'){ OUTLINE.on=!OUTLINE.on;
     for(const o of OUTLINE.meshes)o.visible=OUTLINE.on;
     log('outlines '+(OUTLINE.on?'on':'off'),false); }
-  if(e.code==='KeyM'&&MODELPIPE.enabled&&player){
-    MODELPIPE.cycle('P',1);
-    log('your fighter: '+MODELPIPE.roster[MODELPIPE.pick.P].label,false);
-  }
-  if(e.code==='KeyN'&&MODELPIPE.enabled&&enemy){
-    MODELPIPE.cycle('E',1);
-    log('the opponent: '+MODELPIPE.roster[MODELPIPE.pick.E].label,false);
-  }
+  if(e.code==='KeyM'&&player){ PICKER.cycle('P',1);
+    log('your fighter: '+PICKER.roster[PICKER.idx.P].label+' (next duel)',false); }
+  if(e.code==='KeyN'&&enemy){ PICKER.cycle('E',1);
+    log('the opponent: '+PICKER.roster[PICKER.idx.E].label+' (next duel)',false); }
   /* physics dials: [ ] = blend, ; ' = assist strength (live tuning) */
   if(PHYS.enabled){
     if(e.code==='BracketLeft'){ PHYS.blend=Math.max(0,PHYS.blend-.1);
@@ -4215,11 +4201,20 @@ function killPreview(s){
   }catch(e){}
   PREVIEW[s]=null;
 }
+function previewSpot(s){
+  const fwd=TMP1.set(0,0,-1).applyQuaternion(camera.quaternion); fwd.y=0;
+  if(fwd.lengthSq()<.01)fwd.set(0,0,-1); fwd.normalize();
+  const right=TMP2.set(fwd.z,0,-fwd.x);
+  return camera.position.clone().addScaledVector(fwd,3.6)
+    .addScaledVector(right,s==='P'?-1.35:1.35).setY(0);
+}
 function makePreview(s){
   killPreview(s);
   try{
-    const x=s==='P'?-1.6:1.6;
-    const f=new Fighter('preview',null,x,s==='P'?1:-1,false,SELECT[s]);
+    const p=previewSpot(s);
+    const f=new Fighter('preview',null,p.x,1,false,SELECT[s]);
+    f.pos.copy(p);
+    if(f.feet){ f.feet.R.p.set(p.x+.12,0,p.z); f.feet.L.p.set(p.x-.12,0,p.z); }
     f.preview=true;
     PREVIEW[s]=f;
   }catch(e){}
@@ -4232,6 +4227,8 @@ function updatePreviews(dt){
       /* face the camera; breathe; a light arcade bounce */
       f.yaw=f.bodyYaw=Math.atan2(camera.position.x-f.pos.x,
                                  camera.position.z-f.pos.z);
+      const spot=previewSpot(s);
+      if(spot.distanceTo(f.pos)>.6){ makePreview(s); continue; }
       f.previewBob=Math.abs(Math.sin(f.previewT*2.6))*.045;
       if(f.tipTarget)f.tipTarget.copy(f.pos)
         .addScaledVector(DIRY(f.bodyYaw),.95)
@@ -4240,7 +4237,7 @@ function updatePreviews(dt){
     }catch(e){}
   }
 }
-MODELPIPE.onBuildPick=s=>{ if(game.state==='menu')makePreview(s); };
+
 document.getElementById('btn-begin').addEventListener('click',()=>{
   killPreview('P'); killPreview('E');
   Sound.ac().resume&&Sound.ac().resume();
@@ -4250,6 +4247,11 @@ document.getElementById('btn-begin').addEventListener('click',()=>{
   restart();
 });
 document.getElementById('btn-again').addEventListener('click',restart);
+for(const [id,slot,dir] of [['selP-prev','P',-1],['selP-next','P',1],
+                            ['selE-prev','E',-1],['selE-next','E',1]]){
+  const el=document.getElementById(id);
+  if(el)el.addEventListener('click',e=>{ e.stopPropagation(); PICKER.cycle(slot,dir); });
+}
 
 /* =============================== THE BIND ==============================
    Real fencing lives in blade contact: pressure, leverage, feeling the
