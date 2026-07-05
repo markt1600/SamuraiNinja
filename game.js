@@ -781,13 +781,13 @@ const ANATOMY={
     layers:[
       {at:.3,  name:'wrist cut',                     effect:'bleedMinor'},
       {at:1.0, name:'grip tendons severed — the sword falls', effect:'dropSword'},
-      {at:2.0, name:'forearm taken at the bone',     effect:'severArmR', bone:120, sever:170},
+      {at:2.0, name:'forearm taken at the bone',     effect:'severArmR', bone:95, sever:135},
     ]},
   forearmL:{ label:'off wrist', r:.042, limb:'armL',
     layers:[
       {at:.3,  name:'left wrist cut',                effect:'bleedMinor'},
       {at:1.0, name:'left hand tendons severed',     effect:'disableArmL'},
-      {at:2.0, name:'left forearm taken at the bone',effect:'severArmL', bone:120, sever:170},
+      {at:2.0, name:'left forearm taken at the bone',effect:'severArmL', bone:95, sever:135},
     ]},
   thighR:{ label:'right thigh', r:.082, limb:'legR',
     layers:[
@@ -856,7 +856,8 @@ function limbMesh(len,rTop,rBot,mat){
    and legs, weighted across world-space bones driven by the same IK
    joints as the capsule skeleton. Joints deform instead of hinging.
    ========================================================================= */
-function buildSkinnedBody(kimonoMat,hakamaMat){
+function buildSkinnedBody(kimonoMat,hakamaMat,B){
+  B=B||BUILDS.musashi;
   const BONES={pelvis:0,spine:1,chest:2,uaR:3,uaL:4,thR:5,shR:6,thL:7,shL:8};
   const bindPos={
     pelvis:[0,.9,0], spine:[0,1.07,0], chest:[0,1.38,0],
@@ -907,7 +908,9 @@ function buildSkinnedBody(kimonoMat,hakamaMat){
       [1.02,.134,.81],[1.07,.127,.79],[1.12,.128,.79],[1.18,.134,.79],
       [1.24,.146,.80],[1.30,.158,.82],[1.36,.170,.85],[1.41,.172,.87],
       [1.45,.148,.88],[1.475,.120,.88]];
-    const rings=prof.map(([y,r,szz])=>{
+    const shape=y=>y>1.22?B.sh:(y>.98&&y<1.16?B.waist:(y<.92?B.hip:1));
+    const rings=prof.map(([y,r0,szz])=>{
+      const r=r0*shape(y);
       let skin;
       if(y<.97)skin=[P,1,S,0];
       else if(y<1.13)skin=blend(y,.97,1.13,P,S);
@@ -1034,7 +1037,11 @@ function aimLimb(g,from,to){
 }
 
 class Fighter{
-  constructor(name,palette,x,facing,isPlayer){
+  constructor(name,palette,x,facing,isPlayer,buildKey){
+    this.build=BUILDS[buildKey||'musashi']||BUILDS.musashi;
+    /* the build owns the costume; the duelist keeps his soul */
+    palette=Object.assign({},this.build.palette,
+      {face:Object.assign({},this.build.palette.face,(palette&&palette.face)||{})});
     this.name=name; this.isPlayer=isPlayer; this.palette=palette;
     this.pos=V3(x,0,0); this.vel=V3();
     this.facing=facing;
@@ -1130,6 +1137,7 @@ class Fighter{
       headGeo.rotateY(-Math.PI/2);            // painted face looks down +Z
       const skull=new THREE.Mesh(headGeo,fTex?faceMat:skin);
       skull.castShadow=true; skull.scale.set(.92,1.08,.98);
+      skull.userData.skull=true;
       const hairC=new THREE.Mesh(
         new THREE.SphereGeometry(D.headR*1.04,14,12,0,Math.PI*2,0,1.6),hairM);
       hairC.scale.set(.94,1.06,1); hairC.rotation.x=-.5;
@@ -1151,6 +1159,41 @@ class Fighter{
         mu.position.set(0,-.046,D.headR*.88); F.push(mu); }
       if(fh.beard){ const bd=new THREE.Mesh(new THREE.SphereGeometry(D.headR*.6,10,8),hairM);
         bd.position.set(0,-.078,.024); bd.scale.set(.85,.72,.86); F.push(bd); }
+      const HB=this.build.hair;
+      if(HB==='pony'){
+        mage.visible=false;
+        const tie=new THREE.Mesh(new THREE.CylinderGeometry(.02,.023,.035,8),hairM);
+        tie.position.set(0,.06,-.075); tie.rotation.x=1.2;
+        const tail=new THREE.Mesh(new THREE.CylinderGeometry(.017,.006,.34,8),hairM);
+        tail.position.set(0,-.09,-.115); tail.rotation.x=.28;
+        F.push(tie,tail);
+      } else if(HB==='helmet'){
+        hairC.visible=false; mage.visible=false;
+        const helm=new THREE.Mesh(
+          new THREE.SphereGeometry(D.headR*1.12,16,12,0,Math.PI*2,0,1.9),
+          stdMat(0x8a7a58,{roughness:.35,metalness:.6}));
+        helm.scale.set(.95,1.05,1.02); helm.position.y=.012;
+        const crest=new THREE.Mesh(new THREE.BoxGeometry(.014,.075,.14),
+          stdMat(0x8a2020,{roughness:.8}));
+        crest.position.y=D.headR*1.1;
+        const guard=new THREE.Mesh(new THREE.BoxGeometry(.012,.05,.014),
+          stdMat(0x8a7a58,{roughness:.35,metalness:.6}));
+        guard.position.set(0,-.01,D.headR*.98);
+        F.push(helm,crest,guard);
+      }
+      if(this.build.bare){ /* the harness across the bare chest */
+        const strap=new THREE.Mesh(new THREE.BoxGeometry(.05,.42,.02),
+          stdMat(0x3a2a18,{roughness:.85}));
+        strap.position.set(.04,-0,-0);
+        strap.rotation.z=.6;
+        /* mounted on the chest, not the head */
+        setTimeout(()=>{ try{ this.parts.chest.add(strap);
+          strap.position.set(.01,-.14,.0); }catch(e){} },0);
+        const pauld=new THREE.Mesh(new THREE.SphereGeometry(.075,10,8,0,Math.PI*2,0,1.7),
+          stdMat(0x8a7a58,{roughness:.4,metalness:.55}));
+        setTimeout(()=>{ try{ this.parts.upperArmL.add(pauld);
+          pauld.position.set(0,-.03,0); }catch(e){} },0);
+      }
       parts.head.add(skull,hairC,mage,...F);
       if(isPlayer){
         const hachi=new THREE.Mesh(new THREE.TorusGeometry(D.headR*.94,.014,6,16),accentM);
@@ -1161,8 +1204,9 @@ class Fighter{
     /* arms: kimono sleeve flares on the upper arm, bare forearm */
     parts.upperArmR=limbMesh(D.upperArm,.052,.075,kimono);
     parts.upperArmL=limbMesh(D.upperArm,.052,.075,kimono);
-    parts.forearmR=limbMesh(D.foreArm,.052,.042,skin);
-    parts.forearmL=limbMesh(D.foreArm,.052,.042,skin);
+    const LB=this.build.limb;
+    parts.forearmR=limbMesh(D.foreArm,.052*LB,.042*LB,skin);
+    parts.forearmL=limbMesh(D.foreArm,.052*LB,.042*LB,skin);
     parts.handR=new THREE.Mesh(new THREE.SphereGeometry(.037,8,7),skin);
     parts.handR.scale.set(.8,1.15,.9); parts.handR.castShadow=true;
     parts.handL=parts.handR.clone();
@@ -1181,7 +1225,7 @@ class Fighter{
     this.katana=katanaMesh(); scene.add(this.katana);
 
     /* continuous skinned body over torso, upper arms, legs */
-    this.skin=buildSkinnedBody(kimono,hakama);
+    this.skin=buildSkinnedBody(this.build.bare?skin:kimono,hakama,this.build);
     scene.add(this.skin.mesh);
     this.skinKimono=this.skin.kimono;
     const hideIn=(g,keep)=>g.traverse(o=>{
@@ -1356,6 +1400,7 @@ class Fighter{
           continue;
         }
         deepest=L;
+        if(L.bone)this.boneBreak(partKey,hitPoint,hitDir);
         this.applyEffect(L,partKey,hitPoint,hitDir,energy,log);
       }
     }
@@ -1557,7 +1602,7 @@ const PHYS=(typeof ZPhys!=='undefined')?{
 if(PHYS.enabled){ PHYS.engine.g.set(0,-9.81,0); PHYS.engine.substeps=6; PHYS.engine.iters=3; }
 
 
-const ZAN_VERSION='v21';
+const ZAN_VERSION='v24';
 console.log('%c斬 ZAN '+ZAN_VERSION,'font-size:16px');
 
 /* =========================================================================
@@ -1586,10 +1631,12 @@ const MODELPIPE=(()=>{
     'models/Old Man.fbx','models/Zombiegirl W Kurniawan.fbx',
     'models/samurai2.glb','models/fighter.glb',
     'models/Xbot.glb','models/Soldier.glb'];
-  /* the roster: entry 0 is always the classic procedural samurai */
-  const roster=[{label:'武 MUSASHI — classic',src:null}];
-  for(const s of sources)roster.push({
-    label:s.split('/').pop().replace(/\.(glb|fbx)$/i,'').toUpperCase(),src:s});
+  /* the roster: the three procedural fighters. Dropped files (the back
+     door) join the list at runtime. */
+  const roster=[
+    {label:BUILDS.musashi.label,build:'musashi'},
+    {label:BUILDS.onna.label,build:'onna'},
+    {label:BUILDS.gladiator.label,build:'gladiator'}];
   /* models/index.json (["file.glb",...]) prepends to the cycle */
   try{ fetch('models/index.json').then(r=>r.ok?r.json():null).then(list=>{
     if(Array.isArray(list))for(const f of list){
@@ -1892,6 +1939,9 @@ const MODELPIPE=(()=>{
     const entry=roster[pick[slot]];
     const nameEl=document.getElementById('sel'+slot+'-name');
     if(nameEl)nameEl.textContent=entry.label;
+    if(entry.build){ current[slot]=null; SELECT[slot]=entry.build;
+      if(f)f.setModel(null);
+      return; }
     if(!entry.src){ current[slot]=null; if(f)f.setModel(null); return; }
     if(nameEl)nameEl.textContent=entry.label+' …';
     load(entry.src,g=>{
@@ -2551,6 +2601,8 @@ Fighter.prototype.updateAlive=function(dt,opponent){
     this.setBone('uaR',shR,elR);
     P.handR.position.copy(handR);
     P.handR.quaternion.copy(this.katana.quaternion);
+    if(this.brokenParts&&this.brokenParts.forearmR&&!this.hasSword)
+      P.handR.rotateX(1.1);   // the hand hangs off the break
     if(this.isPlayer){ game._drift=Math.max(game._drift||0,Math.abs(shR.distanceTo(elR)-D.upperArm));
       game._span=Math.max(game._span||0,Math.abs(P.forearmR.scale.y*P.forearmR.userData.len-elR.distanceTo(handR))); }
     if(!this.disabled.armL&&!this.severed.armL){
@@ -2797,10 +2849,17 @@ class AI{
 
     /* if disarmed or crippled → desperate retreat */
     const desperate=!f.hasSword||f.bloodFrac<.55;
+    /* THE OPENING: a crippled opponent is not spared — he is finished */
+    const foeCrippled=foe.alive&&(foe.downT>0||!foe.hasSword||
+      foe.consciousness<62||foe.bloodFrac<.55||
+      (foe.legDamage&&(foe.legDamage.R+foe.legDamage.L)>1.1));
+    md.execute=foeCrippled&&!desperate&&f.consciousness>50;
+    if(md.execute&&!md.saidKill){ md.saidKill=true;
+      log(f.name+' sees the opening — he moves in to finish it',false); }
 
     switch(this.state){
       case 'circle':{
-        const maai=desperate?3.4:this.P.maai;
+        const maai=md.execute?1.7:(desperate?3.4:this.P.maai);
         if(dist>maai+.25)move.add(fwd);
         else if(dist<maai-.25)move.sub(fwd);
         move.addScaledVector(right,this.strafe*.6);
@@ -2820,7 +2879,8 @@ class AI{
         if(this.t<=0){ this.strafe*=Math.random()<.4?-1:1; this.t=rand(this.P.tempo[0],this.P.tempo[1]);
           let pAtk=this.P.atkCircle*(1+md.aggr*.85)*(1-md.fear*.5);
           if(desperate2)pAtk=Math.max(pAtk,.55);        // the cornered animal
-          if(!desperate&&dist<2.9&&Math.random()<pAtk){ this.beginAttack(foe); } }
+          if(md.execute)pAtk=Math.max(pAtk,.8);         // no mercy, no hesitation
+          if(!desperate&&dist<(md.execute?3.4:2.9)&&Math.random()<pAtk){ this.beginAttack(foe); } }
         break; }
       case 'block':{
         f.guarding=true;
@@ -2878,6 +2938,9 @@ class AI{
       {k:'thighL',w:2,windup:V3(.8,-.1,0),thrust:false},
       {k:'abdomen',w:2,windup:V3(-.9,.2,0),thrust:false},
     ];
+    if(this.f.mood&&this.f.mood.execute){
+      for(const t of targets)t.w=(t.k==='neck')?9:(t.k==='head')?6:t.w*.3;
+    }
     let sum=0; for(const t of targets)sum+=t.w;
     let r=Math.random()*sum, pick=targets[0];
     for(const t of targets){ r-=t.w; if(r<=0){ pick=t; break; } }
@@ -3043,6 +3106,10 @@ function updateLoose(f,dt){
   }
   if(f._fleshM)for(const m of f._fleshM)
     if(m.color&&f.bloodTint)m.color.lerp(f.bloodTint,dt*.05*(1-(f.bloodFrac||1)));
+  if(f.brokenParts){       /* broken shins: the foot flops */
+    if(f.brokenParts.shinR&&f.feet)f.feet.R.roll=.55;
+    if(f.brokenParts.shinL&&f.feet)f.feet.L.roll=-.55;
+  }
   /* torn cloth breathes and swings */
   if(f._flaps&&f._flaps.length){
     const t=performance.now()*.003,
@@ -3329,26 +3396,56 @@ Fighter.prototype.launchHeart=function(worldPt,hitDir){
     game.timeScale=.3; game.slowT=.45;
   }catch(e){}
 };
-Fighter.prototype.exposeBrain=function(worldPt){
-  if(this.brainOut)return; this.brainOut=true;
+Fighter.prototype.exposeBrain=function(worldPt,hitDir){
+  if(this.brainOut||this.severed.head)return; this.brainOut=true;
   try{
-    const head=this.parts.head;
+    const head=this.parts.head, R=this.dims.headR, CUT=1.0;
+    let skull=null,hair=null;
+    head.traverse(o=>{ if(o.userData&&o.userData.skull)skull=o; });
+    /* the remaining head: everything below the cut line */
+    if(skull){
+      const lower=new THREE.SphereGeometry(R,26,20,0,Math.PI*2,CUT,Math.PI-CUT);
+      lower.rotateY(-Math.PI/2);
+      skull.geometry.dispose&&skull.geometry.dispose();
+      skull.geometry=lower;
+      /* the bowl: bone rim, meat, the brain sitting in it */
+      const capY=R*Math.cos(CUT)*1.08;
+      const cap=new THREE.Group();
+      const meat=new THREE.Mesh(new THREE.CircleGeometry(R*Math.sin(CUT)*.95,18),
+        stdMat(0x6e1414,{roughness:.3,side:THREE.DoubleSide}));
+      meat.rotation.x=-Math.PI/2;
+      const rim=new THREE.Mesh(new THREE.TorusGeometry(R*Math.sin(CUT)*.92,.006,6,18),
+        stdMat(0xe0d8c4,{roughness:.45}));
+      rim.rotation.x=Math.PI/2;
+      const brain=new THREE.Mesh(new THREE.SphereGeometry(R*.62,14,10),
+        stdMat(0xffffff,{map:brainTex||null,color:brainTex?0xffffff:0xc9a3a0,
+          roughness:.25}));
+      brain.scale.y=.55; brain.position.y=.004;
+      cap.add(meat,rim,brain); cap.position.y=capY;
+      head.add(cap);
+    }
+    /* the crown, flying: scalp + hair, hollow underside */
+    const crownG=new THREE.SphereGeometry(R,20,10,0,Math.PI*2,0,CUT);
+    crownG.rotateY(-Math.PI/2);
+    const crown=new THREE.Group();
+    const scalp=new THREE.Mesh(crownG,
+      stdMat(this.palette?this.palette.skin:0xc9a184,{roughness:.55,
+        side:THREE.DoubleSide}));
+    const under=new THREE.Mesh(new THREE.CircleGeometry(R*Math.sin(CUT)*.9,14),
+      stdMat(0x5e0f0f,{roughness:.35,side:THREE.DoubleSide}));
+    under.rotation.x=Math.PI/2; under.position.y=R*Math.cos(CUT);
+    crown.add(scalp,under);
     head.updateMatrixWorld(true);
-    const local=head.worldToLocal(worldPt.clone()).normalize()
-      .multiplyScalar(this.dims.headR*.72);
-    const g=new THREE.Group();
-    const rim=jaggedCap(.052);                       // torn scalp + bone ring
-    rim.traverse(o=>{ if(o.isMesh&&o.material&&o.material.color&&
-      o.material.color.getHex()===0xd9d2c0)o.scale&&o.scale.setScalar(1.15); });
-    const brain=new THREE.Mesh(new THREE.SphereGeometry(.042,12,10),
-      stdMat(0xffffff,{map:brainTex||null,color:brainTex?0xffffff:0xc9a3a0,
-        roughness:.25}));
-    brain.scale.set(1,.8,.9); brain.position.z=-.012;
-    g.add(rim,brain);
-    g.position.copy(local);
-    g.lookAt(local.clone().multiplyScalar(2));
-    head.add(g);
-    emitBlood(worldPt,V3(0,1,0),3,22);
+    crown.position.setFromMatrixPosition(head.matrixWorld);
+    crown.position.y+=R*.5;
+    scene.add(crown);
+    this.severedPieces=this.severedPieces||[];
+    this.severedPieces.push({mesh:crown,bleed:2,
+      vel:V3((hitDir?hitDir.x:0)*2.2+rand(-.5,.5),rand(2.2,3),(hitDir?hitDir.z:0)*2.2+rand(-.5,.5)),
+      ang:V3(rand(-8,8),rand(-8,8),rand(-8,8))});
+    addSquirt(this,'head',worldPt,3.6,2.2);
+    emitBlood(worldPt,V3(0,1,0),5,50);
+    game.timeScale=.32; game.slowT=.45; game.shake=1;
   }catch(e){}
 };
 /* evisceration: the belly opens and does not hold */
@@ -3413,30 +3510,39 @@ const tearTex=canTex(64,64,(x,w,h)=>{
 const CLOTHED=/chest|abdomen|upperArm|thigh|pelvis/;
 /* the cloth comes OFF: collapse the fabric out of a torso band, reveal
    a flesh under-body, and throw kimono panels fluttering to the snow */
-const REND_BANDS={chest:[1.04,1.52],abdomen:[.76,1.04]};
+const REND_BANDS={
+  chest:  {y0:1.04,y1:1.52,fx:(x,z)=>Math.hypot(x,z)<.21,part:'chest',  r:[.142,.152],cloth:'kimono'},
+  abdomen:{y0:.76, y1:1.04,fx:(x,z)=>Math.hypot(x,z)<.21,part:'abdomen',r:[.125,.14], cloth:'kimono'},
+  armR:   {y0:1.12,y1:1.46,fx:(x,z)=>x>.15, part:'upperArmR',r:[.05,.056],cloth:'kimono'},
+  armL:   {y0:1.12,y1:1.46,fx:(x,z)=>x<-.15,part:'upperArmL',r:[.05,.056],cloth:'kimono'},
+  thighR: {y0:.4,  y1:.8,  fx:(x,z)=>x>.02, part:'thighR',  r:[.07,.09], cloth:'hakama'},
+  thighL: {y0:.4,  y1:.8,  fx:(x,z)=>x<-.02,part:'thighL',  r:[.07,.09], cloth:'hakama'}};
+const REND_MAP={chest:'chest',abdomen:'abdomen',upperArmR:'armR',upperArmL:'armL',
+  thighR:'thighR',thighL:'thighL'};
 Fighter.prototype.rendRegion=function(region,worldPt){
   this._rend=this._rend||{};
   if(this._rend[region]||!REND_BANDS[region])return;
   this._rend[region]=true;
   try{
-    const [y0,y1]=REND_BANDS[region];
+    const R=REND_BANDS[region];
+    const {y0,y1}=R;
     /* 1) the fabric is cut away (bind-space vertex collapse) */
     if(this.skin&&this.skin.mesh&&this.skin.mesh.geometry){
       const pos=this.skin.mesh.geometry.attributes.position;
       for(let i=0;i<pos.count;i++){
         const y=pos.getY(i), x=pos.getX(i), z=pos.getZ(i);
-        if(y>=y0&&y<=y1&&Math.hypot(x,z)<.21){
+        if(y>=y0&&y<=y1&&R.fx(x,z)){
           pos.setX(i,x*.1); pos.setZ(i,z*.1);
         }
       }
       pos.needsUpdate=true;
     }
     /* 2) the body beneath */
-    const part=region==='chest'?this.parts.chest:this.parts.abdomen;
+    const part=this.parts[R.part];
     if(part&&this.palette){
       const len=y1-y0+.05;
       const flesh=new THREE.Mesh(
-        new THREE.CylinderGeometry(.142,.152,len,12,1,false),
+        new THREE.CylinderGeometry(R.r[0],R.r[1],len,12,1,false),
         stdMat(this.palette.skin,{roughness:.5,map:skinTex||null,
           normalMap:skinNrm||null}));
       flesh.position.y=-len*.5+.02;
@@ -3450,7 +3556,7 @@ Fighter.prototype.rendRegion=function(region,worldPt){
     for(let i=0;i<2;i++){
       const scrap=new THREE.Mesh(new THREE.PlaneGeometry(.24,.36),
         new THREE.MeshStandardMaterial({
-          color:region==='chest'?this.palette.kimono:this.palette.hakama,
+          color:this.palette[R.cloth],
           roughness:.92,side:THREE.DoubleSide,
           alphaMap:tearTex||null,transparent:!!tearTex,
           alphaTest:tearTex?.35:0}));
@@ -3464,6 +3570,49 @@ Fighter.prototype.rendRegion=function(region,worldPt){
     Sound&&Sound.cloth&&Sound.cloth();
   }catch(e){}
 };
+Fighter.prototype.boneBreak=function(partKey,worldPt,hitDir){
+  this.brokenParts=this.brokenParts||{};
+  if(this.brokenParts[partKey])return;
+  this.brokenParts[partKey]=true;
+  const part=this.parts[partKey]; if(!part)return;
+  try{
+    /* compound fracture: splinters jut from the break */
+    part.updateMatrixWorld(true);
+    const local=part.worldToLocal(worldPt.clone());
+    for(let i=0;i<2;i++){
+      const spike=new THREE.Mesh(new THREE.ConeGeometry(.009,.075,5),
+        stdMat(0xe6dfc9,{roughness:.4}));
+      spike.position.copy(local).multiplyScalar(1.02);
+      spike.position.x+=rand(-.015,.015); spike.position.y+=rand(-.02,.02);
+      spike.lookAt(local.clone().multiplyScalar(4));
+      spike.rotateX(Math.PI/2+rand(-.5,.5));
+      part.add(spike);
+    }
+    this.gib(worldPt,hitDir||V3(0,1,0),1,true);
+    Sound.bone&&Sound.bone();
+  }catch(e){}
+};
+Fighter.prototype.gib=function(worldPt,dir,n,withBone){
+  this.severedPieces=this.severedPieces||[];
+  try{
+    for(let i=0;i<n;i++){
+      const c=new THREE.Mesh(new THREE.IcosahedronGeometry(.014+Math.random()*.02,0),
+        stdMat(Math.random()<.5?0x6e1414:0x8e1e18,{roughness:.3}));
+      c.position.copy(worldPt); scene.add(c);
+      this.severedPieces.push({mesh:c,bleed:.7,
+        vel:V3(dir.x*2+rand(-1.6,1.6),rand(1,2.6),dir.z*2+rand(-1.6,1.6)),
+        ang:V3(rand(-9,9),rand(-9,9),rand(-9,9))});
+    }
+    if(withBone){
+      const s=new THREE.Mesh(new THREE.ConeGeometry(.007,.05,5),
+        stdMat(0xe0d8c4,{roughness:.4}));
+      s.position.copy(worldPt); scene.add(s);
+      this.severedPieces.push({mesh:s,bleed:0,
+        vel:V3(dir.x*2.4,rand(1.6,3),dir.z*2.4),
+        ang:V3(rand(-12,12),rand(-12,12),rand(-12,12))});
+    }
+  }catch(e){}
+};
 Fighter.prototype.addOpenWound=function(partKey,worldPt,severity){
   this._openW=(this._openW||0);
   if(this._openW>=14)return;
@@ -3471,11 +3620,12 @@ Fighter.prototype.addOpenWound=function(partKey,worldPt,severity){
   this._openW++;
   try{
     const g=new THREE.Group();
-    const deep=severity!=='severe'?true:Math.random()<.5;
+    const deep=severity!=='severe'?true:Math.random()<.6;
+    const big=severity==='mortal'?2.2:(severity==='severe'?1.5:1);
     const clothed=CLOTHED.test(partKey);
     /* torn cloth rim, in this fighter's own cloth color */
     if(clothed&&this.palette){
-      const rim=jaggedCap(.052);
+      const rim=jaggedCap(.052*big);
       rim.traverse(o=>{ if(o.isMesh&&o.material){
         o.material=stdMat(partKey==='chest'||/upperArm/.test(partKey)?
           this.palette.kimono:this.palette.hakama,{roughness:.92,
@@ -3483,18 +3633,22 @@ Fighter.prototype.addOpenWound=function(partKey,worldPt,severity){
       rim.scale.z=.4; g.add(rim);
     }
     /* the flesh beneath */
-    const meat=new THREE.Mesh(new THREE.SphereGeometry(.034,9,7),
+    const meat=new THREE.Mesh(new THREE.SphereGeometry(.034*big,10,8),
       stdMat(0x6e1414,{roughness:.3}));
-    meat.scale.set(1.2,.8,.45); g.add(meat);
-    const meat2=new THREE.Mesh(new THREE.SphereGeometry(.02,8,6),
-      stdMat(0x9c2820,{roughness:.2}));
-    meat2.scale.set(1.1,.7,.5); meat2.position.z=.008; g.add(meat2);
+    meat.scale.set(1.25,.85,.45); g.add(meat);
+    const meat2=new THREE.Mesh(new THREE.SphereGeometry(.021*big,9,7),
+      stdMat(0x9c2820,{roughness:.18}));
+    meat2.scale.set(1.1,.72,.5); meat2.position.z=.009*big; g.add(meat2);
     /* the bone, for the deep ones */
     if(deep){
-      const bone=new THREE.Mesh(new THREE.CylinderGeometry(.007,.007,.05,6),
+      const bone=new THREE.Mesh(new THREE.CylinderGeometry(.008*big,.008*big,.05*big,6),
         stdMat(0xe0d8c4,{roughness:.45}));
-      bone.rotation.z=Math.PI/2+rand(-.4,.4); bone.position.z=.012;
+      bone.rotation.z=Math.PI/2+rand(-.4,.4); bone.position.z=.014*big;
       g.add(bone);
+      if(severity==='mortal'){          // shattered: a second splintered end
+        const b2=bone.clone(); b2.rotation.z+=rand(.5,1.1);
+        b2.position.x+=.02; g.add(b2);
+      }
     }
     /* cloth flaps that hang and sway at the tear */
     if(clothed&&this.palette){
@@ -3721,6 +3875,20 @@ function faceTex(skinHex,face){
     x.fillStyle=g; x.fillRect(w*.42,h*.61,w*.16,h*.09);
     x.strokeStyle=tone(.8,.4); x.lineWidth=w*.005;
     x.beginPath(); x.moveTo(w*.5,h*.555); x.lineTo(w*.5,h*.572); x.stroke();
+    if(face&&face.feminine){
+      /* stronger lash line, fuller lips, softer jaw */
+      const m=(f)=>{ for(const s of [1,-1]){ x.save();
+        x.translate(w*.5,0); x.scale(s,1); f(x); x.restore(); } };
+      m(x=>{ x.strokeStyle='rgba(20,12,10,.95)'; x.lineWidth=w*.009;
+        x.beginPath();
+        x.ellipse(w*.052,h*.436,w*.033,h*.016,0,Math.PI*1.02,Math.PI*1.98);
+        x.stroke(); });
+      g=x.createLinearGradient(0,h*.575,0,h*.61);
+      g.addColorStop(0,'rgba(178,86,88,.95)'); g.addColorStop(.5,'rgba(150,58,62,.95)');
+      g.addColorStop(.52,'rgba(80,30,34,.95)'); g.addColorStop(1,'rgba(188,96,98,.95)');
+      x.fillStyle=g; x.beginPath();
+      x.ellipse(w*.5,h*.59,w*.046,h*.02,0,0,6.29); x.fill();
+    }
     /* stubble for the bearded */
     if(face&&(face.beard||face.stubble)){
       x.fillStyle='rgba(25,18,12,.16)';
@@ -3830,6 +3998,22 @@ function clampBladeDir(d,fwd,right){
   return d.set(0,ly,0).addScaledVector(right,lx).addScaledVector(fwd,lz).normalize();
 }
 
+/* ================== BUILDS: three fighters, all procedural ============== */
+const BUILDS={
+  musashi:{label:'武 MUSASHI — ronin',
+    sh:1, waist:1, hip:1, limb:1, hair:'topknot', bare:false,
+    palette:{kimono:0x2a4a78,hakama:0x18263e,obi:0xe8ddc0,skin:0xd0a684,
+      accent:0xf2eee2,face:{}}},
+  onna:{label:'鈴 SUZUME — onna-musha',
+    sh:.86, waist:.84, hip:1.06, limb:.88, hair:'pony', bare:false,
+    palette:{kimono:0x5e2440,hakama:0x241020,obi:0xd8c890,skin:0xdbb394,
+      accent:0xf0e6da,face:{feminine:true}}},
+  gladiator:{label:'Ω BRUTUS — gladiator',
+    sh:1.16, waist:1.06, hip:1.02, limb:1.18, hair:'helmet', bare:true,
+    palette:{kimono:0x8a6a48,hakama:0x5a4028,obi:0x3a2a18,skin:0xc09068,
+      accent:0xb89858,face:{stubble:true}}}};
+const SELECT={P:'musashi',E:'musashi'};
+
 /* ---------------- kamae: the five guards, as tip targets --------------- */
 const KAMAE={
   chudan:(o,p,fwd,right)=>o.copy(p).addScaledVector(fwd,.95).setY(1.28),
@@ -3898,10 +4082,10 @@ function setup(){
   for(const p of bloodStains)scene.remove(p.mesh); bloodStains.length=0;
   for(const m of allStains)scene.remove(m); allStains.length=0; stainCount=0;
   if(groundMark)groundMark.reset();   // fresh snow fell overnight
-  player=new Fighter('Musashi',
-    {kimono:0x2a4a78,hakama:0x18263e,obi:0xe8ddc0,skin:0xd0a684,accent:0xf2eee2},-1.9,1,true);
+  player=new Fighter(BUILDS[SELECT.P].label.split(' — ')[0],
+    null,-1.9,1,true,SELECT.P);
   const D=DUELISTS[game.stage];
-  enemy=new Fighter(D.name,D.palette,1.9,-1,false);
+  enemy=new Fighter(D.name,SELECT.E==='musashi'?D.palette:null,1.9,-1,false,SELECT.E);
   enemy.speedMul=D.ai.speedMul;
   const lbl=document.getElementById('name-enemy');
   if(lbl)lbl.innerHTML='<span style="color:var(--dim)">'+D.kanji+' </span>'+D.name
