@@ -1717,7 +1717,7 @@ const PHYS=(typeof ZPhys!=='undefined')?{
 if(PHYS.enabled){ PHYS.engine.g.set(0,-9.81,0); PHYS.engine.substeps=6; PHYS.engine.iters=3; }
 
 
-const ZAN_VERSION='v37';
+const ZAN_VERSION='v39';
 console.log('%c斬 ZAN '+ZAN_VERSION,'font-size:16px');
 
 /* =========================================================================
@@ -1751,8 +1751,8 @@ const WEAPONS={
               effMass:1.55,dmg:1.3, parryWin:.85, blunt:false, curl:1.24},
   axe:       {label:'斧 AXE',       len:.74, cutFrom:.42, speed:.58,  maxSpd:.8,
               effMass:2.3, dmg:1.8, parryWin:.6,  blunt:false, curl:1.12},
-  bare:      {label:'拳 BARE HANDS',len:.16, cutFrom:0,   speed:1.35, maxSpd:1.2,
-              effMass:.9,  dmg:.9, parryWin:1.15, blunt:true, curl:1.9}};
+  bare:      {label:'拳 BARE HANDS',len:.16, cutFrom:0,   speed:1.4, maxSpd:1.25,
+              effMass:1.7, dmg:1.25, parryWin:1.2, blunt:true, curl:1.9}};
 const SELECT={P:'musashi',E:'musashi',WP:'katana',WE:'katana'};
 function pickdbg(t){
   try{ const el=document.getElementById('pickdbg'); if(el)el.textContent=t; }catch(e){}
@@ -3210,10 +3210,12 @@ function bladeVsBody(att,def,log){
       const dir=TMP1.copy(att.tipVel).normalize();
       def.lastHitDir=dir.clone();
       const res=def.applyCut(key,energy,align,att.thrust,hitTmpB.clone(),dir.clone(),log);
-      if(AW.blunt){ /* the fist SHOVES: mass through the target */
-        def.physImpulse&&def.physImpulse(key,dir,Math.min(energy*.9,260));
-        def.stun=Math.max(def.stun,Math.min(energy/900,.5));
-        def.pain=Math.min(100,def.pain+energy*.04);
+      if(res)def.addHitMark(key,hitTmpB.clone(),dir,res.severity||'minor',AW.blunt);
+      if(AW.blunt){ /* the fist SHOVES: bodyweight through the target */
+        def.physImpulse&&def.physImpulse(key,dir,Math.min(energy*1.1,400));
+        def.stun=Math.max(def.stun,Math.min(energy/620,.75));
+        def.pain=Math.min(100,def.pain+energy*.065);
+        def.stamina=Math.max(0,def.stamina-energy*.05);   // punches wind you
       }
       if(res){
         /* blade loses energy in the body — realistic drag */
@@ -3845,6 +3847,67 @@ Fighter.prototype.gib=function(worldPt,dir,n,withBone){
         vel:V3(dir.x*2.4,rand(1.6,3),dir.z*2.4),
         ang:V3(rand(-12,12),rand(-12,12),rand(-12,12))});
     }
+  }catch(e){}
+};
+/* bright arcade marks: a saturated slash on skin, a splatter on cloth,
+   a bruise bloom from fists — unlit so the night can't mute them */
+const brightGashTex=canTex(128,64,(x,w,h)=>{
+  x.clearRect(0,0,w,h);
+  x.lineCap='round';
+  x.strokeStyle='#c60d16'; x.lineWidth=11;
+  x.beginPath(); x.moveTo(10,h*.5);
+  for(let px=10;px<=w-10;px+=8)x.lineTo(px,h*.5+(Math.random()-.5)*h*.5);
+  x.stroke();
+  x.strokeStyle='#ff3540'; x.lineWidth=4;
+  x.beginPath(); x.moveTo(12,h*.5);
+  for(let px=12;px<=w-12;px+=8)x.lineTo(px,h*.5+(Math.random()-.5)*h*.36);
+  x.stroke();
+  x.fillStyle='#d81420';
+  for(let i=0;i<10;i++)
+    x.fillRect(Math.random()*w,h*.5+(Math.random()-.5)*h*.8,2.5,2.5);
+});
+const splatTex=canTex(128,128,(x,w,h)=>{
+  x.clearRect(0,0,w,h);
+  x.fillStyle='#c40d16';
+  x.beginPath();
+  for(let a=0;a<6.283;a+=.4){
+    const r=w*.22*(0.7+Math.random()*.6);
+    const px=w*.5+Math.cos(a)*r, py=h*.5+Math.sin(a)*r;
+    a===0?x.moveTo(px,py):x.lineTo(px,py);
+  }
+  x.closePath(); x.fill();
+  x.fillStyle='#e01822';
+  for(let i=0;i<14;i++){ const a=Math.random()*6.283, r=w*(.26+Math.random()*.2);
+    x.beginPath();
+    x.arc(w*.5+Math.cos(a)*r,h*.5+Math.sin(a)*r,1.5+Math.random()*3.5,0,6.283);
+    x.fill(); }
+});
+Fighter.prototype.addHitMark=function(partKey,worldPt,hitDir,severity,blunt){
+  this._marks=(this._marks||0);
+  if(this._marks>=24)return;
+  const part=this.parts[partKey]; if(!part)return;
+  this._marks++;
+  try{
+    const onCloth=!this.build.bare&&CLOTHED.test(partKey);
+    const size=(severity==='mortal'?.23:severity==='severe'?.18:.13);
+    const tex=blunt?null:(onCloth?splatTex:brightGashTex);
+    const mat=new THREE.MeshBasicMaterial({
+      map:tex||null,transparent:!!tex,depthWrite:false,
+      color:blunt?0x7a1230:0xffffff,
+      opacity:blunt?.75:1,
+      polygonOffset:true,polygonOffsetFactor:-5});
+    const m=new THREE.Mesh(
+      new THREE.PlaneGeometry(size,blunt?size*.85:(onCloth?size:size*.45)),mat);
+    part.updateMatrixWorld(true);
+    m.position.copy(part.worldToLocal(worldPt.clone())).multiplyScalar(1.08);
+    m.lookAt(m.position.clone().multiplyScalar(3));
+    m.renderOrder=4;
+    /* the stripe follows the cut's line */
+    if(!onCloth&&!blunt&&hitDir)
+      m.rotation.z=-Math.atan2(hitDir.y,
+        Math.hypot(hitDir.x,hitDir.z)+.001)*1.1+rand(-.3,.3);
+    else m.rotation.z=Math.random()*Math.PI;
+    part.add(m);
   }catch(e){}
 };
 Fighter.prototype.addOpenWound=function(partKey,worldPt,severity){
@@ -4704,24 +4767,45 @@ function updateKillRitual(dt){
             addSquirt(loser,'chest',hp.clone().setY(hp.y-.2),4,2.2);
             emitBlood(hp,V3(0,1,0),7,90);
             game.timeScale=.28; game.slowT=.7;
-            if(piece){                             /* carried, then hurled */
-              piece.held=vt; piece.heldT=1.5; piece.vel=null;
-              piece.relVel=V3(TMP2.x*(bare?6.4:7.5),bare?5.4:4.8,
-                              TMP2.z*(bare?6.4:7.5));
+            if(piece){                             /* carried until THROWN */
+              piece.held=vt; piece.heldT=9; piece.vel=null;
+              kc.headPiece=piece; kc.throwDir=TMP2.clone();
               piece.ang.set(rand(-14,14),rand(-14,14),rand(-14,14));
             }
             game.shake=Math.max(game.shake,.9);
             log(bare?'the head is TORN FREE \u2014 and hurled'
                     :'the head is taken \u2014 and thrown across the snow',false);
           }
-        } else {                                   /* raise it high, release */
+        } else {                                   /* RAISE — WINDUP — THROW */
           const t2=kc.ritual-kc.thrownAt;
-          vt._ritualGrabL&&vt._ritualGrabL.copy(vt.pos)
-            .addScaledVector(DIRY(vt.bodyYaw),.35).setY(1.55+t2*.6);
-          if(bare&&vt._ritualGrabR)vt._ritualGrabR.copy(vt._ritualGrabL)
-            .setX(vt._ritualGrabL.x+.14);
-          if(t2>1.45){ vt._ritualGrabL=null; vt._ritualGrabR=null;
-            kc.released=true; }
+          const fwd2=DIRY(vt.bodyYaw);
+          if(!vt._ritualGrabL)vt._ritualGrabL=vt.pos.clone();
+          const G=vt._ritualGrabL;
+          if(t2<1.15){                             /* the head, held HIGH */
+            const e=minJerk?minJerk(clamp(t2/.7,0,1)):clamp(t2/.7,0,1);
+            G.copy(vt.pos).addScaledVector(fwd2,.28)
+              .setY(lerp(1.15,2.05,e));            // full overhead extension
+            vt.tipTarget.copy(vt.pos).addScaledVector(fwd2,.7).setY(.6);
+          } else if(t2<1.5){                       /* the windup: back and down */
+            const e=(t2-1.15)/.35;
+            G.copy(vt.pos).addScaledVector(fwd2,lerp(.28,-.34,e))
+              .setY(lerp(2.05,1.25,e));
+          } else if(!kc.released){                 /* THE THROW */
+            const e=clamp((t2-1.5)/.22,0,1);
+            G.copy(vt.pos).addScaledVector(fwd2,lerp(-.34,.72,e))
+              .setY(lerp(1.25,1.95,e));
+            if(e>=.75&&kc.headPiece&&kc.headPiece.held){   // release at the apex
+              const hpP=kc.headPiece;
+              hpP.held=null;
+              hpP.vel=V3(kc.throwDir.x*(bare?6.8:8.2),bare?5.2:4.6,
+                         kc.throwDir.z*(bare?6.8:8.2));
+              Sound.swing&&Sound.swing(1);
+            }
+            if(e>=1){ kc.released=true;
+              vt._ritualGrabL=null; vt._ritualGrabR=null; }
+          }
+          if(bare&&vt._ritualGrabR&&vt._ritualGrabL)
+            vt._ritualGrabR.copy(vt._ritualGrabL).x+=.14;
         }
       }
     }
