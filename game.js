@@ -1625,7 +1625,7 @@ const PHYS=(typeof ZPhys!=='undefined')?{
 if(PHYS.enabled){ PHYS.engine.g.set(0,-9.81,0); PHYS.engine.substeps=6; PHYS.engine.iters=3; }
 
 
-const ZAN_VERSION='v27';
+const ZAN_VERSION='v28';
 console.log('%c斬 ZAN '+ZAN_VERSION,'font-size:16px');
 
 /* =========================================================================
@@ -1649,8 +1649,27 @@ const BUILDS={
     palette:{kimono:0x8a6a48,hakama:0x5a4028,obi:0x3a2a18,skin:0xc09068,
       accent:0xb89858,face:{stubble:true}}}};
 const SELECT={P:'musashi',E:'musashi'};
+function pickdbg(t){
+  try{ const el=document.getElementById('pickdbg'); if(el)el.textContent=t; }catch(e){}
+}
 const PICKER={
   idx:{P:0,E:0},
+  rebuild(slot){
+    try{
+      const isP=slot==='P';
+      const old=isP?player:enemy;
+      if(!old)return;
+      const x=old.pos.x;
+      disposeFighter(old);
+      const D=DUELISTS[game.stage]||DUELISTS[0];
+      const nf=new Fighter(
+        isP?BUILDS[SELECT.P].label.split(' \u2014 ')[0]:D.name,
+        (!isP&&SELECT.E==='musashi')?D.palette:null,
+        x,isP?1:-1,isP,SELECT[slot]);
+      if(isP)player=nf; else enemy=nf;
+      pickdbg(slot+' \u2192 '+BUILDS[SELECT[slot]].label);
+    }catch(e){ pickdbg('rebuild: '+e.message); }
+  },
   roster:[
     {label:BUILDS.musashi.label,build:'musashi'},
     {label:BUILDS.onna.label,build:'onna'},
@@ -1668,11 +1687,9 @@ const PICKER={
       try{
         if(typeof MODELPIPE!=='undefined'&&MODELPIPE.current)
           MODELPIPE.current[slot]=null;
-        const f=slot==='P'?(typeof player!=='undefined'&&player)
-                          :(typeof enemy!=='undefined'&&enemy);
-        if(f&&f.setModel)f.setModel(null);
-        if(typeof makePreview==='function'&&game.state==='menu')makePreview(slot);
-      }catch(err){}
+        if(game.state==='menu')this.rebuild(slot);
+        else{ const f=slot==='P'?player:enemy; if(f&&f.setModel)f.setModel(null); }
+      }catch(err){ pickdbg('apply: '+err.message); }
     } else if(e.src&&typeof MODELPIPE!=='undefined'&&MODELPIPE.enabled){
       MODELPIPE.load(e.src,g=>{
         if(!g){ if(el)el.textContent=e.label+' (missing)'; return; }
@@ -4189,57 +4206,7 @@ function endDuel(){
   beginKillCam(won?enemy:player, won?player:enemy);
 }
 
-/* ---- menu previews: the picks stand at their marks, lightly alive ---- */
-const PREVIEW={P:null,E:null};
-function killPreview(s){
-  const f=PREVIEW[s]; if(!f)return;
-  try{
-    scene.remove(f.root); if(f.katana)scene.remove(f.katana);
-    if(f.blobs)for(const b of f.blobs)scene.remove(b);
-    if(f.model)scene.remove(f.model.root);
-    f.disposePhys&&f.disposePhys();
-  }catch(e){}
-  PREVIEW[s]=null;
-}
-function previewSpot(s){
-  const fwd=TMP1.set(0,0,-1).applyQuaternion(camera.quaternion); fwd.y=0;
-  if(fwd.lengthSq()<.01)fwd.set(0,0,-1); fwd.normalize();
-  const right=TMP2.set(fwd.z,0,-fwd.x);
-  return camera.position.clone().addScaledVector(fwd,3.6)
-    .addScaledVector(right,s==='P'?-1.35:1.35).setY(0);
-}
-function makePreview(s){
-  killPreview(s);
-  try{
-    const p=previewSpot(s);
-    const f=new Fighter('preview',null,p.x,1,false,SELECT[s]);
-    f.pos.copy(p);
-    if(f.feet){ f.feet.R.p.set(p.x+.12,0,p.z); f.feet.L.p.set(p.x-.12,0,p.z); }
-    f.preview=true;
-    PREVIEW[s]=f;
-  }catch(e){}
-}
-function updatePreviews(dt){
-  for(const s of ['P','E']){
-    const f=PREVIEW[s]; if(!f)continue;
-    try{
-      f.previewT=(f.previewT||0)+dt;
-      /* face the camera; breathe; a light arcade bounce */
-      f.yaw=f.bodyYaw=Math.atan2(camera.position.x-f.pos.x,
-                                 camera.position.z-f.pos.z);
-      const spot=previewSpot(s);
-      if(spot.distanceTo(f.pos)>.6){ makePreview(s); continue; }
-      f.previewBob=Math.abs(Math.sin(f.previewT*2.6))*.045;
-      if(f.tipTarget)f.tipTarget.copy(f.pos)
-        .addScaledVector(DIRY(f.bodyYaw),.95)
-        .setY(1.15+Math.sin(f.previewT*1.6)*.12);
-      f.updateAlive(dt);
-    }catch(e){}
-  }
-}
-
 document.getElementById('btn-begin').addEventListener('click',()=>{
-  killPreview('P'); killPreview('E');
   Sound.ac().resume&&Sound.ac().resume();
   Sound.startWind();
   document.getElementById('menu').classList.add('hidden');
@@ -4247,11 +4214,16 @@ document.getElementById('btn-begin').addEventListener('click',()=>{
   restart();
 });
 document.getElementById('btn-again').addEventListener('click',restart);
-for(const [id,slot,dir] of [['selP-prev','P',-1],['selP-next','P',1],
-                            ['selE-prev','E',-1],['selE-next','E',1]]){
-  const el=document.getElementById(id);
-  if(el)el.addEventListener('click',e=>{ e.stopPropagation(); PICKER.cycle(slot,dir); });
-}
+document.addEventListener('click',ev=>{
+  const b=ev.target&&ev.target.closest?ev.target.closest('.selbtn'):null;
+  if(!b)return;
+  ev.stopPropagation();
+  const map={'selP-prev':['P',-1],'selP-next':['P',1],
+             'selE-prev':['E',-1],'selE-next':['E',1]};
+  const m=map[b.id];
+  if(m)PICKER.cycle(m[0],m[1]);
+},true);
+pickdbg('picker ready \u00b7 click the arrows');
 
 /* =============================== THE BIND ==============================
    Real fencing lives in blade contact: pressure, leverage, feeling the
@@ -4430,10 +4402,17 @@ function frame(now){
   for(const L of lanterns)
     L.light.intensity=L.base*(0.82+0.22*Math.sin(now*.011+L.seed)+0.1*Math.sin(now*.037+L.seed*2.7));
 
-  if(game.state==='menu'){
-    if(!PREVIEW.P)makePreview('P');
-    if(!PREVIEW.E)makePreview('E');
-    updatePreviews(dt);
+  if(game.state==='menu'&&typeof player!=='undefined'&&player&&enemy){
+    for(const f of [player,enemy]){
+      try{
+        f.previewT=(f.previewT||0)+dt;
+        f.previewBob=Math.abs(Math.sin(f.previewT*2.6+(f.isPlayer?0:1.35)))*.05;
+        if(f.tipTarget)f.tipTarget.copy(f.pos)
+          .addScaledVector(DIRY(f.bodyYaw),.95)
+          .setY(1.15+Math.sin(f.previewT*1.5+(f.isPlayer?0:.8))*.1);
+        f.updateAlive(dt);
+      }catch(e){ pickdbg('menu-anim: '+e.message); }
+    }
   }
   if(game.state==='fight'||game.state==='over'){
     game.state==='fight'&&(game.duelTime+=dt);
