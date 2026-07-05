@@ -1625,7 +1625,7 @@ const PHYS=(typeof ZPhys!=='undefined')?{
 if(PHYS.enabled){ PHYS.engine.g.set(0,-9.81,0); PHYS.engine.substeps=6; PHYS.engine.iters=3; }
 
 
-const ZAN_VERSION='v28';
+const ZAN_VERSION='v29';
 console.log('%c斬 ZAN '+ZAN_VERSION,'font-size:16px');
 
 /* =========================================================================
@@ -1680,8 +1680,9 @@ const PICKER={
   },
   apply(slot){
     const e=this.roster[this.idx[slot]];
-    const el=document.getElementById('sel'+slot+'-name');
-    if(el)el.textContent=e.label;
+    let el=null;
+    try{ document.querySelectorAll('[id="sel'+slot+'-name"]')
+      .forEach(n=>{ n.textContent=e.label; el=n; }); }catch(err){}
     if(e.build){
       SELECT[slot]=e.build;
       try{
@@ -4402,15 +4403,34 @@ function frame(now){
   for(const L of lanterns)
     L.light.intensity=L.base*(0.82+0.22*Math.sin(now*.011+L.seed)+0.1*Math.sin(now*.037+L.seed*2.7));
 
-  if(game.state==='menu'&&typeof player!=='undefined'&&player&&enemy){
+  if(game.state==='menu'&&typeof process==='undefined'&&typeof player!=='undefined'&&player&&enemy){
+    /* stage the picks LEFT and RIGHT of the menu text, facing the lens */
+    const mFwd=TMP3.set(0,0,-1).applyQuaternion(camera.quaternion);
+    mFwd.y=0; if(mFwd.lengthSq()<.01)mFwd.set(0,0,-1); mFwd.normalize();
+    const mRight=TMP4.set(mFwd.z,0,-mFwd.x);
     for(const f of [player,enemy]){
       try{
+        const spot=camera.position.clone().addScaledVector(mFwd,4.4)
+          .addScaledVector(mRight,f.isPlayer?-1.85:1.85).setY(0);
+        if(f.pos.distanceTo(spot)>.03){
+          f.pos.copy(spot);
+          f.yaw=f.bodyYaw=Math.atan2(camera.position.x-spot.x,
+                                     camera.position.z-spot.z);
+          const fr=DIRY(f.bodyYaw), rt=TMP1.set(fr.z,0,-fr.x);
+          if(f.feet){
+            f.feet.R.p.set(spot.x+rt.x*.13,0,spot.z+rt.z*.13);
+            f.feet.L.p.set(spot.x-rt.x*.13,0,spot.z-rt.z*.13);
+            f.feet.R.yaw=f.feet.L.yaw=f.bodyYaw;
+            f.feet.R.swing=f.feet.L.swing=0;
+          }
+        }
         f.previewT=(f.previewT||0)+dt;
         f.previewBob=Math.abs(Math.sin(f.previewT*2.6+(f.isPlayer?0:1.35)))*.05;
         if(f.tipTarget)f.tipTarget.copy(f.pos)
           .addScaledVector(DIRY(f.bodyYaw),.95)
           .setY(1.15+Math.sin(f.previewT*1.5+(f.isPlayer?0:.8))*.1);
-        f.updateAlive(dt);
+        f.updateAlive(dt,f.isPlayer?enemy:player);
+        f.updateLoose&&updateLoose(f,dt);
       }catch(e){ pickdbg('menu-anim: '+e.message); }
     }
   }
