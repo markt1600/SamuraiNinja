@@ -13,7 +13,8 @@ Three duelists wait in the roped ring.
 vercel --prod
 ```
 
-Static site: `index.html` + `game.js`. Three.js r128 from cdnjs. No build step.
+Static site: `index.html` + `game.js`. Three.js **r164** vendored under
+`vendor/` (ES modules via import map — no CDN dependency). No build step.
 
 ## Controls
 
@@ -64,9 +65,18 @@ Kill all three: **三人斬り**.
   (**chiburi**), lowers it. Stillness, then the verdict.
 - **Snow memory** — the ring is a live 1024² canvas: every footstep prints,
   crippled legs drag furrows, blood soaks in. Fresh snow between duels.
-- **Bloom** — hand-rolled post pipeline (bright-pass → half-res separable
-  gaussian ×2 → additive composite, manual sRGB). Lanterns, moon and sword
-  trail glow. Falls back to direct render on any GPU hiccup.
+- **HDR pipeline** — the scene renders linear HDR into HalfFloat targets;
+  exposure + ACES happen exactly once, in the composite. Bloom is a
+  two-level pyramid (half-res tight halo + quarter-res wide glow) with an
+  HDR bright-pass: lantern flames, the moon and raised steel emit brighter
+  than white and truly glow. Falls back to direct render on any GPU hiccup.
+- **Snow glitter** — per-centimeter crystal facets flare when they align
+  with the moon/view half-vector, twinkling over time, near-field only.
+- **Contact shadows** — a soft pool under each fighter grounds him against
+  the bright snow; it spreads and thins when a body goes down.
+- **Cloth** — the hakama is verlet cloth (front/back panels colliding with
+  the legs), and the kimono sleeves are cloth too: they swing with the cut
+  and drape over a corpse.
 - **Sound** — all procedural WebAudio: wind that breathes and holds its
   breath at the kill, a heartbeat that rises as your blood falls, one taiko
   hit at first blood, a sub-boom on the deciding cut. Steel rings on parry.
@@ -77,7 +87,8 @@ Kill all three: **三人斬り**.
   parry probability, attack rates.
 - Parry feel: freshness window `185` ms; interception width `.13`;
   attacker stun `.6`.
-- Bloom: composite strength `1.15`, threshold `smoothstep(.62,.95)`.
+- Bloom: halo/glow strengths `.85`/`1.2`, HDR threshold `smoothstep(.9,1.9)`,
+  exposure `uExposure` `1.12`.
 - Cut lethality: `TISSUE_J_CM`, `BLADE_EFF_MASS`, artery flow rates in `ANATOMY`.
 
 ## Movement model (v4 — toward mocap feel)
@@ -105,6 +116,18 @@ Kill all three: **三人斬り**.
 - **Kamae** — five authored guards (chudan, seigan, jodan, gedan, waki).
   Kiyomasa waits in jodan, Gennosuke in seigan, Shizuka in waki: you can
   read each duelist's school from their silhouette.
+- **Pivot-weighted turning** — planted feet resist yaw; the turn flows once
+  a foot is in flight, so a change of facing *is* footwork, not rotation.
+- **Stride mechanics** — the pelvis shifts laterally over the planted foot,
+  dips through mid-swing, and the shoulders counter-rotate against the
+  hips while striding.
+- **Impact momentum** — the XPBD ragdoll's opinion is blended up under
+  fresh hits and staggers, so shock travels through the body as momentum
+  rather than scripted offsets.
+- **Mocap locomotion (models)** — a picked character model that ships
+  Idle/Walk/Run clips (bundled Soldier/Xbot do) plays them under the sim:
+  crossfaded by ground speed, cadence matched to velocity, blended per
+  bone so sword arms and planted feet stay simulation-true.
 
 ## v5 — the duel becomes a life
 
