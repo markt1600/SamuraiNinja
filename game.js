@@ -931,6 +931,48 @@ function limbMesh(len,rTop,rBot,mat){
   return g;
 }
 
+/* sculpt a sphere into a skull: tapered jaw, brow ridge, set-back eye
+   sockets, cheekbones, forward chin, tucked nape. The painted face keeps
+   its UVs — only the form underneath changes. Expects the face at +Z. */
+function sculptSkull(geo,r){
+  const p=geo.attributes.position, d=V3();
+  const gs=(dir,cx,cy,cz,sharp)=>{                 // gaussian bump on the sphere
+    const dd=dir.x*cx+dir.y*cy+dir.z*cz;
+    return Math.exp(-(1-dd)*sharp);
+  };
+  for(let i=0;i<p.count;i++){
+    d.set(p.getX(i),p.getY(i),p.getZ(i)).divideScalar(r);
+    const y=d.y, front=clamp(d.z,0,1), back=clamp(-d.z,0,1), side=Math.abs(d.x);
+    let s=1;
+    const low=clamp((-y-.02)/.9,0,1);
+    s*=1-.17*low*low*side;                                  // the jaw tapers
+    s*=1-.15*back*clamp((-y-.12)/.6,0,1);                   // nape tucks in
+    s*=1+.04*front*Math.exp(-Math.pow((y-.24)/.15,2))*(1-.45*side); // brow ridge
+    s*=1-.055*gs(d,.34,.17,.92,55)-.055*gs(d,-.34,.17,.92,55);      // eye sockets
+    s*=1+.032*gs(d,.6,-.06,.76,24)+.032*gs(d,-.6,-.06,.76,24);      // cheekbones
+    s*=1+.06*front*Math.exp(-Math.pow((y+.68)/.2,2))
+        *(1-clamp(side*2.4,0,1)*.75);                        // the chin leads
+    s*=1-.02*front*Math.exp(-Math.pow((y+.36)/.11,2));       // slight under-lip set
+    p.setXYZ(i,d.x*s*r,d.y*s*r,d.z*s*r);
+  }
+  p.needsUpdate=true;
+  geo.computeVertexNormals();
+  /* heal the UV seam and pole: co-located verts share one normal */
+  const n=geo.attributes.normal, seam={};
+  for(let i=0;i<p.count;i++){
+    const key=p.getX(i).toFixed(4)+','+p.getY(i).toFixed(4)+','+p.getZ(i).toFixed(4);
+    (seam[key]=seam[key]||[]).push(i);
+  }
+  for(const k in seam){ const a=seam[k]; if(a.length<2)continue;
+    let nx=0,ny=0,nz=0;
+    for(const i of a){ nx+=n.getX(i); ny+=n.getY(i); nz+=n.getZ(i); }
+    const l=Math.hypot(nx,ny,nz)||1;
+    for(const i of a)n.setXYZ(i,nx/l,ny/l,nz/l);
+  }
+  n.needsUpdate=true;
+  return geo;
+}
+
 /* =========================================================================
    PROCEDURAL SKINNED BODY — one continuous mesh over torso, upper arms
    and legs, weighted across world-space bones driven by the same IK
@@ -1281,10 +1323,11 @@ class Fighter{
       const faceMat=rimify(stdMat(0xffffff,{map:fTex||null,
         normalMap:skinNrm||null,roughness:.52}),.42,.4,.42,3,.3);
       if(faceMat.normalMap)faceMat.normalScale=new THREE.Vector2(.35,.35);
-      const headGeo=new THREE.SphereGeometry(D.headR,26,20);
+      const headGeo=new THREE.SphereGeometry(D.headR,40,30);
       headGeo.rotateY(-Math.PI/2);            // painted face looks down +Z
+      sculptSkull(headGeo,D.headR);           // a skull, not a balloon
       const skull=new THREE.Mesh(headGeo,fTex?faceMat:skin);
-      skull.castShadow=true; skull.scale.set(.92,1.08,.98);
+      skull.castShadow=true; skull.scale.set(.94,1.06,1);
       skull.userData.skull=true;
       const hairC=new THREE.Mesh(
         new THREE.SphereGeometry(D.headR*1.04,22,16,0,Math.PI*2,0,1.6),hairM);
@@ -1297,7 +1340,7 @@ class Fighter{
       const bridge=new THREE.Mesh(new THREE.BoxGeometry(.012,.042,.013),skin);
       bridge.position.set(0,.006,D.headR*.9); bridge.rotation.x=.16;
       const noseTip=new THREE.Mesh(new THREE.SphereGeometry(.0125,12,9),skin);
-      noseTip.position.set(0,-.017,D.headR*.95); noseTip.scale.set(1.1,.82,.78);
+      noseTip.position.set(0,-.02,D.headR*.94); noseTip.scale.set(.95,.8,.62);
       const mkEar=(sx)=>{ const e=new THREE.Mesh(new THREE.SphereGeometry(.019,12,9),skin);
         e.position.set(sx*D.headR*.9,-.005,0); e.scale.set(.4,1,.7); F.push(e); };
       mkEar(1); mkEar(-1);
@@ -2282,15 +2325,8 @@ const MODELPIPE=(()=>{
     _handFix:new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1,0,0),-Math.PI/2),
     mode:0};
 })();
-/* bundled character models join the picker (menu arrows, or M/N in-fight);
-   only files that actually exist appear */
-if(MODELPIPE.enabled&&typeof fetch!=='undefined')
-  MODELPIPE.sources.forEach(src=>{
-    fetch(src,{method:'HEAD'}).then(r=>{ if(!r.ok)return;
-      PICKER.roster.push({label:'⬢ '+src.split('/').pop()
-        .replace(/\.(glb|fbx)$/i,'').toUpperCase(),src});
-    }).catch(()=>{});
-  });
+/* the picker offers ONLY the procedural fighters. Bundled model files are
+   not surfaced; dropping a .glb/.fbx onto the page remains the back door. */
 
 const _pq=new THREE.Quaternion(), _pv=V3(), _pv2=V3();
 function mkTargetQ(from,to,q){ _pv.subVectors(to,from).normalize();
@@ -2604,8 +2640,13 @@ Fighter.prototype.soften=function(k,v,rate,dt){
       wgt*=1-clamp(this.bladeSpeed/9,0,.8);
     /* under a fresh impact or a stagger the ragdoll speaks louder —
        real momentum, not scripted offsets */
-    wgt*=1+clamp(this.stagger||0,0,1)*.9+clamp(this.flinch.lengthSq()*22,0,.5);
-    if(_pj.distanceToSquared(v)<.36)v.lerp(_pj,Math.min(.85,PHYS.blend*wgt));
+    wgt*=1+clamp(this.stagger||0,0,1)*.6+clamp(this.flinch.lengthSq()*22,0,.5);
+    /* low-pass the solver sample: XPBD substep noise must not become
+       limb jitter — momentum passes, vibration doesn't */
+    const SP=this.softP||(this.softP={});
+    let sp=SP[k]; if(!sp)sp=SP[k]=_pj.clone();
+    sp.lerp(_pj,1-Math.exp(-22*dt));
+    if(sp.distanceToSquared(v)<.36)v.lerp(sp,Math.min(.85,PHYS.blend*wgt));
   }
   const S=this.soft||(this.soft={});
   let s=S[k]; if(!s){ s=S[k]={p:v.clone(),vel:V3()}; }
@@ -4338,30 +4379,30 @@ function faceTex(skinHex,face){
     const mir=f=>{ for(const s of [1,-1]){ x.save();
       x.translate(w*.5,0); x.scale(s,1); f(x); x.restore(); } };
     /* eye sockets */
-    mir(x=>{ const g2=x.createRadialGradient(w*.052,h*.435,2,w*.052,h*.435,w*.055);
+    mir(x=>{ const g2=x.createRadialGradient(w*.058,h*.435,2,w*.058,h*.435,w*.062);
       g2.addColorStop(0,tone(.62,.5)); g2.addColorStop(1,tone(1,0));
       x.fillStyle=g2; x.beginPath();
-      x.ellipse(w*.052,h*.435,w*.055,h*.038,0,0,6.29); x.fill(); });
+      x.ellipse(w*.058,h*.435,w*.062,h*.042,0,0,6.29); x.fill(); });
     /* whites, iris, pupil, catchlight */
     mir(x=>{ x.fillStyle='rgba(226,220,206,.95)'; x.beginPath();
-      x.ellipse(w*.052,h*.44,w*.03,h*.016,0,0,6.29); x.fill();
+      x.ellipse(w*.058,h*.44,w*.036,h*.019,0,0,6.29); x.fill();
       x.fillStyle='#3a2a1c'; x.beginPath();
-      x.arc(w*.052,h*.441,w*.0145,0,6.29); x.fill();
+      x.arc(w*.058,h*.441,w*.017,0,6.29); x.fill();
       x.fillStyle='#120c08'; x.beginPath();
-      x.arc(w*.052,h*.441,w*.007,0,6.29); x.fill();
+      x.arc(w*.058,h*.441,w*.008,0,6.29); x.fill();
       x.fillStyle='rgba(255,255,255,.9)'; x.beginPath();
-      x.arc(w*.046,h*.435,w*.004,0,6.29); x.fill();
+      x.arc(w*.051,h*.434,w*.0045,0,6.29); x.fill();
       /* lash line + lid crease */
       x.strokeStyle='rgba(30,20,14,.85)'; x.lineWidth=w*.006;
-      x.beginPath(); x.ellipse(w*.052,h*.437,w*.031,h*.015,0,Math.PI*1.05,Math.PI*1.95);
+      x.beginPath(); x.ellipse(w*.058,h*.437,w*.037,h*.018,0,Math.PI*1.05,Math.PI*1.95);
       x.stroke();
       x.strokeStyle=tone(.7,.55); x.lineWidth=w*.004;
-      x.beginPath(); x.ellipse(w*.052,h*.428,w*.033,h*.014,0,Math.PI*1.1,Math.PI*1.9);
+      x.beginPath(); x.ellipse(w*.058,h*.427,w*.039,h*.017,0,Math.PI*1.1,Math.PI*1.9);
       x.stroke(); });
     /* brows: feathered strokes, angled */
     mir(x=>{ x.strokeStyle='rgba(24,17,12,.9)'; x.lineWidth=w*.004;
-      for(let i=0;i<9;i++){
-        const t=i/8, bx=w*(.022+t*.062), by=h*(.402-t*.014)+Math.random()*h*.004;
+      for(let i=0;i<11;i++){
+        const t=i/10, bx=w*(.026+t*.072), by=h*(.398-t*.016)+Math.random()*h*.004;
         x.beginPath(); x.moveTo(bx,by+h*.008); x.lineTo(bx+w*.008,by-h*.006); x.stroke(); } });
     /* nostril shadows (the 3D nose sits above) */
     mir(x=>{ x.fillStyle=tone(.55,.6); x.beginPath();
@@ -4372,9 +4413,9 @@ function faceTex(skinHex,face){
     g.addColorStop(.52,'rgba(60,32,26,.95)'); g.addColorStop(.62,'rgba(158,96,80,.95)');
     g.addColorStop(1,'rgba(134,78,64,.9)');
     x.fillStyle=g; x.beginPath();
-    x.ellipse(w*.5,h*.59,w*.042,h*.017,0,0,6.29); x.fill();
+    x.ellipse(w*.5,h*.59,w*.05,h*.019,0,0,6.29); x.fill();
     x.fillStyle='rgba(255,235,225,.25)'; x.beginPath();
-    x.ellipse(w*.5,h*.597,w*.02,h*.005,0,0,6.29); x.fill();
+    x.ellipse(w*.5,h*.598,w*.024,h*.006,0,0,6.29); x.fill();
     /* chin + jaw shading, philtrum */
     g=x.createRadialGradient(w*.5,h*.655,2,w*.5,h*.655,w*.05);
     g.addColorStop(0,tone(1.05,.3)); g.addColorStop(1,tone(.8,.25));
@@ -4387,13 +4428,13 @@ function faceTex(skinHex,face){
         x.translate(w*.5,0); x.scale(s,1); f(x); x.restore(); } };
       m(x=>{ x.strokeStyle='rgba(20,12,10,.95)'; x.lineWidth=w*.009;
         x.beginPath();
-        x.ellipse(w*.052,h*.436,w*.033,h*.016,0,Math.PI*1.02,Math.PI*1.98);
+        x.ellipse(w*.058,h*.436,w*.039,h*.019,0,Math.PI*1.02,Math.PI*1.98);
         x.stroke(); });
       g=x.createLinearGradient(0,h*.575,0,h*.61);
       g.addColorStop(0,'rgba(178,86,88,.95)'); g.addColorStop(.5,'rgba(150,58,62,.95)');
       g.addColorStop(.52,'rgba(80,30,34,.95)'); g.addColorStop(1,'rgba(188,96,98,.95)');
       x.fillStyle=g; x.beginPath();
-      x.ellipse(w*.5,h*.59,w*.046,h*.02,0,0,6.29); x.fill();
+      x.ellipse(w*.5,h*.59,w*.054,h*.023,0,0,6.29); x.fill();
     }
     /* stubble for the bearded */
     if(face&&(face.beard||face.stubble)){
@@ -4468,9 +4509,14 @@ function addOutline(mesh,thick){
   try{
     if(!mesh.geometry||!mesh.geometry.attributes.position)return;
     if(mesh.geometry.attributes.position.count<60)return;   // skip face micro-parts
+    /* small parts (fingers, toes, trim) turn inside-out under a hull —
+       the displacement rivals their radius and reads as black flicker */
+    if(!mesh.geometry.boundingSphere)mesh.geometry.computeBoundingSphere();
+    const br=mesh.geometry.boundingSphere.radius;
+    if(br<.055)return;
     const mat=new THREE.MeshBasicMaterial({color:0x04060b,side:THREE.BackSide});
     if(mesh.isSkinnedMesh)mat.skinning=true;
-    const t=(thick||.007).toFixed(4);
+    const t=Math.min(thick||.007,br*.12).toFixed(4);
     /* MeshBasicMaterial has no objectNormal — displace along the raw
        normal attribute (pre-skinning is fine for a hull this thin) */
     mat.onBeforeCompile=s=>{ s.vertexShader=s.vertexShader.replace(
@@ -4526,13 +4572,24 @@ function segPush(pt,a,b,rad){
 Fighter.prototype.buildCloth=function(hakamaMat){
   if(this.build.cloth===false)return;
   this.cloth=[];
-  for(const side of [1,-1]){   // front, back
-    const P=mkClothPanel(6,5,hakamaMat);
-    P.side=side;
-    scene.add(P.mesh);
-    /* start points near the pelvis so the first frames don't explode */
-    for(const q of P.pts){ q.p.set(this.pos.x,0.7,this.pos.z); q.pp.copy(q.p); }
-    this.cloth.push(P);
+  /* ONE continuous wrap: a cloth cylinder pinned around the waist and
+     seam-stitched closed — the hakama flows as a garment, not two flags */
+  const COLS=14, ROWS=7;
+  const P=mkClothPanel(COLS+1,ROWS,hakamaMat,.072,.108,.094);
+  P.wrap=COLS;
+  for(let r2=1;r2<ROWS;r2++)               // stitch the seam column shut
+    P.cons.push([r2*(COLS+1),r2*(COLS+1)+COLS,0]);
+  scene.add(P.mesh);
+  for(const q of P.pts){ q.p.set(this.pos.x,.8,this.pos.z); q.pp.copy(q.p); }
+  this.cloth.push(P);
+  /* obi tails: two ribbons off the back knot, never quite still */
+  const tailM=rimify(stdMat(this.palette.obi,{roughness:.9,
+    side:THREE.DoubleSide}),.3,.36,.5,3,.25);
+  for(const s of [-1,1]){
+    const T=mkClothPanel(2,5,tailM,.048,.052,.06);
+    T.tail=s; scene.add(T.mesh);
+    for(const q of T.pts){ q.p.set(this.pos.x,.9,this.pos.z); q.pp.copy(q.p); }
+    this.cloth.push(T);
   }
   if(this.skirtF)this.skirtF.visible=false;
   if(this.skirtB)this.skirtB.visible=false;
@@ -4593,33 +4650,47 @@ Fighter.prototype.tickSleeves=function(dt,J){
     for(let i=0;i<P.pts.length;i++)
       pos.setXYZ(i,P.pts[i].p.x,P.pts[i].p.y,P.pts[i].p.z);
     pos.needsUpdate=true;
-    if((P.ni++&1)===0)P.mesh.geometry.computeVertexNormals();
+    P.mesh.geometry.computeVertexNormals();   // every frame: no lighting shimmer
   }
 };
 Fighter.prototype.tickCloth=function(dt,J){
   if(!this.cloth)return;
   dt=Math.min(dt,.033);
   const yaw=this.bodyYaw||0, fwd=DIRY(yaw), right=V3(fwd.z,0,-fwd.x);
+  const now=performance.now()*.001;
   for(const P of this.cloth){
-    /* pin the waistband */
-    for(let c=0;c<P.cols;c++){
-      const q=P.pts[c];
-      const lx=(c/(P.cols-1)-.5)*.3;
-      q.p.copy(J.pelvis)
-        .addScaledVector(right,lx)
-        .addScaledVector(fwd,P.side*.125);
-      q.p.y=J.pelvis.y-.06;
-      q.pp.copy(q.p);
+    if(P.wrap){
+      /* pin the waistband around the torso's ellipse */
+      const N=P.wrap;
+      for(let c=0;c<=N;c++){
+        const q=P.pts[c], th=(c%N)/N*Math.PI*2;
+        q.p.copy(J.pelvis)
+          .addScaledVector(right,Math.cos(th)*.152)
+          .addScaledVector(fwd,Math.sin(th)*.132);
+        q.p.y=J.pelvis.y-.045;
+        q.pp.copy(q.p);
+      }
+    } else if(P.tail){
+      /* the ribbons hang from the back knot */
+      for(let c=0;c<P.cols;c++){
+        const q=P.pts[c];
+        q.p.copy(J.pelvis).addScaledVector(fwd,-.155)
+          .addScaledVector(right,P.tail*.03+(c-.5)*.048);
+        q.p.y=J.pelvis.y+.02;
+        q.pp.copy(q.p);
+      }
     }
     /* verlet */
     for(let i=P.cols;i<P.pts.length;i++){
       const q=P.pts[i];
-      TMP2.subVectors(q.p,q.pp).multiplyScalar(.965);
+      TMP2.subVectors(q.p,q.pp).multiplyScalar(P.tail?.93:.968);
       q.pp.copy(q.p);
       q.p.add(TMP2);
-      q.p.y-=5.4*dt*dt;                                   // gravity (verlet form)
-      q.p.addScaledVector(fwd,Math.sin(performance.now()*.0012+i)*.0004);
-      q.p.addScaledVector(this.vel,-dt*.25);              // drag from movement
+      q.p.y-=(P.tail?7.5:5.6)*dt*dt;                      // gravity (verlet form)
+      /* the night air moves the cloth */
+      q.p.addScaledVector(fwd,Math.sin(now*1.2+i*.7)*.0005);
+      q.p.x+=Math.sin(now*.9+i*1.3)*.0004;
+      q.p.addScaledVector(this.vel,-dt*.28);              // drag from movement
     }
     for(let it=0;it<3;it++){
       for(const [a,b,rest] of P.cons){
@@ -4633,8 +4704,8 @@ Fighter.prototype.tickCloth=function(dt,J){
       /* the legs are inside the garment */
       for(let i=P.cols;i<P.pts.length;i++){
         const q=P.pts[i];
-        segPush(q.p,J.hipR,J.knR,.1); segPush(q.p,J.knR,J.ankR,.085);
-        segPush(q.p,J.hipL,J.knL,.1); segPush(q.p,J.knL,J.ankL,.085);
+        segPush(q.p,J.hipR,J.knR,.115); segPush(q.p,J.knR,J.ankR,.09);
+        segPush(q.p,J.hipL,J.knL,.115); segPush(q.p,J.knL,J.ankL,.09);
         if(q.p.y<.015)q.p.y=.015;
       }
     }
@@ -4643,7 +4714,7 @@ Fighter.prototype.tickCloth=function(dt,J){
     for(let i=0;i<P.pts.length;i++)
       pos.setXYZ(i,P.pts[i].p.x,P.pts[i].p.y,P.pts[i].p.z);
     pos.needsUpdate=true;
-    if((P.ni++&1)===0)P.mesh.geometry.computeVertexNormals();
+    P.mesh.geometry.computeVertexNormals();   // every frame: no lighting shimmer
   }
 };
 
