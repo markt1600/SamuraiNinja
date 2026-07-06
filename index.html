@@ -58,6 +58,34 @@
   .title-sub{font-family:'Shippori Mincho',serif;font-size:20px;letter-spacing:.5em;margin-top:14px;color:var(--paper)}
   .title-tag{font-size:11.5px;letter-spacing:.24em;color:var(--dim);margin-top:10px;text-transform:uppercase}
   .rule{width:52px;height:1px;background:var(--dim);margin:34px 0 26px;opacity:.5}
+  /* THE LADDER interstitial: rails, rungs, the climb */
+  #ladder{transition:opacity .5s}
+  #ladder-title{font-family:'Shippori Mincho',serif;font-size:26px;letter-spacing:.5em;
+    color:var(--paper);margin-bottom:26px;text-shadow:0 0 40px rgba(233,230,223,.15)}
+  #ladder-box{position:relative;padding:6px 46px;
+    border-left:4px solid rgba(233,230,223,.5);border-right:4px solid rgba(233,230,223,.5);
+    animation:climb 1.1s cubic-bezier(.2,.8,.2,1)}
+  @keyframes climb{from{transform:translateY(-46px);opacity:.3}to{transform:translateY(0);opacity:1}}
+  .rung{position:relative;padding:15px 8px;text-align:center;min-width:300px;
+    border-bottom:3px solid rgba(233,230,223,.5)}
+  .rung:first-child{border-top:3px solid rgba(233,230,223,.5)}
+  .rung .r-name{font-family:'Shippori Mincho',serif;font-size:17px;letter-spacing:.2em;color:var(--paper)}
+  .rung .r-sub{font-size:10px;letter-spacing:.22em;color:var(--dim);text-transform:uppercase;margin-top:3px}
+  .rung.r-next{opacity:.55}
+  .rung.r-now .r-name{font-size:20px;color:#fff;text-shadow:0 0 26px rgba(233,230,223,.4)}
+  .rung.r-now::before{content:'▲';position:absolute;left:-32px;top:50%;transform:translateY(-50%);
+    color:var(--paper);font-size:14px;animation:bob 1.1s ease-in-out infinite}
+  @keyframes bob{0%,100%{margin-top:2px}50%{margin-top:-4px}}
+  .rung.r-beaten{opacity:.4}
+  .rung.r-beaten .r-name{color:var(--dim)}
+  .rung.r-beaten::after{content:'';position:absolute;left:10%;top:50%;height:2px;width:80%;
+    background:var(--blood-fresh,#c22323);transform:rotate(-4deg)}
+  .rung.r-fresh::after{animation:strike .5s .55s ease-out backwards}
+  @keyframes strike{from{width:0}to{width:80%}}
+  .rung.r-beaten .r-x{position:absolute;right:-30px;top:50%;transform:translateY(-50%);
+    font-family:'Shippori Mincho',serif;color:var(--blood-fresh,#c22323);font-size:15px;opacity:.9}
+  #ladder-foot{margin-top:26px;font-size:10.5px;letter-spacing:.3em;color:var(--dim);
+    text-transform:uppercase}
   .controls{display:grid;grid-template-columns:auto auto;gap:7px 22px;font-size:12.5px;color:var(--dim);letter-spacing:.08em}
   .controls b{color:var(--paper);font-weight:500;text-align:right;letter-spacing:.14em}
   .begin{margin-top:40px;font-family:'Shippori Mincho',serif;font-size:15px;letter-spacing:.32em;color:var(--paper);
@@ -192,6 +220,13 @@
   <button class="begin" id="btn-again">AGAIN&nbsp;&nbsp;·&nbsp;&nbsp;R</button>
   <button class="begin" id="btn-rematch" style="margin-top:14px;font-size:12px;letter-spacing:.26em;padding:10px 30px">REMATCH SAME FOE&nbsp;&nbsp;·&nbsp;&nbsp;E</button>
   <button class="begin" id="btn-menu" style="margin-top:14px;font-size:12px;letter-spacing:.26em;padding:10px 30px">NEW FIGHTER / WEAPON</button>
+</div>
+
+<!-- THE CLIMB: interstitial between won rounds — the ladder itself -->
+<div class="screen hidden" id="ladder" style="pointer-events:none;z-index:26">
+  <div id="ladder-title">梯 THE LADDER</div>
+  <div id="ladder-box"><div id="ladder-list"></div></div>
+  <div id="ladder-foot">YOU CLIMB</div>
 </div>
 
 <script type="importmap">

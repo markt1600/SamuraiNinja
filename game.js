@@ -5868,25 +5868,34 @@ function setup(){
   player=new Fighter(BUILDS[SELECT.P].label.split(' — ')[0],
     null,-1.9,1,true,SELECT.P);
   const D=DUELISTS[game.stage];
-  let eBuild=(SELECT.E==='musashi'&&D.build)?D.build:SELECT.E;
-  /* the road never sends the same face twice: each duelist resolves to
-     a build the player hasn't faced; only once every build has fought
-     does the pool refill. Hand-picked opponents are always honored. */
-  if(SELECT.E==='musashi'){
-    if(!D._rBuild){
-      game.fought=game.fought||[];
-      let b=eBuild;
-      if(game.fought.includes(b)){
-        let fresh=Object.keys(BUILDS).filter(k=>!game.fought.includes(k));
-        if(!fresh.length){ game.fought.length=0; fresh=Object.keys(BUILDS); }
-        b=fresh[Math.floor(Math.random()*fresh.length)];
-      }
-      game.fought.push(b); D._rBuild=b;
-    }
-    eBuild=D._rBuild;
+  /* the road never sends the same face twice: each duelist resolves ONCE
+     to a build the player hasn't faced this run (stable across retries);
+     the pool refills only when every build has fought. A hand-picked
+     opponent is honored for the FIRST duel only — after that the ladder
+     owns the matchmaking, or every round would be the same man. */
+  game.fought=game.fought||[];
+  const picked=game.stage===0&&SELECT.E!=='musashi';
+  /* the menu tableau resolves stage 0 early — a pick made after that
+     must overrule the cached resolution, not be swallowed by it */
+  if(picked&&D._rBuild&&D._rBuild!==SELECT.E){
+    const i=game.fought.indexOf(D._rBuild);
+    if(i>=0)game.fought.splice(i,1);
+    delete D._rBuild;
   }
+  if(!D._rBuild){
+    let b=picked?SELECT.E:(D.build||'musashi');
+    if(!picked&&game.fought.includes(b)){
+      let fresh=Object.keys(BUILDS).filter(k=>!game.fought.includes(k));
+      if(!fresh.length){ game.fought.length=0; fresh=Object.keys(BUILDS); }
+      b=fresh[Math.floor(Math.random()*fresh.length)];
+    }
+    if(!game.fought.includes(b))game.fought.push(b);
+    D._rBuild=b;
+  }
+  const eBuild=D._rBuild;
   const pw=BUILDS[eBuild]&&BUILDS[eBuild].preferWeapon;
-  const eWpn=(SELECT.WE==='katana')?(pw||D.weapon||'katana'):SELECT.WE;
+  const eWpn=(game.stage===0&&SELECT.WE!=='katana')?SELECT.WE
+    :(pw||D.weapon||'katana');
   enemy=new Fighter(D.name,eBuild==='musashi'?D.palette:null,1.9,-1,false,eBuild,eWpn);
   enemy.speedMul=D.ai.speedMul;
   const lbl=document.getElementById('name-enemy');
@@ -5922,7 +5931,31 @@ function disposeFighter(f){
   if(f.model){ scene.remove(f.model.root); f.model=null; }
   for(const k in f.parts)scene.remove(f.parts[k]);
 }
+/* THE CLIMB: between won rounds the ladder itself appears — the fallen
+   struck through in red, the arrow at the rung you now stand on, the
+   next name waiting above. Pure interstitial: it holds no input. */
+function showLadder(){
+  const el=document.getElementById('ladder');
+  const list=document.getElementById('ladder-list');
+  if(!el||!list)return;
+  const rung=(D,cls,x)=>{
+    const label=D?(D.kanji||'')+' '+D.name:'———';
+    const sub=D?(D.epithet||''):'unknown';
+    return '<div class="rung '+cls+'"><div class="r-name">'+label+'</div>'
+      +'<div class="r-sub">'+sub+'</div>'+(x?'<div class="r-x">敗</div>':'')+'</div>';
+  };
+  let html='';
+  html+=rung(DUELISTS[game.stage+1],'r-next',false);      // waiting above
+  html+=rung(DUELISTS[game.stage],'r-now',false);         // you are HERE
+  for(let s=game.stage-1;s>=Math.max(0,game.stage-3);s--) // the fallen below
+    html+=rung(DUELISTS[s],'r-beaten'+(s===game.stage-1?' r-fresh':''),true);
+  list.innerHTML=html;
+  el.classList.remove('hidden');
+  clearTimeout(showLadder._t);
+  showLadder._t=setTimeout(()=>el.classList.add('hidden'),3400);
+}
 function restart(){
+  const climbed=game.advance===true;
   if(game.advance===true)game.stage=Math.min(game.stage+1,DUELISTS.length-1);
   OUTLINE.meshes=OUTLINE.meshes.filter(o=>!!o.parent&&o.parent.parent!==null);
   game.advance=false; killCam=null; game.firstBlood=false;
@@ -5952,6 +5985,7 @@ function restart(){
     if(MODELPIPE.current.E)enemy.setModel(MODELPIPE.current.E);
   }
   setup(); game.state='fight'; game.timeScale=1; game.duelTime=0;
+  if(climbed)showLadder();       // the sense of ascent, before the bow
 }
 /* mercy granted: the duel ends without a death. The road goes on. */
 function spareDuel(){
@@ -6009,6 +6043,7 @@ function endDuel(){
         +(best>0?' · BEST: '+best:''))
       :'YOU FALL';
     game.advance=false; game.legacy=null; game.stage=0;
+    resetLadder();               // a new life climbs a new ladder
   }
   document.getElementById('btn-again').innerHTML=
     won?'NEXT DUEL&nbsp;&nbsp;\u00b7&nbsp;&nbsp;R':'AGAIN&nbsp;&nbsp;\u00b7&nbsp;&nbsp;R';
@@ -6043,10 +6078,17 @@ function rematch(){
 }
 { const br=document.getElementById('btn-rematch');
   if(br)br.addEventListener('click',rematch); }
+/* the run is over: forget who was fought and how each rung resolved,
+   or a stale roster haunts every later run with repeat faces */
+function resetLadder(){
+  game.fought=[];
+  for(const d of DUELISTS)delete d._rBuild;
+}
 /* back to the select screen: a clean slate — new fighter, new weapon */
 function toMenu(){
   game.state='menu'; killCam=null;
   game.advance=false; game.legacy=null; game.stage=0;
+  resetLadder();
   game.timeScale=1; game.bind=null; game._bindN=0;
   document.body.classList.remove('cine');
   document.getElementById('verdict').classList.add('hidden');

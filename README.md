@@ -181,6 +181,13 @@ Kill all three: **三人斬り**.
 - **The victory dance** — a victor who barely bled (over 88% blood,
   little pain) claims the ritual slot after the head is thrown and
   DANCES over the fallen: one of four mocap dances, capped at 12s.
+- **THE LADDER** — winning a round now shows the climb itself: an
+  interstitial ladder of names between duels, the fallen struck through
+  in red (敗), the arrow at the rung you stand on, the next name dim
+  above. The matchmaking behind it never repeats a face in a run: each
+  rung resolves once to an unfought build, a hand-picked opponent is
+  honored for the first duel only, and a loss or a return to the menu
+  resets the roster for a fresh climb.
 - **Stuck steel reads as stuck** — an embedded blade now wears a dark
   blood collar and splash at the entry wound, weeping continuously,
   so a lodged blade can't be mistaken for a pass-through flash. And
