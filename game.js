@@ -934,12 +934,17 @@ function limbMesh(len,rTop,rBot,mat){
 /* sculpt a sphere into a skull: tapered jaw, brow ridge, set-back eye
    sockets, cheekbones, forward chin, tucked nape. The painted face keeps
    its UVs — only the form underneath changes. Expects the face at +Z. */
-function sculptSkull(geo,r){
+function sculptSkull(geo,r,age){
+  age=age||0;
   const p=geo.attributes.position, d=V3();
   const gs=(dir,cx,cy,cz,sharp)=>{                 // gaussian bump on the sphere
     const dd=dir.x*cx+dir.y*cy+dir.z*cz;
     return Math.exp(-(1-dd)*sharp);
   };
+  /* age (0..1): sockets sink, cheeks hollow, temples cave, jowls sag —
+     the difference between a fighter's face and an old master's */
+  const socket=lerp(.055,.08,age), cheek=lerp(.032,-.045,age),
+        browB=lerp(.04,.052,age), temple=.03*age, jowl=.024*age;
   for(let i=0;i<p.count;i++){
     d.set(p.getX(i),p.getY(i),p.getZ(i)).divideScalar(r);
     const y=d.y, front=clamp(d.z,0,1), back=clamp(-d.z,0,1), side=Math.abs(d.x);
@@ -947,9 +952,11 @@ function sculptSkull(geo,r){
     const low=clamp((-y-.02)/.9,0,1);
     s*=1-.17*low*low*side;                                  // the jaw tapers
     s*=1-.15*back*clamp((-y-.12)/.6,0,1);                   // nape tucks in
-    s*=1+.04*front*Math.exp(-Math.pow((y-.24)/.15,2))*(1-.45*side); // brow ridge
-    s*=1-.055*gs(d,.34,.17,.92,55)-.055*gs(d,-.34,.17,.92,55);      // eye sockets
-    s*=1+.032*gs(d,.6,-.06,.76,24)+.032*gs(d,-.6,-.06,.76,24);      // cheekbones
+    s*=1+browB*front*Math.exp(-Math.pow((y-.24)/.15,2))*(1-.45*side); // brow ridge
+    s*=1-socket*gs(d,.34,.17,.92,55)-socket*gs(d,-.34,.17,.92,55);    // eye sockets
+    s*=1+cheek*gs(d,.6,-.06,.76,24)+cheek*gs(d,-.6,-.06,.76,24);      // cheekbones/hollows
+    s*=1-temple*gs(d,.72,.42,.3,30)-temple*gs(d,-.72,.42,.3,30);      // temples cave
+    s*=1+jowl*gs(d,.5,-.6,.5,32)+jowl*gs(d,-.5,-.6,.5,32);            // jowls sag
     s*=1+.06*front*Math.exp(-Math.pow((y+.68)/.2,2))
         *(1-clamp(side*2.4,0,1)*.75);                        // the chin leads
     s*=1-.02*front*Math.exp(-Math.pow((y+.36)/.11,2));       // slight under-lip set
@@ -1250,7 +1257,7 @@ class Fighter{
     const skin=rimify(stdMat(palette.skin,{roughness:.55,map:skinTex||null,
       normalMap:skinNrm||null}),.42,.4,.42,3,.32);
     if(skin.normalMap)skin.normalScale=new THREE.Vector2(.6,.6);
-    const hairM=stdMat(0x14110d,{roughness:.9});
+    const hairM=stdMat((palette.hair!==undefined)?palette.hair:0x14110d,{roughness:.9});
     const obiM=stdMat(palette.obi,{roughness:.8});
     const accentM=stdMat(palette.accent,{roughness:.75});
     this.kimonoMat=kimono;
@@ -1326,7 +1333,8 @@ class Fighter{
       if(faceMat.normalMap)faceMat.normalScale=new THREE.Vector2(.35,.35);
       const headGeo=new THREE.SphereGeometry(D.headR,40,30);
       headGeo.rotateY(-Math.PI/2);            // painted face looks down +Z
-      sculptSkull(headGeo,D.headR);           // a skull, not a balloon
+      sculptSkull(headGeo,D.headR,
+        (palette.face&&palette.face.aged)?1:0); // a skull, not a balloon
       const skull=new THREE.Mesh(headGeo,fTex?faceMat:skin);
       skull.castShadow=true; skull.scale.set(.94,1.06,1);
       skull.userData.skull=true;
@@ -1398,6 +1406,24 @@ class Fighter{
         const disc=new THREE.Mesh(new THREE.SphereGeometry(.014,12,9),gold);
         disc.position.set(0,D.headR*.62,D.headR*.92); disc.scale.z=.45;
         F.push(cres,disc);
+      } else if(HB==='elder'){
+        /* age has taken the crown: the hair cap survives, but white,
+           shrunken, and swept far back — bare forehead and crown in
+           front, a thin white sweep behind (the Old Man's recession) */
+        mage.visible=false;
+        hairM.side=THREE.DoubleSide;             // the sweep reads from all angles
+        hairC.scale.set(.88,.98,.96);
+        hairC.rotation.x=-1.05; hairC.position.y=-.012; hairC.position.z=-.02;
+        const nape=new THREE.Mesh(new THREE.SphereGeometry(
+          D.headR*1.02,20,8,0,Math.PI*2,Math.PI*.55,Math.PI*.28),hairM);
+        nape.scale.set(.9,1.15,.95); nape.position.z=-.012;
+        for(const sx of [1,-1]){                 // thin patches at the temples
+          const tp=new THREE.Mesh(new THREE.SphereGeometry(.03,10,8),hairM);
+          tp.position.set(sx*D.headR*.86,.008,-.028);
+          tp.scale.set(.35,.85,.75);
+          F.push(tp);
+        }
+        F.push(nape);
       }
       if(this.build.bare){ /* the harness across the bare chest */
         const strap=new THREE.Mesh(new THREE.BoxGeometry(.05,.42,.02),
@@ -1911,6 +1937,10 @@ const BUILDS={
     armor:true, mass:1.3,
     palette:{kimono:0x2b3040,hakama:0x14161c,obi:0x6e1f1f,skin:0xc59d7d,
       accent:0x8a2020,face:{mustache:true}}},
+  okina:{label:'翁 JUBEI — the old master',
+    sh:.92, waist:.88, hip:.94, limb:.86, hair:'elder', bare:false, stoop:.085,
+    palette:{kimono:0x4a443a,hakama:0x26221c,obi:0x8a8272,skin:0xc4a183,
+      hair:0xd8d4cc,accent:0x6b675e,face:{aged:true,stubble:true}}},
   sumo:{label:'雷 RAIDEN — sumo',
     sh:1.3, waist:2.05, hip:1.85, limb:1.52, hair:'topknot', bare:true, mass:1.9, cloth:false,
     palette:{kimono:0xd8a880,hakama:0xd8a880,obi:0x1a2a4a,skin:0xd8a880,
@@ -1961,6 +1991,7 @@ const PICKER={
     {label:BUILDS.musashi.label,build:'musashi'},
     {label:BUILDS.onna.label,build:'onna'},
     {label:BUILDS.yoroi.label,build:'yoroi'},
+    {label:BUILDS.okina.label,build:'okina'},
     {label:BUILDS.gladiator.label,build:'gladiator'},
     {label:BUILDS.sumo.label,build:'sumo'}],
   cycle(slot,dir){
@@ -2895,7 +2926,8 @@ Fighter.prototype.updateAlive=function(dt,opponent){
   this.flinch.addScaledVector(this.flinchV,dt);
 
   /* spine: pelvis → abdomen → chest, distributing lean and twist */
-  const lean=clamp(.04+this.tipVel.length()*.007+speed2d*.016,0,.12);
+  const stoop=this.build.stoop||0;    // age rounds the back
+  const lean=clamp(.04+stoop+this.tipVel.length()*.007+speed2d*.016,0,.12+stoop);
   const chestYawA=this.bodyYaw+this.twist*.8+this._ctr;
   const fwdC=DIRY(chestYawA), rightC=V3(fwdC.z,0,-fwdC.x);
   const chestB=pelvis.clone().addScaledVector(fwdP,.03+lean*.3)
@@ -4404,6 +4436,8 @@ if(kimonoNrm)kimonoNrm.repeat.set(3,3);
 function paintFace(x,w,h,skinHex,face,st){
   st=st||{};
   const pain=clamp(st.pain||0,0,1), ko=!!st.ko;
+  const aged=!!(face&&face.aged);
+  const eyS=aged?.85:1;                       // age narrows the eyes
   const open=ko?0:clamp((1-(st.blink||0))*(1-pain*.38),0,1);
   let sd=(st.seed||7)>>>0;                    // deterministic: no crawling
   const rnd=()=>{ sd=(sd*1664525+1013904223)>>>0; return sd/4294967296; };
@@ -4428,11 +4462,11 @@ function paintFace(x,w,h,skinHex,face,st){
   if(open>.16){
     /* whites, iris, pupil, catchlight — squeezed by lids */
     mir(x=>{ x.fillStyle='rgba(226,220,206,.95)'; x.beginPath();
-      x.ellipse(w*.058,h*.44,w*.036,h*.019*open,0,0,6.29); x.fill();
+      x.ellipse(w*.058,h*.44,w*.036*eyS,h*.019*open*eyS,0,0,6.29); x.fill();
       x.save(); x.beginPath();
-      x.ellipse(w*.058,h*.44,w*.036,h*.019*open,0,0,6.29); x.clip();
+      x.ellipse(w*.058,h*.44,w*.036*eyS,h*.019*open*eyS,0,0,6.29); x.clip();
       x.fillStyle='#3a2a1c'; x.beginPath();
-      x.arc(w*.058,h*.441,w*.017,0,6.29); x.fill();
+      x.arc(w*.058,h*.441,w*.017*eyS,0,6.29); x.fill();
       x.fillStyle='#120c08'; x.beginPath();
       x.arc(w*.058,h*.441,w*.008,0,6.29); x.fill();
       if(open>.55){ x.fillStyle='rgba(255,255,255,.9)'; x.beginPath();
@@ -4456,8 +4490,37 @@ function paintFace(x,w,h,skinHex,face,st){
         x.beginPath(); x.moveTo(w*.092,h*.43); x.lineTo(w*.104,h*.422); x.stroke();
         x.beginPath(); x.moveTo(w*.092,h*.443); x.lineTo(w*.105,h*.447); x.stroke(); } });
   }
+  /* the marks of a life — detail vocabulary studied from the Old Man
+     reference: folds, creases, bags, hollowed cheeks */
+  const foldA=(aged?.34:0)+pain*.22;
+  if(foldA>.05){ /* nasolabial folds: age carves them, the grimace deepens them */
+    mir(x=>{ x.strokeStyle=tone(.6,Math.min(foldA,.55)); x.lineWidth=w*.005;
+      x.beginPath(); x.moveTo(w*.026,h*.522);
+      x.quadraticCurveTo(w*.052,h*.56,w*.044,h*.598); x.stroke(); }); }
+  if(aged){
+    x.strokeStyle=tone(.66,.34); x.lineWidth=w*.004;   // forehead creases
+    for(let i=0;i<3;i++){ const fy=h*(.33+i*.024);
+      x.beginPath(); x.moveTo(w*.42,fy);
+      x.quadraticCurveTo(w*.5,fy-h*.008,w*.58,fy); x.stroke(); }
+    mir(x=>{ x.strokeStyle=tone(.62,.4); x.lineWidth=w*.003; // crow's feet
+      for(let i=-1;i<=1;i++){ x.beginPath();
+        x.moveTo(w*.094,h*(.436+i*.008));
+        x.lineTo(w*.108,h*(.43+i*.014)); x.stroke(); } });
+    mir(x=>{ x.strokeStyle=tone(.68,.45); x.lineWidth=w*.004; // under-eye bags
+      x.beginPath(); x.ellipse(w*.058,h*.462,w*.026,h*.008,0,Math.PI*.15,Math.PI*.85);
+      x.stroke(); });
+    mir(x=>{ const g3=x.createRadialGradient(w*.075,h*.53,2,w*.075,h*.53,w*.045);
+      g3.addColorStop(0,tone(.72,.3)); g3.addColorStop(1,tone(1,0)); // hollow cheeks
+      x.fillStyle=g3; x.beginPath();
+      x.ellipse(w*.075,h*.53,w*.045,h*.05,-.4,0,6.29); x.fill(); });
+    x.fillStyle=tone(.62,.3);                            // age spots
+    for(let i=0;i<9;i++){
+      const px=w*(.34+rnd()*.32), py=h*(.3+rnd()*.32);
+      x.beginPath(); x.arc(px,py,w*.003+rnd()*w*.002,0,6.29); x.fill(); }
+  }
   /* brows: pain drags the inner ends down and together — the grimace V */
-  mir(x=>{ x.strokeStyle='rgba(24,17,12,.9)'; x.lineWidth=w*(.004+pain*.0015);
+  mir(x=>{ x.strokeStyle=aged?'rgba(208,203,192,.88)':'rgba(24,17,12,.9)';
+    x.lineWidth=w*(.004+pain*.0015+(aged?.0012:0));
     for(let i=0;i<11;i++){
       const t=i/10;
       const by=h*(.398-t*.016)+pain*h*(.02-t*.034)+rnd()*h*.004;
@@ -4500,7 +4563,8 @@ function paintFace(x,w,h,skinHex,face,st){
     g.addColorStop(.52,'rgba(60,32,26,.95)'); g.addColorStop(.62,'rgba(158,96,80,.95)');
     g.addColorStop(1,'rgba(134,78,64,.9)');
     x.fillStyle=g; x.beginPath();
-    x.ellipse(w*.5,h*.59,w*(.05+pain*.008),h*(.019+pain*.008),0,0,6.29); x.fill();
+    x.ellipse(w*.5,h*.59,w*(.05+pain*.008)*(aged?.92:1),
+      h*(.019+pain*.008)*(aged?.72:1),0,0,6.29); x.fill();
     x.fillStyle='rgba(255,235,225,.25)'; x.beginPath();
     x.ellipse(w*.5,h*.598,w*.024,h*.006,0,0,6.29); x.fill();
   }
@@ -4526,7 +4590,7 @@ function paintFace(x,w,h,skinHex,face,st){
   }
   /* stubble for the bearded */
   if(face&&(face.beard||face.stubble)){
-    x.fillStyle='rgba(25,18,12,.16)';
+    x.fillStyle=aged?'rgba(218,213,203,.22)':'rgba(25,18,12,.16)';
     for(let i=0;i<900;i++){ const a=rnd()*6.29,r2=rnd();
       const px=w*.5+Math.cos(a)*w*.11*r2, py=h*.62+Math.sin(a)*h*.07*r2;
       if(py>h*.6)x.fillRect(px,py,1.4,1.4); } }
@@ -4756,6 +4820,11 @@ Fighter.prototype.buildCloth=function(hakamaMat){
   P.wrap=COLS;
   for(let r2=1;r2<ROWS;r2++)               // stitch the seam column shut
     P.cons.push([r2*(COLS+1),r2*(COLS+1)+COLS,0]);
+  /* ring stiffness: skip-one links stop the wrap folding into two
+     stretched lobes when the legs spread mid-lunge */
+  for(let r2=1;r2<ROWS;r2++)for(let c2=0;c2<COLS;c2++)
+    P.cons.push([r2*(COLS+1)+c2,r2*(COLS+1)+((c2+2)%COLS),
+      lerp(.072,.108,r2/(ROWS-1))*1.94]);
   scene.add(P.mesh);
   for(const q of P.pts){ q.p.set(this.pos.x,.8,this.pos.z); q.pp.copy(q.p); }
   this.cloth.push(P);
