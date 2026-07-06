@@ -921,13 +921,13 @@ const DEAD_AT=.48;
 /* tapered limb: joint sphere at the pivot, shaft, condyle at the far end */
 function limbMesh(len,rTop,rBot,mat){
   const g=new THREE.Group();
-  const cyl=new THREE.Mesh(new THREE.CylinderGeometry(rTop,rBot,len,20),mat);
+  const cyl=new THREE.Mesh(new THREE.CylinderGeometry(rTop,rBot,len,26),mat);
   cyl.position.y=-len/2; cyl.castShadow=true; cyl.userData.shaft=true;
   /* generous joint spheres: bent limbs stay CONNECTED, no daylight at
      the elbow or knee */
-  const j=new THREE.Mesh(new THREE.SphereGeometry(rTop*1.14,16,12),mat); j.castShadow=true;
+  const j=new THREE.Mesh(new THREE.SphereGeometry(rTop*1.14,20,14),mat); j.castShadow=true;
   j.userData.joint=true;
-  const e=new THREE.Mesh(new THREE.SphereGeometry(rBot*1.04,16,12),mat); e.position.y=-len; e.castShadow=true;
+  const e=new THREE.Mesh(new THREE.SphereGeometry(rBot*1.04,20,14),mat); e.position.y=-len; e.castShadow=true;
   e.userData.end=true;
   g.add(cyl,j,e); g.userData.len=len; g.userData.r=Math.max(rTop,rBot);
   return g;
@@ -1001,7 +1001,7 @@ function buildSkinnedBody(kimonoMat,hakamaMat,B){
     b.position.fromArray(bindPos[k]); root.add(b); bones.push(b); }
 
   const pos=[],nrm=[],sIdx=[],sWgt=[],uvs=[],idx=[],groups=[];
-  const SEG=28;
+  const SEG=36;
   let ringStart=0, vBase=0;
   /* a vertical tube in bind pose; rings: {c:[x,y,z],r,sz,skin:[b0,w0,b1,w1]} */
   function tube(rings,matIndex){
@@ -1048,10 +1048,12 @@ function buildSkinnedBody(kimonoMat,hakamaMat,B){
   /* ---- torso (kimono) ---- */
   { const P=BONES.pelvis,S=BONES.spine,Ch=BONES.chest;
     const prof=[ // y, radius, depth-scale — a torso, not a pipe
-      [.72,.144,.80],[.78,.150,.82],[ .84,.154,.85],[ .90,.155,.86],[ .96,.146,.84],
-      [1.02,.134,.81],[1.07,.127,.79],[1.12,.128,.79],[1.18,.134,.79],
-      [1.24,.146,.80],[1.30,.158,.82],[1.36,.170,.85],[1.41,.172,.87],
-      [1.45,.148,.88],[1.475,.120,.88]];
+      [.72,.144,.80],[.78,.150,.82],[.84,.154,.85],[.90,.155,.86],
+      [.93,.151,.85],[.96,.146,.84],[.99,.140,.825],[1.02,.134,.81],
+      [1.045,.130,.80],[1.07,.127,.79],[1.095,.1275,.79],[1.12,.128,.79],
+      [1.15,.131,.79],[1.18,.134,.79],[1.21,.140,.795],[1.24,.146,.80],
+      [1.27,.152,.81],[1.30,.158,.82],[1.33,.164,.835],[1.36,.170,.85],
+      [1.41,.172,.87],[1.45,.148,.88],[1.475,.120,.88]];
     const sm=(a,b,t)=>{ t=clamp((t-a)/(b-a),0,1); return t*t*(3-2*t); };
     const shape=y=>{
       const wS=sm(.92,1.0,y)*(1-sm(1.14,1.24,y));     // waist influence, feathered
@@ -1062,11 +1064,13 @@ function buildSkinnedBody(kimonoMat,hakamaMat,B){
     const rings=prof.map(([y,r0,szz])=>{
       const r=r0*shape(y);
       let skin;
-      if(y<.97)skin=[P,1,S,0];
-      else if(y<1.13)skin=blend(y,.97,1.13,P,S);
-      else if(y<1.20)skin=[S,1,Ch,0];
-      else skin=blend(y,1.20,1.32,S,Ch);
-      if(y>=1.32)skin=[Ch,1,S,0];
+      /* WIDE blend bands: twist spreads over the whole trunk instead of
+         candy-wrapping one narrow ring */
+      if(y<.92)skin=[P,1,S,0];
+      else if(y<1.16)skin=blend(y,.92,1.16,P,S);
+      else if(y<1.18)skin=[S,1,Ch,0];
+      else skin=blend(y,1.18,1.34,S,Ch);
+      if(y>=1.34)skin=[Ch,1,S,0];
       /* the bust rides the chest rings, apex ~1.28 */
       const bust=(B.bust||0)*Math.exp(-Math.pow((y-1.285)/.075,2));
       return {c:[0,y,0],r,sz:szz,skin,bust};
@@ -1312,8 +1316,8 @@ class Fighter{
     }
     /* torso: chest broad at the shoulders, abdomen beneath */
     parts.chest=limbMesh(D.torso*.62,.155,.13,kimono);
-    { const yokeR=new THREE.Mesh(new THREE.SphereGeometry(.075,14,10),kimono);
-      yokeR.position.set(.155,-.02,0); yokeR.castShadow=true;
+    { const yokeR=new THREE.Mesh(new THREE.SphereGeometry(.062,18,13),kimono);
+      yokeR.position.set(.148,-.015,0); yokeR.scale.set(1,.9,.92); yokeR.castShadow=true;
       const yokeL=yokeR.clone(); yokeL.position.x=-.155;
       const collar=new THREE.Mesh(new THREE.TorusGeometry(.075,.02,10,24),accentM);
       collar.rotation.x=Math.PI/2-.35; collar.position.set(0,-.02,.02);
@@ -1466,8 +1470,8 @@ class Fighter{
     parts.upperArmR=limbMesh(D.upperArm,.052,.075,kimono);
     parts.upperArmL=limbMesh(D.upperArm,.052,.075,kimono);
     const LB=this.build.limb;
-    parts.forearmR=limbMesh(D.foreArm,.052*LB,.042*LB,skin);
-    parts.forearmL=limbMesh(D.foreArm,.052*LB,.042*LB,skin);
+    parts.forearmR=limbMesh(D.foreArm,.058*LB,.04*LB,skin);
+    parts.forearmL=limbMesh(D.foreArm,.058*LB,.04*LB,skin);
     /* a HAND: palm, four curled fingers, an opposed thumb.
        pose 'grip' wraps a handle along local +Y; 'fist' closes fully. */
     const mkHand=(pose,mirror)=>{
@@ -1479,8 +1483,8 @@ class Fighter{
       if(pose==='grip')inner.rotation.z=(mirror?-1:1)*Math.PI/2;
       const gAdd=o=>inner.add(o);
       const s=mirror?-1:1;
-      const palm=new THREE.Mesh(new THREE.BoxGeometry(.052,.075,.03),skin);
-      palm.position.z=-.024; gAdd(palm);
+      const palm=new THREE.Mesh(new THREE.SphereGeometry(.036,14,10),skin);
+      palm.scale.set(.78,1.1,.44); palm.position.z=-.022; gAdd(palm);
       const curl=pose==='fist'?1.9:1.25;      // radians of finger wrap
       g.userData.joints=[];
       /* capsule fingers: rounded flesh, not matchsticks */
@@ -2429,7 +2433,7 @@ const MODELPIPE=(()=>{
 /* the picker offers ONLY the procedural fighters. Bundled model files are
    not surfaced; dropping a .glb/.fbx onto the page remains the back door. */
 
-const _pq=new THREE.Quaternion(), _pv=V3(), _pv2=V3();
+const _pq=new THREE.Quaternion(), _pq2b=new THREE.Quaternion(), _pv=V3(), _pv2=V3();
 function mkTargetQ(from,to,q){ _pv.subVectors(to,from).normalize();
   return q.setFromUnitVectors(UPV,_pv); }
 
@@ -2772,6 +2776,17 @@ Fighter.prototype.softHit=function(k,dir,mag){
 };
 
 const _bT=V3();
+/* direction + CONTROLLED yaw: the tube's ellipse (and the bust) must
+   face where the body faces — setFromUnitVectors alone leaves the roll
+   at world-arbitrary and the torso twists against its own pelvis */
+Fighter.prototype.setBoneYaw=function(name,from,to,yaw){
+  const b=this.skin.bones[this.skin.BONES[name]];
+  b.position.copy(from);
+  _bT.subVectors(to,from).normalize();
+  b.quaternion.setFromUnitVectors(UPV,_bT);
+  _pq2b.setFromAxisAngle(UPY,yaw);
+  b.quaternion.multiply(_pq2b);
+};
 Fighter.prototype.setBone=function(name,from,to){
   const b=this.skin.bones[this.skin.BONES[name]];
   b.position.copy(from);
@@ -2928,6 +2943,15 @@ Fighter.prototype.updateAlive=function(dt,opponent){
     .addScaledVector(vdir,stride*(1-this.legDamage.R*.5));
   const tgtL=catchPt.clone().addScaledVector(right,-.17).addScaledVector(fwd,-.12)
     .addScaledVector(vdir,stride*(1-this.legDamage.L*.5));
+  /* a kneeling man gathers his feet beneath him — no leg stretched to a
+     foot planted a stride away under the skirt */
+  if((this.kneel>0||this.begging)&&!this.disabled.legR&&!this.disabled.legL){
+    const kk=Math.max(this.kneel||0,this.begging?.9:0)*.8;
+    TMP3.copy(this.pos).addScaledVector(right,.14).addScaledVector(fwd,.06);
+    tgtR.lerp(TMP3,kk);
+    TMP3.copy(this.pos).addScaledVector(right,-.14).addScaledVector(fwd,-.24);
+    tgtL.lerp(TMP3,kk);
+  }
   /* balance: if the CoM escapes the support line, an urgent catch-step */
   let urgR=false,urgL=false;
   if(ft.R.swing===0&&ft.L.swing===0){
@@ -3018,8 +3042,8 @@ Fighter.prototype.updateAlive=function(dt,opponent){
        pelvis kit — a hard lean must not open a seam at the waist */
     const b=this.skin.bones[this.skin.BONES.pelvis];
     b.position.copy(pelvis); b.quaternion.copy(P.pelvis.quaternion); }
-  this.setBone('spine',chestB,pelvis);
-  this.setBone('chest',chestT,chestB);
+  this.setBoneYaw('spine',chestB,pelvis,lerpAngle(pelvisYawA,chestYawA,.5));
+  this.setBoneYaw('chest',chestT,chestB,chestYawA);
   this._K.pelvis.copy(pelvis); this._K.chestB.copy(chestB);
   this._K.chestT.copy(chestT); this._K.neckT.copy(neckT);
 
@@ -3106,7 +3130,7 @@ Fighter.prototype.updateAlive=function(dt,opponent){
     if(this.stuck){
       const S=this.stuck, tgt=S.def, cc=tgt.capsules&&tgt.capsules[S.part];
       S.t+=dt;
-      if(!cc||S.t>1.5||game.state!=='fight'||(!tgt.alive&&S.t>.35)){
+      if(!cc||S.t>2.4||game.state!=='fight'||(!tgt.alive&&S.t>.35)){
         this.stuck=null;
       } else {
         TMP1.lerpVectors(cc.a,cc.b,S.tt);
@@ -3114,12 +3138,14 @@ Fighter.prototype.updateAlive=function(dt,opponent){
         this.tipVel.multiplyScalar(Math.exp(-13*dt));
         if(this.isPlayer){
           TMP2.subVectors(this.tipTarget,TMP1);
-          if(TMP2.length()>.45)S.retract+=dt*TMP2.length()*2.2;
-        } else S.retract+=dt*2.6;
+          if(TMP2.length()>.4)S.retract+=dt*TMP2.length()*1.7;
+        } else S.retract+=dt*1.7;
         if(S.retract>=S.need){
           this.stuck=null;
           TMP2.subVectors(this.tip,tgt.pos).setY(.35).normalize();
-          this.tipVel.addScaledVector(TMP2,3);        // wrenched free
+          this.tipVel.addScaledVector(TMP2,3.5);      // wrenched free
+          emitBlood(TMP1,TMP2,2.2,8);                 // the wound tears open
+          tgt.softHit&&tgt.softHit(SOFTMAP[S.part]||'chestT',TMP2,1.6);
           Sound.cut&&Sound.cut(.5);
           if(this.isPlayer)log('wrenched FREE',false);
         }
@@ -3676,14 +3702,16 @@ function bladeVsBody(att,def,log){
       /* THE BLADE BITES: a committed cut or thrust that does not pass
          CLEAN THROUGH lodges in the body and must be wrenched free.
          Severing strokes and glancing blows pass; the in-between sticks. */
-      if(res&&!AW.blunt&&!severedNow&&def.alive&&spd>5.5&&game.state==='fight'){
+      if(res&&!AW.blunt&&!severedNow&&def.alive&&spd>4.6&&game.state==='fight'){
         const cc=def.capsules[key];
         TMP2.subVectors(cc.b,cc.a);
         const tt=TMP2.lengthSq()>1e-8
           ?clamp(hitTmpB.clone().sub(cc.a).dot(TMP2)/TMP2.lengthSq(),0,1):.5;
         att.stuck={def,part:key,tt,t:0,retract:0,
-          need:clamp(energy/(att.thrust?260:340),.35,1.1)};
+          need:clamp(energy/(att.thrust?190:260),.55,1.6)};
         Sound.scrape&&Sound.scrape();
+        game.timeScale=.5; game.slowT=.18;               // the bite is FELT
+        shake(.25);
         if(att.isPlayer)log('the blade BITES '+(att.thrust?'deep':'into the '+
           ((ANATOMY[key]&&ANATOMY[key].label)||key))+' — held fast. pull it free!',false);
         break;
