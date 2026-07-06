@@ -2170,8 +2170,11 @@ const PICKER={
     {label:BUILDS.ryu.label,build:'ryu'},
     {label:BUILDS.gladiator.label,build:'gladiator'},
     {label:BUILDS.sumo.label,build:'sumo'},
-    /* the first REAL mesh in the roster: the knight rides the sim */
-    {label:'⚔ PELEGRINI — knight',src:'models/knight.fbx'}],
+    /* the REAL meshes in the roster: loaded rigs riding the sim, with
+       full severance, decals, and the head-taking ritual */
+    {label:'⚔ PELEGRINI — knight',src:'models/knight.fbx'},
+    {label:'翁 THE OLD MAN — wanderer',src:'models/Old Man.fbx'},
+    {label:'屍 ZOMBIEGIRL — the returned',src:'models/Zombiegirl W Kurniawan.fbx'}],
   cycle(slot,dir){
     this.idx[slot]=(this.idx[slot]+dir+this.roster.length)%this.roster.length;
     this.apply(slot);
