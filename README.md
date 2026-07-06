@@ -52,6 +52,10 @@ Kill all three: **三人斬り**.
   rates; grip tendons (drops the sword); skull/rib bone gates; heart, lungs,
   windpipe. Blood volume 5000ml; unconscious at 62%, dead at 48%. Bleeding
   slows as pressure falls. Forearms can be severed outright.
+- **Living faces** — each face is a repainting canvas: fighters blink on
+  their own clock, pain knits the brows and bares clenched teeth, and an
+  unconscious man's face goes slack, eyes closed. The head itself is a
+  sculpted skull (jaw, brow, sockets, cheekbones), not a sphere.
 - **Bodies** — procedurally **skinned meshes** (9 world-space bones per
   fighter, driven by the same IK joints as the physics skeleton): continuous
   deformation at shoulders, waist, hips, knees; kimono darkens as its owner

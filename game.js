@@ -1319,7 +1319,8 @@ class Fighter{
     parts.elbowR.castShadow=parts.elbowL.castShadow=true;
     /* head: skull, jaw, hair, topknot; player wears a hachimaki */
     parts.head=new THREE.Group();
-    { const fTex=faceTex(palette.skin,palette.face);
+    { this.faceCtl=mkFace(palette.skin,palette.face);
+      const fTex=this.faceCtl.tex;
       const faceMat=rimify(stdMat(0xffffff,{map:fTex||null,
         normalMap:skinNrm||null,roughness:.52}),.42,.4,.42,3,.3);
       if(faceMat.normalMap)faceMat.normalScale=new THREE.Vector2(.35,.35);
@@ -1371,6 +1372,32 @@ class Fighter{
           stdMat(0x8a7a58,{roughness:.35,metalness:.6}));
         guard.position.set(0,-.01,D.headR*.98);
         F.push(helm,crest,guard);
+      } else if(HB==='kabuto'){
+        /* the general's helmet: lacquered bowl, flared shikoro neck
+           lames sweeping the back, gilt crescent maedate at the brow */
+        hairC.visible=false; mage.visible=false;
+        const lacq=stdMat(0x23252c,{roughness:.38,metalness:.5});
+        const dome=new THREE.Mesh(
+          new THREE.SphereGeometry(D.headR*1.15,26,18,0,Math.PI*2,0,1.72),lacq);
+        dome.scale.set(.97,1.0,1.05); dome.position.y=.02;
+        F.push(dome);
+        const rim=new THREE.Mesh(new THREE.TorusGeometry(D.headR*1.07,.011,8,26),lacq);
+        rim.rotation.x=Math.PI/2+.1; rim.position.y=-.004;
+        F.push(rim);
+        for(let i=0;i<3;i++){                        // shikoro: back + sides
+          const sh=new THREE.Mesh(new THREE.CylinderGeometry(
+            D.headR*(1.12+i*.1),D.headR*(1.28+i*.11),.034,22,1,true,
+            Math.PI*.42,Math.PI*1.16),lacq.clone());
+          sh.material.side=THREE.DoubleSide;
+          sh.position.y=-.026-i*.028;
+          F.push(sh);
+        }
+        const gold=stdMat(0xc8a84b,{roughness:.28,metalness:.85});
+        const cres=new THREE.Mesh(new THREE.TorusGeometry(.048,.0085,8,26,Math.PI),gold);
+        cres.position.set(0,D.headR*.78,D.headR*.78); cres.rotation.z=Math.PI;
+        const disc=new THREE.Mesh(new THREE.SphereGeometry(.014,12,9),gold);
+        disc.position.set(0,D.headR*.62,D.headR*.92); disc.scale.z=.45;
+        F.push(cres,disc);
       }
       if(this.build.bare){ /* the harness across the bare chest */
         const strap=new THREE.Mesh(new THREE.BoxGeometry(.05,.42,.02),
@@ -1387,8 +1414,8 @@ class Fighter{
       }
       parts.head.add(skull,hairC,mage,...F);
       if(isPlayer){
-        const hachi=new THREE.Mesh(new THREE.TorusGeometry(D.headR*.94,.014,8,24),accentM);
-        hachi.rotation.x=Math.PI/2+.12; hachi.position.y=.028;
+        const hachi=new THREE.Mesh(new THREE.TorusGeometry(D.headR*.92,.014,8,24),accentM);
+        hachi.rotation.x=Math.PI/2+.06; hachi.position.y=.048;
         parts.head.add(hachi);
       }
     }
@@ -1480,6 +1507,7 @@ class Fighter{
       side:THREE.DoubleSide,map:hakamaTex||null}),.3,.38,.58,3,.4));
     this.buildSleeves(rimify(stdMat(this.palette.kimono,{roughness:.95,
       side:THREE.DoubleSide,map:kimonoTex||null}),.32,.42,.62,3,.2));
+    if(this.build.armor)this.buildArmor();
     this.skinKimono=this.skin.kimono;
     const hideIn=(g,keep)=>g.traverse(o=>{
       if(o.isMesh&&!(keep&&keep(o)))o.visible=false; });
@@ -1878,6 +1906,11 @@ const BUILDS={
     sh:1.16, waist:1.06, hip:1.02, limb:1.18, hair:'helmet', bare:true,
     palette:{kimono:0x8a6a48,hakama:0x5a4028,obi:0x3a2a18,skin:0xc09068,
       accent:0xb89858,face:{stubble:true}}},
+  yoroi:{label:'鎧 KURODA — armored general',
+    sh:1.08, waist:1.05, hip:1.03, limb:1.06, hair:'kabuto', bare:false,
+    armor:true, mass:1.3,
+    palette:{kimono:0x2b3040,hakama:0x14161c,obi:0x6e1f1f,skin:0xc59d7d,
+      accent:0x8a2020,face:{mustache:true}}},
   sumo:{label:'雷 RAIDEN — sumo',
     sh:1.3, waist:2.05, hip:1.85, limb:1.52, hair:'topknot', bare:true, mass:1.9, cloth:false,
     palette:{kimono:0xd8a880,hakama:0xd8a880,obi:0x1a2a4a,skin:0xd8a880,
@@ -1927,6 +1960,7 @@ const PICKER={
   roster:[
     {label:BUILDS.musashi.label,build:'musashi'},
     {label:BUILDS.onna.label,build:'onna'},
+    {label:BUILDS.yoroi.label,build:'yoroi'},
     {label:BUILDS.gladiator.label,build:'gladiator'},
     {label:BUILDS.sumo.label,build:'sumo'}],
   cycle(slot,dir){
@@ -4363,87 +4397,155 @@ if(kimonoNrm)kimonoNrm.repeat.set(3,3);
 /* a FACE, painted the way 90s digitized fighters were: airbrushed skin
    values, socketed eyes with catchlights, feathered brows, two-tone lips.
    Painted per-fighter in his own skin tone; mapped onto the skull. */
-function faceTex(skinHex,face){
-  return canTex(512,512,(x,w,h)=>{
-    const c=new THREE.Color(skinHex);
-    const R=c.r*255,G=c.g*255,B=c.b*255;
-    const tone=(m,a)=>'rgba('+Math.round(R*m)+','+Math.round(G*m)+','+Math.round(B*m)+','+(a===undefined?1:a)+')';
-    x.fillStyle=tone(1); x.fillRect(0,0,w,h);
-    /* airbrush: forehead light, temples/jaw shaded */
-    let g=x.createLinearGradient(0,h*.3,0,h*.72);
-    g.addColorStop(0,tone(1.1,.55)); g.addColorStop(.45,tone(1,.0));
-    g.addColorStop(1,tone(.72,.5)); x.fillStyle=g; x.fillRect(0,0,w,h);
-    g=x.createRadialGradient(w*.5,h*.5,w*.1,w*.5,h*.5,w*.34);
-    g.addColorStop(0,tone(1.06,.3)); g.addColorStop(1,tone(.85,.35));
-    x.fillStyle=g; x.fillRect(w*.2,h*.28,w*.6,h*.44);
-    const mir=f=>{ for(const s of [1,-1]){ x.save();
-      x.translate(w*.5,0); x.scale(s,1); f(x); x.restore(); } };
-    /* eye sockets */
-    mir(x=>{ const g2=x.createRadialGradient(w*.058,h*.435,2,w*.058,h*.435,w*.062);
-      g2.addColorStop(0,tone(.62,.5)); g2.addColorStop(1,tone(1,0));
-      x.fillStyle=g2; x.beginPath();
-      x.ellipse(w*.058,h*.435,w*.062,h*.042,0,0,6.29); x.fill(); });
-    /* whites, iris, pupil, catchlight */
+/* THE LIVING FACE — painted onto a canvas that repaints itself with the
+   fight: blinking lids, pain knitting the brows into a grimace, bared
+   teeth under a hard hit, and the slack empty face of the unconscious.
+   st = {pain:0..1, blink:0..1 (1=shut), ko:bool, seed} */
+function paintFace(x,w,h,skinHex,face,st){
+  st=st||{};
+  const pain=clamp(st.pain||0,0,1), ko=!!st.ko;
+  const open=ko?0:clamp((1-(st.blink||0))*(1-pain*.38),0,1);
+  let sd=(st.seed||7)>>>0;                    // deterministic: no crawling
+  const rnd=()=>{ sd=(sd*1664525+1013904223)>>>0; return sd/4294967296; };
+  const c=new THREE.Color(skinHex);
+  const R=c.r*255,G=c.g*255,B=c.b*255;
+  const tone=(m,a)=>'rgba('+Math.round(R*m)+','+Math.round(G*m)+','+Math.round(B*m)+','+(a===undefined?1:a)+')';
+  x.fillStyle=tone(1); x.fillRect(0,0,w,h);
+  /* airbrush: forehead light, temples/jaw shaded */
+  let g=x.createLinearGradient(0,h*.3,0,h*.72);
+  g.addColorStop(0,tone(1.1,.55)); g.addColorStop(.45,tone(1,.0));
+  g.addColorStop(1,tone(.72,.5)); x.fillStyle=g; x.fillRect(0,0,w,h);
+  g=x.createRadialGradient(w*.5,h*.5,w*.1,w*.5,h*.5,w*.34);
+  g.addColorStop(0,tone(1.06,.3)); g.addColorStop(1,tone(.85,.35));
+  x.fillStyle=g; x.fillRect(w*.2,h*.28,w*.6,h*.44);
+  const mir=f=>{ for(const s of [1,-1]){ x.save();
+    x.translate(w*.5,0); x.scale(s,1); f(x); x.restore(); } };
+  /* eye sockets (deepen with pain) */
+  mir(x=>{ const g2=x.createRadialGradient(w*.058,h*.435,2,w*.058,h*.435,w*.062);
+    g2.addColorStop(0,tone(.62,.5+pain*.25)); g2.addColorStop(1,tone(1,0));
+    x.fillStyle=g2; x.beginPath();
+    x.ellipse(w*.058,h*.435,w*.062,h*.042,0,0,6.29); x.fill(); });
+  if(open>.16){
+    /* whites, iris, pupil, catchlight — squeezed by lids */
     mir(x=>{ x.fillStyle='rgba(226,220,206,.95)'; x.beginPath();
-      x.ellipse(w*.058,h*.44,w*.036,h*.019,0,0,6.29); x.fill();
+      x.ellipse(w*.058,h*.44,w*.036,h*.019*open,0,0,6.29); x.fill();
+      x.save(); x.beginPath();
+      x.ellipse(w*.058,h*.44,w*.036,h*.019*open,0,0,6.29); x.clip();
       x.fillStyle='#3a2a1c'; x.beginPath();
       x.arc(w*.058,h*.441,w*.017,0,6.29); x.fill();
       x.fillStyle='#120c08'; x.beginPath();
       x.arc(w*.058,h*.441,w*.008,0,6.29); x.fill();
-      x.fillStyle='rgba(255,255,255,.9)'; x.beginPath();
-      x.arc(w*.051,h*.434,w*.0045,0,6.29); x.fill();
+      if(open>.55){ x.fillStyle='rgba(255,255,255,.9)'; x.beginPath();
+        x.arc(w*.051,h*.434,w*.0045,0,6.29); x.fill(); }
+      x.restore();
       /* lash line + lid crease */
       x.strokeStyle='rgba(30,20,14,.85)'; x.lineWidth=w*.006;
-      x.beginPath(); x.ellipse(w*.058,h*.437,w*.037,h*.018,0,Math.PI*1.05,Math.PI*1.95);
+      x.beginPath(); x.ellipse(w*.058,h*.437,w*.037,h*.018*open,0,Math.PI*1.05,Math.PI*1.95);
       x.stroke();
       x.strokeStyle=tone(.7,.55); x.lineWidth=w*.004;
       x.beginPath(); x.ellipse(w*.058,h*.427,w*.039,h*.017,0,Math.PI*1.1,Math.PI*1.9);
       x.stroke(); });
-    /* brows: feathered strokes, angled */
-    mir(x=>{ x.strokeStyle='rgba(24,17,12,.9)'; x.lineWidth=w*.004;
-      for(let i=0;i<11;i++){
-        const t=i/10, bx=w*(.026+t*.072), by=h*(.398-t*.016)+Math.random()*h*.004;
-        x.beginPath(); x.moveTo(bx,by+h*.008); x.lineTo(bx+w*.008,by-h*.006); x.stroke(); } });
-    /* nostril shadows (the 3D nose sits above) */
-    mir(x=>{ x.fillStyle=tone(.55,.6); x.beginPath();
-      x.ellipse(w*.018,h*.532,w*.009,h*.006,.4,0,6.29); x.fill(); });
-    /* lips: two-tone with center line and highlight */
+  } else {
+    /* lids shut: one soft downward lash curve, squeezed harder in pain */
+    mir(x=>{ x.strokeStyle='rgba(30,20,14,.9)'; x.lineWidth=w*.006;
+      x.beginPath();
+      x.ellipse(w*.058,h*(.437+(pain>.4&&!ko?.004:0)),w*.036,h*.008,
+        0,Math.PI*.08,Math.PI*.92); x.stroke();
+      if(pain>.4&&!ko){                      // squeezed crow's feet
+        x.strokeStyle=tone(.62,.6); x.lineWidth=w*.003;
+        x.beginPath(); x.moveTo(w*.092,h*.43); x.lineTo(w*.104,h*.422); x.stroke();
+        x.beginPath(); x.moveTo(w*.092,h*.443); x.lineTo(w*.105,h*.447); x.stroke(); } });
+  }
+  /* brows: pain drags the inner ends down and together — the grimace V */
+  mir(x=>{ x.strokeStyle='rgba(24,17,12,.9)'; x.lineWidth=w*(.004+pain*.0015);
+    for(let i=0;i<11;i++){
+      const t=i/10;
+      const by=h*(.398-t*.016)+pain*h*(.02-t*.034)+rnd()*h*.004;
+      const bx=w*(.026+t*.072-pain*.008);
+      x.beginPath(); x.moveTo(bx,by+h*.008); x.lineTo(bx+w*.008,by-h*.006); x.stroke(); } });
+  if(pain>.32&&!ko){ /* the furrow between the brows */
+    x.strokeStyle=tone(.6,.45+pain*.3); x.lineWidth=w*.004;
+    for(const s of [-1,1]){ x.beginPath();
+      x.moveTo(w*(.5+s*.012),h*.405); x.lineTo(w*(.5+s*.009),h*.437); x.stroke(); } }
+  /* nostril shadows — flared when hurting */
+  mir(x=>{ x.fillStyle=tone(.55,.6); x.beginPath();
+    x.ellipse(w*.018,h*.532,w*.009*(1+pain*.45),h*.006*(1+pain*.3),.4,0,6.29); x.fill(); });
+  /* mouth */
+  if(ko){
+    /* slack, slightly open — nobody home */
+    x.fillStyle='rgba(50,26,22,.9)'; x.beginPath();
+    x.ellipse(w*.5,h*.595,w*.02,h*.011,0,0,6.29); x.fill();
+    x.fillStyle='rgba(134,78,64,.55)'; x.beginPath();
+    x.ellipse(w*.5,h*.585,w*.042,h*.008,0,0,6.29); x.fill();
+  } else if(pain>.5){
+    /* the grimace: mouth torn wide, teeth clenched, corners down */
+    const mw=w*(.048+pain*.022), mh=h*(.02+pain*.014);
+    x.fillStyle='rgba(46,22,18,.96)'; x.beginPath();
+    x.ellipse(w*.5,h*.592,mw,mh,0,0,6.29); x.fill();
+    x.save(); x.beginPath(); x.ellipse(w*.5,h*.592,mw,mh,0,0,6.29); x.clip();
+    x.fillStyle='rgba(216,206,190,.95)';
+    x.fillRect(w*.5-mw,h*.585,mw*2,h*.012);           // the clenched band
+    x.strokeStyle='rgba(90,66,56,.8)'; x.lineWidth=w*.002;
+    for(let i=-4;i<=4;i++){ x.beginPath();
+      x.moveTo(w*.5+i*mw*.22,h*.583); x.lineTo(w*.5+i*mw*.22,h*.599); x.stroke(); }
+    x.restore();
+    for(const s of [-1,1]){                            // corners dragged down
+      x.strokeStyle='rgba(60,32,26,.7)'; x.lineWidth=w*.004;
+      x.beginPath(); x.moveTo(w*.5+s*mw*.94,h*.592);
+      x.lineTo(w*.5+s*(mw*.94+w*.008),h*.604); x.stroke(); }
+  } else {
+    /* lips: two-tone with center line and highlight; parting with pain */
     g=x.createLinearGradient(0,h*.575,0,h*.605);
     g.addColorStop(0,'rgba(148,86,72,.95)'); g.addColorStop(.5,'rgba(120,62,52,.95)');
     g.addColorStop(.52,'rgba(60,32,26,.95)'); g.addColorStop(.62,'rgba(158,96,80,.95)');
     g.addColorStop(1,'rgba(134,78,64,.9)');
     x.fillStyle=g; x.beginPath();
-    x.ellipse(w*.5,h*.59,w*.05,h*.019,0,0,6.29); x.fill();
+    x.ellipse(w*.5,h*.59,w*(.05+pain*.008),h*(.019+pain*.008),0,0,6.29); x.fill();
     x.fillStyle='rgba(255,235,225,.25)'; x.beginPath();
     x.ellipse(w*.5,h*.598,w*.024,h*.006,0,0,6.29); x.fill();
-    /* chin + jaw shading, philtrum */
-    g=x.createRadialGradient(w*.5,h*.655,2,w*.5,h*.655,w*.05);
-    g.addColorStop(0,tone(1.05,.3)); g.addColorStop(1,tone(.8,.25));
-    x.fillStyle=g; x.fillRect(w*.42,h*.61,w*.16,h*.09);
-    x.strokeStyle=tone(.8,.4); x.lineWidth=w*.005;
-    x.beginPath(); x.moveTo(w*.5,h*.555); x.lineTo(w*.5,h*.572); x.stroke();
-    if(face&&face.feminine){
-      /* stronger lash line, fuller lips, softer jaw */
-      const m=(f)=>{ for(const s of [1,-1]){ x.save();
-        x.translate(w*.5,0); x.scale(s,1); f(x); x.restore(); } };
-      m(x=>{ x.strokeStyle='rgba(20,12,10,.95)'; x.lineWidth=w*.009;
-        x.beginPath();
-        x.ellipse(w*.058,h*.436,w*.039,h*.019,0,Math.PI*1.02,Math.PI*1.98);
-        x.stroke(); });
+  }
+  /* chin + jaw shading, philtrum */
+  g=x.createRadialGradient(w*.5,h*.655,2,w*.5,h*.655,w*.05);
+  g.addColorStop(0,tone(1.05,.3)); g.addColorStop(1,tone(.8,.25));
+  x.fillStyle=g; x.fillRect(w*.42,h*.61,w*.16,h*.09);
+  x.strokeStyle=tone(.8,.4); x.lineWidth=w*.005;
+  x.beginPath(); x.moveTo(w*.5,h*.555); x.lineTo(w*.5,h*.572); x.stroke();
+  if(face&&face.feminine&&open>.16){
+    /* stronger lash line, fuller lips */
+    mir(x=>{ x.strokeStyle='rgba(20,12,10,.95)'; x.lineWidth=w*.009;
+      x.beginPath();
+      x.ellipse(w*.058,h*.436,w*.039,h*.019*open,0,Math.PI*1.02,Math.PI*1.98);
+      x.stroke(); });
+    if(!ko&&pain<=.5){
       g=x.createLinearGradient(0,h*.575,0,h*.61);
       g.addColorStop(0,'rgba(178,86,88,.95)'); g.addColorStop(.5,'rgba(150,58,62,.95)');
       g.addColorStop(.52,'rgba(80,30,34,.95)'); g.addColorStop(1,'rgba(188,96,98,.95)');
       x.fillStyle=g; x.beginPath();
       x.ellipse(w*.5,h*.59,w*.054,h*.023,0,0,6.29); x.fill();
     }
-    /* stubble for the bearded */
-    if(face&&(face.beard||face.stubble)){
-      x.fillStyle='rgba(25,18,12,.16)';
-      for(let i=0;i<900;i++){ const a=Math.random()*6.29,r=Math.random();
-        const px=w*.5+Math.cos(a)*w*.11*r, py=h*.62+Math.sin(a)*h*.07*r;
-        if(py>h*.6)x.fillRect(px,py,1.4,1.4); } }
-  });
+  }
+  /* stubble for the bearded */
+  if(face&&(face.beard||face.stubble)){
+    x.fillStyle='rgba(25,18,12,.16)';
+    for(let i=0;i<900;i++){ const a=rnd()*6.29,r2=rnd();
+      const px=w*.5+Math.cos(a)*w*.11*r2, py=h*.62+Math.sin(a)*h*.07*r2;
+      if(py>h*.6)x.fillRect(px,py,1.4,1.4); } }
 }
+/* a face that can change its mind: returns {tex, set(state)} */
+function mkFace(skinHex,face){
+  let canvas=null,ctx=null;
+  try{ canvas=document.createElement('canvas');
+    canvas.width=canvas.height=512; ctx=canvas.getContext('2d'); }catch(e){}
+  if(!ctx)return {tex:null,set(){}};
+  const seed=(Math.random()*1e9)>>>0;
+  const tex=new THREE.CanvasTexture(canvas);
+  tex.colorSpace=THREE.SRGBColorSpace; tex.anisotropy=4;
+  const set=(st)=>{ st=st||{}; st.seed=seed;
+    try{ paintFace(ctx,512,512,skinHex,face,st); tex.needsUpdate=true; }catch(e){} };
+  set({});
+  return {tex,set};
+}
+function faceTex(skinHex,face){ return mkFace(skinHex,face).tex; }
 const skinTex=canTex(512,512,(ctx,w,h)=>{
   ctx.fillStyle='#d9d2ca'; ctx.fillRect(0,0,w,h);
   /* subsurface mottle: warm and cool blotches, very soft */
@@ -4569,6 +4671,81 @@ function segPush(pt,a,b,rad){
   const d=pt.distanceTo(_cq);
   if(d<rad&&d>1e-6)pt.addScaledVector(TMP1.subVectors(pt,_cq).divideScalar(d),rad-d);
 }
+/* GUSOKU — procedural armor over the kimono, element-for-element from the
+   sculpted reference: lamellar DO cuirass, SODE shoulder guards, KUSAZURI
+   tassets, KOTE forearm splints, SUNEATE shin plates. Rigid plates on the
+   articulated body; the cloth flows beneath them. */
+Fighter.prototype.buildArmor=function(){
+  const P=this.parts;
+  const lacq=stdMat(0x1e2027,{roughness:.42,metalness:.55});
+  const lacq2=lacq.clone(); lacq2.side=THREE.DoubleSide;
+  const lace=stdMat(this.palette.accent,{roughness:.82});
+  const shadowAll=g=>g.traverse(o=>{ if(o.isMesh)o.castShadow=true; });
+  /* DO — the cuirass: five horizontal lames with lacing cords between */
+  { const g=new THREE.Group();
+    for(let i=0;i<5;i++){
+      const t=i/4, r=lerp(.172,.19,Math.sin(t*Math.PI));
+      const lame=new THREE.Mesh(
+        new THREE.CylinderGeometry(r,r*1.045,.068,26,1,true),lacq2);
+      lame.scale.z=.82; lame.position.y=-.03-i*.062;
+      g.add(lame);
+      const cord=new THREE.Mesh(
+        new THREE.CylinderGeometry(r*1.008,r*1.008,.014,26,1,true),lace);
+      cord.scale.z=.82; cord.position.y=-.03-i*.062+.036;
+      cord.material.side=THREE.DoubleSide;
+      g.add(cord);
+    }
+    shadowAll(g); P.chest.add(g); }
+  /* SODE — three flared lames floating over each shoulder */
+  for(const side of [1,-1]){
+    const ua=side>0?P.upperArmR:P.upperArmL;
+    const g=new THREE.Group();
+    for(let i=0;i<3;i++){
+      const lame=new THREE.Mesh(new THREE.SphereGeometry(
+        .088+i*.014,20,7,0,Math.PI*2,Math.PI*.3,Math.PI*.2),lacq2.clone());
+      lame.material.side=THREE.DoubleSide;
+      lame.position.y=-.005-i*.04;
+      lame.scale.set(1,.9,.92);
+      g.add(lame);
+    }
+    g.position.y=-.01;
+    shadowAll(g); ua.add(g);
+  }
+  /* KUSAZURI — six flared tassets skirting the waist over the hakama */
+  { const g=new THREE.Group(), n=6;
+    for(let i=0;i<n;i++){
+      const a=(i+.5)/n*Math.PI*2;
+      const plate=new THREE.Mesh(new THREE.CylinderGeometry(
+        .185,.255,.19,7,1,true,a-.4,.8),lacq2.clone());
+      plate.material.side=THREE.DoubleSide;
+      plate.position.y=-.155;
+      g.add(plate);
+      const trim=new THREE.Mesh(new THREE.CylinderGeometry(
+        .252,.258,.02,7,1,true,a-.38,.76),lace.clone());
+      trim.material.side=THREE.DoubleSide;
+      trim.position.y=-.245;
+      g.add(trim);
+    }
+    shadowAll(g); P.pelvis.add(g); }
+  /* KOTE — splinted forearms; SUNEATE — shin plates */
+  for(const side of ['R','L']){
+    const fa=P['forearm'+side], sh=P['shin'+side];
+    for(let i=-1;i<=1;i++){
+      const splint=new THREE.Mesh(new THREE.BoxGeometry(.013,.19,.006),lacq);
+      const a=i*.55;
+      splint.position.set(Math.sin(a)*.048,-.13,Math.cos(a)*.048);
+      splint.rotation.y=a; splint.castShadow=true;
+      fa.add(splint);
+    }
+    for(let i=-1;i<=1;i++){
+      const plate=new THREE.Mesh(new THREE.BoxGeometry(.026,.2,.007),lacq);
+      const a=i*.5;
+      plate.position.set(Math.sin(a)*.062,-.27,Math.cos(a)*.062);
+      plate.rotation.y=a; plate.castShadow=true;
+      sh.add(plate);
+    }
+  }
+};
 Fighter.prototype.buildCloth=function(hakamaMat){
   if(this.build.cloth===false)return;
   this.cloth=[];
@@ -5369,6 +5546,22 @@ function frame(now){
   if(PHYS.enabled&&player&&player.phys)PHYS.engine.step(Math.min(dt,.033));
   for(const f of [player,enemy]){
     if(!f)continue;
+    /* the face lives: blinks on its own clock, grimaces with pain,
+       goes slack when the lights go out. Repaints only on state change. */
+    if(f.faceCtl){
+      f._blinkAt=(f._blinkAt===undefined?rand(1,4):f._blinkAt)-dt;
+      let blink=0;
+      if(f._blinkAt<=0){ f._blinkT=.13; f._blinkAt=2.2+Math.random()*3.6; }
+      if(f._blinkT>0){ f._blinkT-=dt;
+        blink=Math.sin(clamp(1-f._blinkT/.13,0,1)*Math.PI); }
+      const ko=!f.alive||f.consciousness<42;
+      const q={p:Math.round(clamp((f.pain||0)/70,0,1)*5),
+               b:ko?0:Math.round(blink*2), k:ko?1:0};
+      if(!f._faceQ||f._faceQ.p!==q.p||f._faceQ.b!==q.b||f._faceQ.k!==q.k){
+        f._faceQ=q;
+        f.faceCtl.set({pain:q.p/5,blink:q.b/2,ko:!!q.k});
+      }
+    }
     /* contact shadow: follows the pelvis, spreads when the body goes down */
     if(!f.cshadow)f.cshadow=mkContactShadow();
     { const pv=f.parts.pelvis.position;
