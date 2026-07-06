@@ -1713,8 +1713,8 @@ class Fighter{
       if(MODELPIPE.enabled&&MODELPIPE.clips){
         const back=this.lastHitDir?
           this.lastHitDir.dot(DIRY(this.bodyYaw))<0:Math.random()<.5;
-        const pool=back?['death_back','death_kneel','death_kneel2']
-                       :['death_fwd','death_kneel','death_kneel2'];
+        const pool=back?['death_back','death_kneel','death_kneel2','death_gs1','death_gs2']
+                       :['death_fwd','death_kneel','death_kneel2','death_gs1','death_gs2'];
         for(const c of pool){
           if(!MODELPIPE.clips[c])continue;
           if(this.model&&MODELPIPE.playClip(this,c,.12)){
@@ -2366,6 +2366,12 @@ const MODELPIPE=(()=>{
   loadClip('death_fwd','models/anims/death_fwd.fbx');
   loadClip('death_kneel','models/anims/death_kneel.fbx');
   loadClip('death_kneel2','models/anims/death_kneel2.fbx');
+  /* the greatsword mocap pack: locomotion for the living, deaths for the rest */
+  loadClip('gs_idle','models/anims/gs/gs_idle.fbx');
+  loadClip('gs_walk','models/anims/gs/gs_walk.fbx');
+  loadClip('gs_run','models/anims/gs/gs_run.fbx');
+  loadClip('death_gs1','models/anims/gs/gs_death1.fbx');
+  loadClip('death_gs2','models/anims/gs/gs_death2.fbx');
   function playClip(f,name,fade){
     const M=f.model; if(!M||!clips[name])return false;
     try{
@@ -2462,13 +2468,97 @@ const MODELPIPE=(()=>{
   }
   const current={P:null,E:null};
   return {enabled:true,sources,load,attach,drive,boneQuat,playClip,tickClips,clips,
-    tickLoco,blendMap:null,
+    clipRigs,tickLoco,blendMap:null,
     playPuppet,tickPuppet,current,
     _handFix:new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1,0,0),-Math.PI/2),
     mode:0};
 })();
 /* the picker offers ONLY the procedural fighters. Bundled model files are
    not surfaced; dropping a .glb/.fbx onto the page remains the back door. */
+
+/* =========================================================================
+   MOCAP LIFE — the greatsword pack plays continuously on a hidden Mixamo
+   rig per fighter; we harvest the TRUNK deltas (pelvis bob and sway,
+   hip/shoulder counter-yaw, at true mocap timing) and layer them onto the
+   simulated pose. The sim keeps the feet and the sword; the mocap
+   breathes. Fails silent if the clips never load.
+   ========================================================================= */
+const GSLOCO=(()=>{
+  const _w=V3(), _w2=V3(), _w3=V3();
+  function mk(){
+    try{
+      const R=MODELPIPE.clipRigs&&MODELPIPE.clipRigs['gs_idle'];
+      if(!R||!MODELPIPE.clips['gs_idle'])return null;
+      const rig=THREE.SkeletonUtils?THREE.SkeletonUtils.clone(R):null;
+      if(!rig)return null;
+      rig.visible=false; scene.add(rig);
+      const find=n=>{ let r=null; rig.traverse(o=>{ if(!r&&o.name&&
+        o.name.toLowerCase().replace(/[^a-z0-9]/g,'').endsWith(n))r=o; });
+        return r; };
+      const bones={hips:find('hips'),
+        shR:find('rightarm'),shL:find('leftarm'),
+        thR:find('rightupleg'),thL:find('leftupleg')};
+      if(!bones.hips){ scene.remove(rig); return null; }
+      const mixer=new THREE.AnimationMixer(rig);
+      const act=n=>{ const c=MODELPIPE.clips[n]; if(!c)return null;
+        const a=mixer.clipAction(c); a.setLoop(THREE.LoopRepeat);
+        a.play(); a.weight=0; return a; };
+      const L={rig,mixer,bones,
+        idle:act('gs_idle'),walk:act('gs_walk'),run:act('gs_run')};
+      rig.updateMatrixWorld(true);
+      bones.hips.getWorldPosition(_w);
+      L.k=.9/Math.max(Math.abs(_w.y),.01);
+      L.restY=_w.y*L.k;
+      L.avgX=0; L.avgZ=0; L.avgY=L.restY; L.avgHY=0; L.avgCY=0;
+      return L;
+    }catch(e){ return null; }
+  }
+  function tick(f,dt,speed){
+    if(f._gsl===null)return null;
+    if(!f._gsl){
+      if(!MODELPIPE.clips||!MODELPIPE.clips['gs_idle'])return null; // still loading
+      f._gsl=mk(); if(!f._gsl){ f._gsl=null; return null; }
+    }
+    const L=f._gsl;
+    const wRun=L.run?clamp((speed-1.9)/1.2,0,1):0;
+    const wWalk=L.walk?clamp(speed/.8,0,1)*(1-wRun):0;
+    const wIdle=L.idle?Math.max(0,1-wWalk-wRun):0;
+    const k=clamp(dt*5,0,1);
+    if(L.idle)L.idle.weight=lerp(L.idle.weight,wIdle,k);
+    if(L.walk){ L.walk.weight=lerp(L.walk.weight,wWalk,k);
+      L.walk.timeScale=clamp(speed/1.35,.6,1.9); }
+    if(L.run){ L.run.weight=lerp(L.run.weight,wRun,k);
+      L.run.timeScale=clamp(speed/3,.6,1.6); }
+    L.mixer.update(dt);
+    L.rig.updateMatrixWorld(true);
+    const B=L.bones;
+    B.hips.getWorldPosition(_w).multiplyScalar(L.k);
+    /* drift-free: x/z high-passed against a slow running average */
+    L.avgX=lerp(L.avgX,_w.x,clamp(dt*.8,0,1));
+    L.avgZ=lerp(L.avgZ,_w.z,clamp(dt*.8,0,1));
+    /* HIGH-PASS everything: the clip's stance constants (bladed hips, low
+       crouch) stay in the clip — only the living OSCILLATION passes */
+    const out=f._gslOut||(f._gslOut={bob:0,sway:0,push:0,hipYaw:0,chestYaw:0});
+    L.avgY=lerp(L.avgY,_w.y,clamp(dt*.8,0,1));
+    out.bob=clamp(_w.y-L.avgY,-.05,.05);
+    out.sway=clamp(_w.x-L.avgX,-.05,.05);
+    out.push=clamp(_w.z-L.avgZ,-.05,.05);
+    if(B.thR&&B.thL){
+      B.thR.getWorldPosition(_w2); B.thL.getWorldPosition(_w3);
+      const hy=Math.atan2(-(_w2.z-_w3.z),(_w2.x-_w3.x)||1e-6);
+      L.avgHY=lerp(L.avgHY,hy,clamp(dt*.8,0,1));
+      out.hipYaw=clamp(hy-L.avgHY,-.3,.3);
+    }
+    if(B.shR&&B.shL){
+      B.shR.getWorldPosition(_w2); B.shL.getWorldPosition(_w3);
+      const cy=Math.atan2(-(_w2.z-_w3.z),(_w2.x-_w3.x)||1e-6);
+      L.avgCY=lerp(L.avgCY,cy,clamp(dt*.8,0,1));
+      out.chestYaw=clamp(cy-L.avgCY,-.3,.3);
+    }
+    return out;
+  }
+  return {tick};
+})();
 
 const _pq=new THREE.Quaternion(), _pq2b=new THREE.Quaternion(), _pv=V3(), _pv2=V3();
 function mkTargetQ(from,to,q){ _pv.subVectors(to,from).normalize();
@@ -3038,12 +3128,16 @@ Fighter.prototype.updateAlive=function(dt,opponent){
   this._armPh=lerp(this._armPh||0,
     ft.R.swing>0?1:(ft.L.swing>0?-1:(this._armPh||0)*.92),clamp(dt*7,0,1));
   this._ctr=lerp(this._ctr||0,strideCtr*.16*clamp(speed2d,0,1.4),clamp(dt*9,0,1));
+  /* mocap life: the greatsword clips lend the trunk their true timing */
+  const ML=(this.alive&&!(this.kneel>0)&&!this.begging&&typeof GSLOCO!=='undefined')
+    ?GSLOCO.tick(this,dt,speed2d):null;
   const pelvisY=D.pelvisY-hurtSag-stepDip*.024-(stepping?.008:0)
-    +Math.sin(this.breath*1.6)*.007+(this.previewBob||0);
+    +Math.sin(this.breath*1.6)*.007+(this.previewBob||0)+(ML?ML.bob*.8:0);
   const pelvis=V3(lerp(feetMid.x,this.pos.x,.55),pelvisY,lerp(feetMid.z,this.pos.z,.55));
-  const pelvisYawA=this.bodyYaw+this.twist*.3-this._ctr*.7;
+  const pelvisYawA=this.bodyYaw+this.twist*.3-this._ctr*.7+(ML?ML.hipYaw*.45:0);
   const fwdP=DIRY(pelvisYawA), rightP=V3(fwdP.z,0,-fwdP.x);
-  pelvis.addScaledVector(rightP,(this._sway||0)+this._wshift);
+  pelvis.addScaledVector(rightP,(this._sway||0)+this._wshift+(ML?ML.sway*.7:0));
+  if(ML)pelvis.addScaledVector(fwdP,ML.push*.5);
 
   /* flinch spring: hits ripple through the trunk */
   this.flinchV.addScaledVector(this.flinch,-140*dt).addScaledVector(this.flinchV,-12*dt);
@@ -3052,7 +3146,8 @@ Fighter.prototype.updateAlive=function(dt,opponent){
   /* spine: pelvis → abdomen → chest, distributing lean and twist */
   const stoop=this.build.stoop||0;    // age rounds the back
   const lean=clamp(.04+stoop+this.tipVel.length()*.007+speed2d*.016,0,.12+stoop);
-  const chestYawA=this.bodyYaw+this.twist*.8+this._ctr;
+  const chestYawA=this.bodyYaw+this.twist*.8+this._ctr
+    +(ML?ML.chestYaw*.55:0);
   const fwdC=DIRY(chestYawA), rightC=V3(fwdC.z,0,-fwdC.x);
   const chestB=pelvis.clone().addScaledVector(fwdP,.03+lean*.3)
     .addScaledVector(this.flinch,.6).addScaledVector(this.leanV,.45);
@@ -5487,6 +5582,7 @@ function disposeFighter(f){
   if(f.cloth)for(const P of f.cloth)scene.remove(P.mesh);
   if(f.sleeves)for(const P of f.sleeves)scene.remove(P.mesh);
   if(f.hairCloth)scene.remove(f.hairCloth.mesh);
+  if(f._gsl&&f._gsl.rig)scene.remove(f._gsl.rig);
   scene.remove(f.root); scene.remove(f.katana); scene.remove(f.trailMesh);
   if(f.skin)scene.remove(f.skin.mesh);
   if(f.glint)scene.remove(f.glint);

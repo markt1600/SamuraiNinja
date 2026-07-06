@@ -143,6 +143,12 @@ Kill all three: **三人斬り**.
   Idle/Walk/Run clips (bundled Soldier/Xbot do) plays them under the sim:
   crossfaded by ground speed, cadence matched to velocity, blended per
   bone so sword arms and planted feet stay simulation-true.
+- **Mocap life (everyone)** — a greatsword mocap pack plays continuously
+  on a hidden rig per fighter; the trunk's living oscillation (pelvis bob
+  and sway, hip/shoulder counter-yaw at true mocap timing) is harvested,
+  high-passed so stance constants stay behind, and layered onto the
+  simulated pose. The sim keeps the feet and the sword; the mocap
+  breathes. Two-handed-sword mocap deaths join the death-animation pool.
 
 ## v5 — the duel becomes a life
 
