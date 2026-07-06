@@ -1069,10 +1069,11 @@ function buildSkinnedBody(kimonoMat,hakamaMat,B,skinMat){
       [1.41,.172,.87],[1.45,.148,.88],[1.475,.120,.88]];
     const sm=(a,b,t)=>{ t=clamp((t-a)/(b-a),0,1); return t*t*(3-2*t); };
     const shape=y=>{
-      const wS=sm(.92,1.0,y)*(1-sm(1.14,1.24,y));     // waist influence, feathered
+      const wS=sm(.92,1.0,y)*(1-sm(1.12,1.3,y));      // waist influence, feathered
       const sS=sm(1.2,1.34,y);                          // shoulder influence
       const hS=1-sm(.86,.96,y);                         // hip influence
-      return 1+(B.waist-1)*wS+(B.sh-1)*sS+(B.hip-1)*hS;
+      const cS=sm(1.08,1.3,y)*(1-sm(1.3,1.42,y));     // ribcage/chest barrel
+      return 1+(B.waist-1)*wS+(B.sh-1)*sS+(B.hip-1)*hS+((B.chest||1)-1)*cS;
     };
     const rings=prof.map(([y,r0,szz])=>{
       const r=r0*shape(y);
@@ -1086,7 +1087,7 @@ function buildSkinnedBody(kimonoMat,hakamaMat,B,skinMat){
       if(y>=1.34)skin=[Ch,1,S,0];
       /* the bust rides the chest rings, apex ~1.28; the belly lower */
       const bust=(B.bust||0)*Math.exp(-Math.pow((y-1.285)/.075,2));
-      const belly=(B.belly||0)*Math.exp(-Math.pow((y-1.0)/.17,2));
+      const belly=(B.belly||0)*Math.exp(-Math.pow((y-1.02)/.21,2));
       return {c:[0,y,0],r,sz:szz,skin,bust,belly};
     });
     tube(rings,0); }
@@ -1357,6 +1358,12 @@ class Fighter{
       if(this.build.mawashi){ /* sumo: the belt IS the garment */
         saya.visible=false; skirtF.visible=false; skirtB.visible=false;
         obi.visible=false;              // the belly owns the waist, no ring
+        /* a solid flesh CORE fills the great torso: when the lean folds
+           the huge tube surface, the camera meets body — never a hollow */
+        const under=new THREE.Mesh(new THREE.SphereGeometry(.3,20,14),skin);
+        under.scale.set(hS*.52,.9,hS*.5);
+        under.position.set(0,.16,.08); under.castShadow=true;
+        parts.pelvis.add(under);
         knot.scale.set(1.6,1.7,1.6);              // the great back knot
         const sagM=stdMat(this.palette.accent,{roughness:.8});
         for(let i=0;i<7;i++){                     // sagari cords, front arc
@@ -1630,7 +1637,7 @@ class Fighter{
     parts.footR=buildFootMesh(); parts.footL=buildFootMesh();
     { /* heavyweight legs need heavyweight feet — a rikishi's tree-trunk
          shin ends in a foot that can carry it */
-      const FS=Math.max(1,(this.build.legR||1)*.82);
+      const FS=Math.max(1,(this.build.legR||1)*.95);
       if(FS>1){ parts.footR.scale.setScalar(FS); parts.footL.scale.setScalar(FS); }
     }
     for(const k in parts)this.root.add(parts[k]);
@@ -2073,7 +2080,7 @@ const BUILDS={
     /* a rikishi in the ring: mountainous, bare but for the mawashi,
        barefoot, chonmage — the belt and its sagari are the whole costume */
     sh:1.5, waist:3.1, hip:2.7, limb:2.0, hair:'topknot', bare:true,
-    mass:3, cloth:false, belly:.3, legsSkin:true, legR:1.9, armR:1.8,
+    mass:3, cloth:false, belly:.3, chest:2.1, legsSkin:true, legR:1.9, armR:1.8,
     armsSkin:true, mawashi:true, barefoot:true, preferWeapon:'bare',
     palette:{kimono:0xd8a880,hakama:0x22315c,obi:0x22315c,skin:0xd8a880,
       accent:0xe8e2d0,face:{stubble:true}}}};
@@ -3152,7 +3159,7 @@ Fighter.prototype.setBone=function(name,from,to){
   const d=_bT.length()||1e-6; _bT.divideScalar(d);
   b.quaternion.setFromUnitVectors(UPV,_bT);
   const rest=_boneRest[name];
-  if(rest)b.scale.y=clamp(d/rest,.8,1.4);
+  if(rest)b.scale.y=clamp(d/rest,.75,1.55);
 };
 Fighter.prototype.setPelvisBone=function(p,yaw){
   const b=this.skin.bones[this.skin.BONES.pelvis];
