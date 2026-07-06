@@ -2546,8 +2546,9 @@ const MODELPIPE=(()=>{
     const hrL=twoHand?_dd.copy(J.haL).addScaledVector(gdir,-hOff):_dd.copy(J.haL);
     if(M._geR){ if(gdir)hrR.add(M._geR); else M._geR.multiplyScalar(.8); }
     if(M._geL){ if(twoHand)hrL.add(M._geL); else M._geL.multiplyScalar(.8); }
-    aimDelta('RightShoulder',J.chestT,J.shR);
-    aimDelta('LeftShoulder',J.chestT,J.shL);
+    /* clavicles stay in BIND pose: aiming them at the sim's shoulder
+       points twists the deltoid where the arm joins the torso. The arm
+       IK reaches from the rig's own natural socket instead. */
     /* two-bone IK with the MODEL's segment lengths: reach the sim's
        wrist, bend where this rig's elbow belongs, use the sim's elbow
        only as the bend-direction hint */
