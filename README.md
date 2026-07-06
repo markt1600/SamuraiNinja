@@ -24,6 +24,7 @@ Static site: `index.html` + `game.js`. Three.js **r164** vendored under
 | mouse | the sword — swing speed and edge angle decide everything |
 | hold RMB | guard — **raised in the last instant, it becomes a parry** |
 | hold SHIFT | thrust grip (deep, narrow, half the bone toll) |
+| G | grant mercy to a begging opponent |
 | R | next duel / retry |
 
 ## The ladder
@@ -48,6 +49,16 @@ Kill all three: **三人斬り**.
 - **Cut mechanics** — kinetic energy of the effective blade mass, degraded by
   edge misalignment (^1.6), ~14 J/cm through tissue; thrusts penetrate ×1.8
   with half bone cost.
+- **The blade BITES** — a committed cut or thrust that doesn't pass clean
+  through lodges in the body and must be wrenched free (pull away);
+  severing strokes and glancing blows pass. The AI works its steel loose.
+- **Technique assist** — the mouse supplies intent (line, power, timing);
+  committed strokes are steered onto each weapon's honest lines: katana
+  kiri-oroshi/kesa/do/kiri-age, axe chops, broadsword hews, fists
+  jab/hook/uppercut. Guards and slow blade work stay fully manual.
+- **Mercy** — a fighter who can no longer fight (disarmed, or both arms
+  gone) kneels and begs. A begging player is executed where he kneels;
+  a begging opponent can be spared with **G** — or not.
 - **Anatomy** — carotid, femoral, brachial arteries with distinct bleed
   rates; grip tendons (drops the sword); skull/rib bone gates; heart, lungs,
   windpipe. Blood volume 5000ml; unconscious at 62%, dead at 48%. Bleeding

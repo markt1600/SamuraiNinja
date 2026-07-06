@@ -1886,6 +1886,8 @@ class Fighter{
     P.pelvis.position.copy(J.pelvis.p);
     if(!this.severed.head)P.head.position.copy(J.head.p);
     place(P.upperArmR,'shR','elR');
+    if(P.elbowR)P.elbowR.position.copy(J.elR.p);   // elbows travel with the fall
+    if(P.elbowL)P.elbowL.position.copy(J.elL.p);
     if(!this.severed.armR){ place(P.forearmR,'elR','haR'); P.handR.position.copy(J.haR.p); }
     place(P.upperArmL,'shL','elL');
     if(!this.severed.armL){ place(P.forearmL,'elL','haL'); P.handL.position.copy(J.haL.p); }
@@ -1972,6 +1974,13 @@ const BUILDS={
    two rising kiri-age. The thrust line is computed live at the target. */
 const CUTLINES=[[0,-.98,.2],[.62,-.7,.24],[-.62,-.7,.24],
   [.95,-.1,.26],[-.95,-.1,.26],[.55,.74,.22],[-.55,.74,.22]];
+/* the axe knows only the chop and the sweep — no rising cuts */
+const AXELINES=[[0,-.98,.2],[.62,-.72,.24],[-.62,-.72,.24],
+  [.95,-.15,.26],[-.95,-.15,.26]];
+/* the fists: straight jab/cross, hooks and backhands, the uppercut,
+   the dropping elbow */
+const FISTLINES=[[0,-.15,.97],[.55,-.1,.8],[-.55,-.1,.8],
+  [.95,.05,.35],[-.95,.05,.35],[0,.78,.55],[0,-.85,.45]];
 const WEAPONS={
   katana:    {label:'刀 KATANA',    len:.93, cutFrom:.12, speed:1.0,  maxSpd:1.0,
               effMass:1.0, dmg:1.0, parryWin:1.0, blunt:false, curl:1.28},
@@ -2885,6 +2894,21 @@ Fighter.prototype.updateAlive=function(dt,opponent){
     log(this.name+' is driven to a knee!',false);
     Sound.thump&&Sound.thump(.8);
   }
+  /* MERCY: a man who cannot fight sinks to his knees and begs */
+  if(this.alive&&!this.begging&&game.state==='fight'){
+    const armROut=this.disabled.armR||this.severed.armR;
+    const armLOut=this.disabled.armL||this.severed.armL;
+    if((!this.hasSword&&!(this.weapon&&this.weapon.blunt))||(armROut&&armLOut)){
+      this.begging=true; this.parryEnabled=false;
+      log(this.isPlayer?'you cannot fight on — you sink to your knees'
+        :this.name+' drops his guard — on his knees, begging for mercy',false);
+      if(!this.isPlayer)log('[G] grant mercy — or take what is owed',false);
+    }
+  }
+  if(this.begging){
+    this.downT=Math.max(this.downT||0,.6);       // stays kneeling
+    this.vel.x*=Math.pow(.001,dt); this.vel.z*=Math.pow(.001,dt);
+  }
   if(this.downT>0)this.downT-=dt;
   const kneel=this.downT>0?clamp(this.downT>.45?1:this.downT/.45,0,1):0;
   this.kneel=kneel;
@@ -3009,7 +3033,7 @@ Fighter.prototype.updateAlive=function(dt,opponent){
     P.head.lookAt(TMP3);
     _headQ.setFromAxisAngle(UPY,chestYawA);
     P.head.quaternion.slerp(_headQ,.35);
-    const droop=clamp((this.pain-22)/140,0,.42)
+    const droop=(this.begging?.45:0)+clamp((this.pain-22)/140,0,.42)
                +clamp((78-this.consciousness)/170,0,.38);
     if(droop>0){ _pq.setFromAxisAngle(rightC,droop*.6);
       P.head.quaternion.premultiply(_pq); }
@@ -3046,18 +3070,25 @@ Fighter.prototype.updateAlive=function(dt,opponent){
        line (kiri-oroshi, kesa, do, kiri-age) with speed preserved; a
        thrust runs straight and true at the target's chest. Slow blade
        work and the guard stay entirely under the hand. */
-    if(this.isPlayer&&!this.guarding){
+    if(this.isPlayer&&!this.guarding&&!this.stuck){
       const sp=this.tipVel.length();
-      if(sp>4.2){
-        const k2=clamp((sp-4.2)/4,0,1)*.55*(1-Math.exp(-9*dt));
+      /* every weapon has its own honest lines and its own commitment:
+         the axe chops, the broadsword hews, the fists jab/hook/uppercut */
+      const AXE=W===WEAPONS.axe, BSW=W===WEAPONS.broadsword;
+      const LINES=AXE?AXELINES:(W.blunt?FISTLINES:CUTLINES);
+      const thr=AXE?3.6:W.blunt?4.6:4.2;
+      const stg=AXE?.66:BSW?.62:W.blunt?.5:.55;
+      if(sp>thr){
+        const k2=clamp((sp-thr)/4,0,1)*stg*(1-Math.exp(-9*dt));
         if(this.thrust){
-          TMP3.copy(opponent.pos).setY(1.3).sub(this.tip);
+          /* thrust: straight and true — at the ribs; a fist at the jaw */
+          TMP3.copy(opponent.pos).setY(W.blunt?1.5:1.3).sub(this.tip);
           if(TMP3.lengthSq()>.01){ TMP3.normalize();
             this.tipVel.lerp(_pv.copy(TMP3).multiplyScalar(sp),k2).setLength(sp); }
         } else {
           TMP3.copy(this.tipVel).divideScalar(sp);
           let bd=-2;
-          for(const L of CUTLINES){
+          for(const L of LINES){
             _pv.copy(rightC).multiplyScalar(L[0]).addScaledVector(fwdC,L[2]);
             _pv.y=L[1]; _pv.normalize();
             const d2=_pv.dot(TMP3);
@@ -3069,7 +3100,31 @@ Fighter.prototype.updateAlive=function(dt,opponent){
       }
     }
     this.tip.addScaledVector(this.tipVel,dt);
-    if(this.tip.y<.06){ this.tip.y=.06; if(this.tipVel.y<0)this.tipVel.y*=-.2; }
+    /* A LODGED BLADE: flesh holds the steel at the wound until it is
+       wrenched free — pull AWAY to retract. The AI works it loose fast;
+       a corpse falling off the edge frees it; nothing sticks forever. */
+    if(this.stuck){
+      const S=this.stuck, tgt=S.def, cc=tgt.capsules&&tgt.capsules[S.part];
+      S.t+=dt;
+      if(!cc||S.t>1.5||game.state!=='fight'||(!tgt.alive&&S.t>.35)){
+        this.stuck=null;
+      } else {
+        TMP1.lerpVectors(cc.a,cc.b,S.tt);
+        this.tip.lerp(TMP1,clamp(dt*28,0,1));         // pinned at the wound
+        this.tipVel.multiplyScalar(Math.exp(-13*dt));
+        if(this.isPlayer){
+          TMP2.subVectors(this.tipTarget,TMP1);
+          if(TMP2.length()>.45)S.retract+=dt*TMP2.length()*2.2;
+        } else S.retract+=dt*2.6;
+        if(S.retract>=S.need){
+          this.stuck=null;
+          TMP2.subVectors(this.tip,tgt.pos).setY(.35).normalize();
+          this.tipVel.addScaledVector(TMP2,3);        // wrenched free
+          Sound.cut&&Sound.cut(.5);
+          if(this.isPlayer)log('wrenched FREE',false);
+        }
+      }
+    }
     const reachMax=D.upperArm+D.foreArm+.87;
     TMP1.subVectors(this.tip,shR);
     if(TMP1.length()>reachMax){ this.tip.copy(shR).addScaledVector(TMP1.normalize(),reachMax);
@@ -3202,8 +3257,13 @@ Fighter.prototype.updateAlive=function(dt,opponent){
     } else this.hangArm('L',shL,rightC,P);
   } else {
     this.bladeA=null; this.bladeB=null; this.bladeSpeed=0;
-    this.hangArm('R',shR,rightC,P);
-    this.hangArm('L',shL,rightC,P);
+    if(this.begging){                 // hands forward, palms open — pleading
+      this.pleadArm('R',shR,fwdC,P);
+      this.pleadArm('L',shL,fwdC,P);
+    } else {
+      this.hangArm('R',shR,rightC,P);
+      this.hangArm('L',shL,rightC,P);
+    }
   }
 
   /* ---- legs: IK from pelvis to the planted feet ---- */
@@ -3280,6 +3340,25 @@ Fighter.prototype.updateAlive=function(dt,opponent){
   s=seg(P.shinL); setCap('shinL',s[0],s[1]);
 };
 
+/* the pleading pose: hands raised forward, open — begging for the mercy
+   of the blade that took the fight from him */
+Fighter.prototype.pleadArm=function(side,sh,fwd,P){
+  if(this.severed['arm'+side]||this.disabled['arm'+side])
+    return this.hangArm(side,sh,TMP3.set(fwd.z,0,-fwd.x),P);
+  const D=this.dims;
+  const ha=sh.clone().addScaledVector(fwd,.32); ha.y=sh.y-.14;
+  const el=V3();
+  solveIK(sh,ha,D.upperArm,D.foreArm,TMP4.set(0,-.9,0).addScaledVector(fwd,.15),el);
+  TMP4.subVectors(el,sh).normalize(); el.copy(sh).addScaledVector(TMP4,D.upperArm);
+  (side==='R'?this._K.elR:this._K.elL).copy(el);
+  (side==='R'?this._K.haR:this._K.haL).copy(ha);
+  const ua=side==='R'?P.upperArmR:P.upperArmL, fa=side==='R'?P.forearmR:P.forearmL;
+  const eb=side==='R'?P.elbowR:P.elbowL; if(eb)eb.position.copy(el);
+  aimLimb(ua,sh,el);
+  this.setBone(side==='R'?'uaR':'uaL',sh,el);
+  aimLimb(fa,el,ha);
+  (side==='R'?P.handR:P.handL).position.copy(ha);
+};
 Fighter.prototype.hangArm=function(side,sh,right,P){
   const D=this.dims;
   const dir=side==='R'?1:-1;
@@ -3322,6 +3401,8 @@ addEventListener('keydown',e=>{ input.keys[e.code]=true;
       log('balance assist tightened',false); }
   }
   if(e.code==='ShiftLeft'||e.code==='ShiftRight')input.shift=true;
+  if(e.code==='KeyG'&&game.state==='fight'&&typeof enemy!=='undefined'&&
+     enemy&&enemy.begging&&!enemy.dead)spareDuel();
   if(e.code==='KeyR'&&game.state!=='menu')restart(); });
 addEventListener('keyup',e=>{ input.keys[e.code]=false;
   if(e.code==='ShiftLeft'||e.code==='ShiftRight')input.shift=false; });
@@ -3398,6 +3479,8 @@ class AI{
   update(dt,foe){
     const f=this.f; if(!f.alive)return;
     if(game.state!=='fight'){ f.telegraph=false; return; }
+    /* a begging man does not maneuver, guard or strike — he waits */
+    if(f.begging){ f.telegraph=false; f.guarding=false; this.plan=null; return; }
     const dist=f.pos.distanceTo(foe.pos);
     const fwd=TMP1.set(Math.sin(f.yaw||0),0,Math.cos(f.yaw||0)).clone();
     const right=V3(fwd.z,0,-fwd.x);
@@ -3560,6 +3643,7 @@ const HIT_ORDER=['neck','head','chest','abdomen','forearmR','forearmL',
   'upperArmR','upperArmL','thighR','thighL','shinR','shinL'];
 function bladeVsBody(att,def,log){
   if(!att.bladeA||!def.alive)return;
+  if(att.stuck)return;                           // a lodged blade cuts nothing new
   if(att.bladeSpeed*att.swordControl<2.2)return; // resting contact does nothing
   const steps=att.hadPrev?3:1;             // swept test defeats tunneling at 14 m/s
   for(const key of HIT_ORDER){
@@ -3585,8 +3669,25 @@ function bladeVsBody(att,def,log){
       const align=AW.blunt?Math.min(att.alignment,.07):att.alignment;
       const dir=TMP1.copy(att.tipVel).normalize();
       def.lastHitDir=dir.clone();
+      const sevBefore=(def.severed.head?1:0)+(def.severed.armR?1:0)+(def.severed.armL?1:0);
       const res=def.applyCut(key,energy,align,att.thrust,hitTmpB.clone(),dir.clone(),log);
       if(res)def.addHitMark(key,hitTmpB.clone(),dir,res.severity||'minor',AW.blunt);
+      const severedNow=((def.severed.head?1:0)+(def.severed.armR?1:0)+(def.severed.armL?1:0))>sevBefore;
+      /* THE BLADE BITES: a committed cut or thrust that does not pass
+         CLEAN THROUGH lodges in the body and must be wrenched free.
+         Severing strokes and glancing blows pass; the in-between sticks. */
+      if(res&&!AW.blunt&&!severedNow&&def.alive&&spd>5.5&&game.state==='fight'){
+        const cc=def.capsules[key];
+        TMP2.subVectors(cc.b,cc.a);
+        const tt=TMP2.lengthSq()>1e-8
+          ?clamp(hitTmpB.clone().sub(cc.a).dot(TMP2)/TMP2.lengthSq(),0,1):.5;
+        att.stuck={def,part:key,tt,t:0,retract:0,
+          need:clamp(energy/(att.thrust?260:340),.35,1.1)};
+        Sound.scrape&&Sound.scrape();
+        if(att.isPlayer)log('the blade BITES '+(att.thrust?'deep':'into the '+
+          ((ANATOMY[key]&&ANATOMY[key].label)||key))+' — held fast. pull it free!',false);
+        break;
+      }
       if(AW.blunt){ /* the fist SHOVES: bodyweight through the target */
         def.physImpulse&&def.physImpulse(key,dir,Math.min(energy*1.1,400));
         def.stun=Math.max(def.stun,Math.min(energy/620,.75));
@@ -3607,6 +3708,7 @@ function bladeVsBody(att,def,log){
 
 function bladeVsBlade(a,b){
   if(!a.bladeA||!b.bladeA)return;
+  if(a.stuck||b.stuck)return;      // steel in flesh cannot clash
   /* swept: check current-vs-current plus each blade's previous position,
      so steel meeting steel at full speed can't tunnel through a frame */
   let d=segSegClosest(a.bladeA,a.bladeB,b.bladeA,b.bladeB,hitTmpA,hitTmpB);
@@ -5261,6 +5363,30 @@ function restart(){
   }
   setup(); game.state='fight'; game.timeScale=1; game.duelTime=0;
 }
+/* mercy granted: the duel ends without a death. The road goes on. */
+function spareDuel(){
+  game.state='over';
+  const v=document.getElementById('verdict');
+  const K=document.getElementById('verdict-kanji');
+  if(game.stage+1>=DUELISTS.length)DUELISTS.push(genDuelist(game.stage+1));
+  K.textContent='恕'; K.className='kanji';
+  document.getElementById('verdict-sub').textContent=
+    'MERCY — HE WILL CARRY THE DEBT · NEXT: '
+    +DUELISTS[game.stage+1].name+', '+DUELISTS[game.stage+1].epithet;
+  document.getElementById('cause').textContent=
+    enemy.name+' — spared, kneeling in the snow. Duel lasted '
+    +game.duelTime.toFixed(1)+'s. Wounds dealt: '+enemy.wounds.length
+    +' · taken: '+player.wounds.length+'.';
+  game.advance=true;
+  game.legacy={
+    legR:player.legDamage.R*.6, legL:player.legDamage.L*.6,
+    blood:Math.max(3600,5000-(5000-player.blood)*.4),
+    kills:(game.legacy?game.legacy.kills:0),          // mercy is not a kill
+    woundsCarried:(game.legacy?game.legacy.woundsCarried:0)+player.wounds.length};
+  log('you lower your blade. he will not forget.',false);
+  setTimeout(()=>v.classList.remove('hidden'),900);
+  try{ document.exitPointerLock&&document.exitPointerLock(); }catch(e){}
+}
 function endDuel(){
   game.state='over';
   Sound.killMoment();
@@ -5310,6 +5436,19 @@ document.getElementById('btn-begin').addEventListener('click',()=>{
   restart();
 });
 document.getElementById('btn-again').addEventListener('click',restart);
+/* back to the select screen: a clean slate — new fighter, new weapon */
+function toMenu(){
+  game.state='menu'; killCam=null;
+  game.advance=false; game.legacy=null; game.stage=0;
+  game.timeScale=1; game.bind=null; game._bindN=0;
+  document.body.classList.remove('cine');
+  document.getElementById('verdict').classList.add('hidden');
+  document.getElementById('menu').classList.remove('hidden');
+  try{ document.exitPointerLock&&document.exitPointerLock(); }catch(e){}
+  placeIce(); setup();
+}
+{ const bm=document.getElementById('btn-menu');
+  if(bm)bm.addEventListener('click',toMenu); }
 
 /* ==================== TOUCH CONTROLS ====================
    Left thumb: footwork joystick. Right half: the SWORD — your finger
