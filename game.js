@@ -1351,6 +1351,9 @@ class Fighter{
       parts.pelvis.add(hip,obi,knot,skirtF,skirtB,saya);
       if(this.build.tracksuit){ obi.visible=knot.visible=saya.visible=false;
         skirtF.visible=skirtB.visible=false; }
+      if(this.build.trunks){ /* boxing trunks: the skirt IS the shorts,
+        the obi the waistband — no steel on a boxer's hip */
+        saya.visible=false; knot.visible=false; }
       /* wide builds: the band and obi must ring the actual body, not
          drown inside it */
       const hS=this.build.hip||1, wS=this.build.waist||1;
@@ -2096,6 +2099,14 @@ const BUILDS={
     tracksuit:true, cloth:false, preferWeapon:'bare',
     palette:{kimono:0xf2cf25,hakama:0xf2cf25,obi:0x141414,skin:0xd8b07f,
       hair:0x0e0b08,accent:0x141414,face:{}}},
+  tyson:{label:'鉄 IRON MIKE — the baddest',
+    /* the heavyweight in the snow: shorts only, as in the ring —
+       compact, massively muscled, bare fists, boxing boots */
+    sh:1.35, waist:1.15, hip:1.05, limb:1.45, hair:'crop', bare:true,
+    chest:1.55, legsSkin:true, legR:1.3, armR:1.55, armsSkin:true,
+    cloth:false, trunks:true, mass:1.7, preferWeapon:'bare',
+    palette:{kimono:0x6b4630,hakama:0x161616,obi:0xe8e6e0,skin:0x6b4630,
+      hair:0x141210,tabi:0x18181a,accent:0xe8e6e0,face:{stubble:true}}},
   okina:{label:'翁 JUBEI — the old master',
     sh:.92, waist:.88, hip:.94, limb:.86, hair:'elder', bare:false, stoop:.085,
     palette:{kimono:0x4a443a,hakama:0x26221c,obi:0x8a8272,skin:0xc4a183,
@@ -2170,6 +2181,7 @@ const PICKER={
     {label:BUILDS.ryu.label,build:'ryu'},
     {label:BUILDS.gladiator.label,build:'gladiator'},
     {label:BUILDS.sumo.label,build:'sumo'},
+    {label:BUILDS.tyson.label,build:'tyson'},
     /* the REAL meshes in the roster: loaded rigs riding the sim, with
        full severance, decals, and the head-taking ritual */
     {label:'⚔ PELEGRINI — knight',src:'models/knight.fbx'},
