@@ -1029,6 +1029,9 @@ function buildSkinnedBody(kimonoMat,hakamaMat,B,skinMat){
           const lobe=Math.exp(-Math.pow((Math.abs(cx)-.45)/.34,2));
           bz=R.bust*Math.pow(Math.max(sz,0),1.25)*(.3+.7*lobe);
         }
+        /* belly: one great central swell — the sumo's silhouette */
+        if(R.belly)bz+=R.belly*Math.pow(Math.max(sz,0),1.15)
+          *(.45+.55*Math.exp(-Math.pow(cx/.62,2)));
         pos.push(R.c[0]+cx*R.r, R.c[1], R.c[2]+sz*R.r*(R.sz||1)+bz);
         const nx=cx, nz=sz*(R.sz||1), nh=Math.hypot(nx,nz)||1;
         nrm.push(nx/nh*inv, -slope*inv, nz/nh*inv);
@@ -1076,9 +1079,10 @@ function buildSkinnedBody(kimonoMat,hakamaMat,B,skinMat){
       else if(y<1.18)skin=[S,1,Ch,0];
       else skin=blend(y,1.18,1.34,S,Ch);
       if(y>=1.34)skin=[Ch,1,S,0];
-      /* the bust rides the chest rings, apex ~1.28 */
+      /* the bust rides the chest rings, apex ~1.28; the belly lower */
       const bust=(B.bust||0)*Math.exp(-Math.pow((y-1.285)/.075,2));
-      return {c:[0,y,0],r,sz:szz,skin,bust};
+      const belly=(B.belly||0)*Math.exp(-Math.pow((y-1.0)/.17,2));
+      return {c:[0,y,0],r,sz:szz,skin,bust,belly};
     });
     tube(rings,0); }
   /* ---- upper arms with sleeve flare (kimono) ---- */
@@ -1090,11 +1094,11 @@ function buildSkinnedBody(kimonoMat,hakamaMat,B,skinMat){
       const t=i/12, y=lerp(top,bot,t);
       const deltoid=.021*minJerkBell(clamp(t/.5,0,1));  // shoulder muscle
       /* slimmer rigid flare: the CLOTH sleeve carries the silhouette */
-      const r=lerp(.056,.07,Math.pow(t,1.35))+deltoid;
+      const r=(lerp(.056,.07,Math.pow(t,1.35))+deltoid)*(B.armR||1);
       const skin=t<.18?blend(t,0,.3,Ch,UA):(t<.3?blend(t,0,.3,Ch,UA):[UA,1,Ch,0]);
       rings.push({c:[x,y,0],r,sz:1,skin});
     }
-    tube(rings,0);
+    tube(rings,B.armsSkin?2:0);        // sleeveless builds show muscle
   }
   /* ---- legs: one continuous hakama tube across the knee ---- */
   for(const side of [1,-1]){
@@ -1116,7 +1120,7 @@ function buildSkinnedBody(kimonoMat,hakamaMat,B,skinMat){
       if(y>.52)skin=[TH,1,SH,0];
       else if(y>.36)skin=blend(y,.52,.36,TH,SH);
       else skin=[SH,1,TH,0];
-      return {c:[x,y,0],r,sz:1,skin};
+      return {c:[x,y,0],r:r*(B.legR||1),sz:1,skin};
     });
     tube(rings,BARE?2:1);
   }
@@ -1332,6 +1336,40 @@ class Fighter{
       parts.pelvis.add(hip,obi,knot,skirtF,skirtB,saya);
       if(this.build.tracksuit){ obi.visible=knot.visible=saya.visible=false;
         skirtF.visible=skirtB.visible=false; }
+      /* wide builds: the band and obi must ring the actual body, not
+         drown inside it */
+      const hS=this.build.hip||1, wS=this.build.waist||1;
+      if(hS>1.05||wS>1.05){
+        hip.scale.set(hS*.95,1,hS*.88);
+        obi.scale.set(wS*.92,.84*wS*.92,1);
+        knot.position.z=-.145*hS*.88;
+      }
+      if(this.build.mawashi){ /* sumo: the belt IS the garment */
+        saya.visible=false; skirtF.visible=false; skirtB.visible=false;
+        obi.visible=false;              // the belly owns the waist, no ring
+        knot.scale.set(1.6,1.7,1.6);              // the great back knot
+        const sagM=stdMat(this.palette.accent,{roughness:.8});
+        for(let i=0;i<7;i++){                     // sagari cords, front arc
+          const a=(i-3)*.17;
+          const s=new THREE.Mesh(new THREE.CylinderGeometry(.007,.005,.22,6),sagM);
+          s.position.set(Math.sin(a)*.16*hS,-.28,Math.cos(a)*.15*hS*.88+.02);
+          s.castShadow=true; parts.pelvis.add(s);
+        }
+      }
+      if(this.build.maximus){ /* pteruges: the leather strap skirt */
+        saya.visible=false; skirtF.visible=false; skirtB.visible=false;
+        const strapM=stdMat(0x4a3826,{roughness:.9});
+        const studM=stdMat(0x9a8a6a,{roughness:.4,metalness:.7});
+        for(let i=0;i<12;i++){
+          const a=i/12*Math.PI*2;
+          const s=new THREE.Mesh(new THREE.BoxGeometry(.055,.24,.012),strapM);
+          s.position.set(Math.sin(a)*.165,-.21,Math.cos(a)*.155);
+          s.rotation.y=a; s.rotation.x=.06; s.castShadow=true;
+          const st=new THREE.Mesh(new THREE.SphereGeometry(.009,8,6),studM);
+          st.position.set(0,-.1,.008); s.add(st);
+          parts.pelvis.add(s);
+        }
+      }
       this.skirtF=skirtF; this.skirtB=skirtB;
     }
     /* torso: chest broad at the shoulders, abdomen beneath */
@@ -1413,6 +1451,11 @@ class Fighter{
         hairM.side=THREE.DoubleSide;
         hairC.scale.set(.99,1.14,1.04); hairC.rotation.x=-.32;
         hairC.position.y=.012;
+      } else if(HB==='crop'){
+        /* the legionary crop: close, matte, no ornament */
+        mage.visible=false;
+        hairC.scale.set(.96,.78,.98); hairC.rotation.x=-.28;
+        hairC.position.y=.014;
       } else if(HB==='helmet'){
         hairC.visible=false; mage.visible=false;
         const helm=new THREE.Mesh(
@@ -1550,8 +1593,9 @@ class Fighter{
     parts.thighL=limbMesh(D.thigh,.1,.14,hakama);
     parts.shinR=limbMesh(D.shin,.135,.055,hakama);
     parts.shinL=limbMesh(D.shin,.135,.055,hakama);
-    /* tabi feet */
-    const tabiM=stdMat(0xd9d5cb,{roughness:.85});
+    /* tabi feet — or bare soles, or sandal leather, by build */
+    const tabiM=this.build.barefoot?stdMat(this.palette.skin,{roughness:.72})
+      :stdMat(this.palette.tabi||0xd9d5cb,{roughness:.85});
     const strawM=stdMat(0x8a7448,{roughness:.95});
     const buildFootMesh=()=>{
       const g=new THREE.Group();
@@ -1568,6 +1612,7 @@ class Fighter{
       /* the cuff: rises to tuck under the hakama — no gap, ever */
       const cuff=new THREE.Mesh(new THREE.CylinderGeometry(.052,.058,.13,14),tabiM);
       cuff.position.set(0,.09,-.02);
+      if(this.build.barefoot)sole.visible=false;   // a rikishi owns the clay
       g.add(instep,heel,toe,sole,cuff);
       g.traverse(o=>{ if(o.isMesh)o.castShadow=true; });
       return g;
@@ -1604,6 +1649,7 @@ class Fighter{
     for(const g of [parts.head,parts.forearmR,parts.forearmL,
         parts.handR,parts.handL,parts.footR,parts.footL,parts.pelvis])
       g.traverse(o=>{ if(o.isMesh&&o.visible&&!o.userData.outline)addOutline(o,.006); });
+    if(this.build.maximus)this.buildMaximus();   // after hideIn: armor stays
 
     /* sword trail ribbon */
     this.trailN=16; this.trailSamples=[];
@@ -1986,10 +2032,14 @@ const BUILDS={
     bust:.088, skirt:true, legsSkin:true,
     palette:{kimono:0xf2c4d2,hakama:0x33262f,skirt:0x8a4a62,obi:0x9c2f4a,
       skin:0xdbb394,accent:0xfdf4f0,face:{feminine:true}}},
-  gladiator:{label:'Ω BRUTUS — gladiator',
-    sh:1.16, waist:1.06, hip:1.02, limb:1.18, hair:'helmet', bare:true,
-    palette:{kimono:0x8a6a48,hakama:0x5a4028,obi:0x3a2a18,skin:0xc09068,
-      accent:0xb89858,face:{stubble:true}}},
+  gladiator:{label:'Ω MAXIMUS — gladiator',
+    /* the Spaniard: leather cuirass, steel pauldron on the sword arm,
+       pteruges at the hips, bare muscled legs, cropped hair, stubble */
+    sh:1.18, waist:1.02, hip:.98, limb:1.2, hair:'crop', bare:false,
+    legsSkin:true, legR:1.1, armsSkin:true, maximus:true, cloth:false,
+    preferWeapon:'broadsword',
+    palette:{kimono:0x6b4f32,hakama:0x4a3826,obi:0x2e2216,skin:0xc9996a,
+      hair:0x3a2c1e,tabi:0x5a452e,accent:0x8d7248,face:{stubble:true}}},
   yoroi:{label:'鎧 KURODA — armored general',
     sh:1.08, waist:1.05, hip:1.03, limb:1.06, hair:'kabuto', bare:false,
     armor:true, mass:1.3,
@@ -2005,9 +2055,13 @@ const BUILDS={
     palette:{kimono:0x4a443a,hakama:0x26221c,obi:0x8a8272,skin:0xc4a183,
       hair:0xd8d4cc,accent:0x6b675e,face:{aged:true,stubble:true}}},
   sumo:{label:'雷 RAIDEN — sumo',
-    sh:1.3, waist:2.05, hip:1.85, limb:1.52, hair:'topknot', bare:true, mass:1.9, cloth:false,
-    palette:{kimono:0xd8a880,hakama:0xd8a880,obi:0x1a2a4a,skin:0xd8a880,
-      accent:0x1a2a4a,face:{stubble:true}}}};
+    /* a rikishi in the ring: mountainous, bare but for the mawashi,
+       barefoot, chonmage — the belt and its sagari are the whole costume */
+    sh:1.32, waist:2.35, hip:2.05, limb:1.6, hair:'topknot', bare:true,
+    mass:2.2, cloth:false, belly:.15, legsSkin:true, legR:1.5, armR:1.45,
+    armsSkin:true, mawashi:true, barefoot:true, preferWeapon:'bare',
+    palette:{kimono:0xd8a880,hakama:0x22315c,obi:0x22315c,skin:0xd8a880,
+      accent:0xe8e2d0,face:{stubble:true}}}};
 /* the honest lines of the sword, in the chest frame [right, up, fwd]:
    vertical kiri-oroshi, the two kesa diagonals, two horizontal do cuts,
    two rising kiri-age. The thrust line is computed live at the target. */
@@ -2398,6 +2452,11 @@ const MODELPIPE=(()=>{
   loadClip('ax_back','models/anims/ax/ax_back.fbx');
   loadClip('ax_left','models/anims/ax/ax_left.fbx');
   loadClip('ax_right','models/anims/ax/ax_right.fbx');
+  /* victory dances: for the victor who barely bled */
+  loadClip('dance1','models/anims/dance/dance1.fbx');
+  loadClip('dance2','models/anims/dance/dance2.fbx');
+  loadClip('dance3','models/anims/dance/dance3.fbx');
+  loadClip('dance4','models/anims/dance/dance4.fbx');
   function playClip(f,name,fade){
     const M=f.model; if(!M||!clips[name])return false;
     try{
@@ -3059,11 +3118,18 @@ Fighter.prototype.setBoneYaw=function(name,from,to,yaw){
   _pq2b.setFromAxisAngle(UPY,yaw);
   b.quaternion.multiply(_pq2b);
 };
+/* bind-pose joint spans: thigh .88->.44, shin .44->.045, upper arm
+   1.335->1.045 — the skinned tube must STRETCH to the live span or a
+   lunging shin ends short of its boot */
+const _boneRest={thR:.44,thL:.44,shR:.395,shL:.395,uaR:.29,uaL:.29};
 Fighter.prototype.setBone=function(name,from,to){
   const b=this.skin.bones[this.skin.BONES[name]];
   b.position.copy(from);
-  _bT.subVectors(to,from).normalize();
+  _bT.subVectors(to,from);
+  const d=_bT.length()||1e-6; _bT.divideScalar(d);
   b.quaternion.setFromUnitVectors(UPV,_bT);
+  const rest=_boneRest[name];
+  if(rest)b.scale.y=clamp(d/rest,.8,1.4);
 };
 Fighter.prototype.setPelvisBone=function(p,yaw){
   const b=this.skin.bones[this.skin.BONES.pelvis];
@@ -3423,6 +3489,27 @@ Fighter.prototype.updateAlive=function(dt,opponent){
         TMP1.lerpVectors(cc.a,cc.b,S.tt);
         this.tip.lerp(TMP1,clamp(dt*28,0,1));         // pinned at the wound
         this.tipVel.multiplyScalar(Math.exp(-13*dt));
+        /* the wound WEARS the steel: a dark blood collar clamps the
+           blade at the entry and the cut weeps — stuck is unmistakable,
+           a pass-through flash is not */
+        if(!this._stuckFx){
+          const g=new THREE.Group();
+          const col=new THREE.Mesh(new THREE.CylinderGeometry(.024,.032,.1,10),
+            stdMat(0x4a0a10,{roughness:.5}));
+          const splash=new THREE.Mesh(new THREE.SphereGeometry(.055,12,9),
+            stdMat(0x5a0d14,{roughness:.45}));
+          splash.scale.set(1,.5,1); splash.position.y=-.04;
+          g.add(col,splash); scene.add(g); this._stuckFx=g;
+        }
+        if(this.bladeB){
+          TMP2.subVectors(this.tip,this.bladeB);
+          const bl=TMP2.length()||1; TMP2.divideScalar(bl);
+          this._stuckFx.visible=true;
+          this._stuckFx.position.copy(TMP1).addScaledVector(TMP2,-.07);
+          this._stuckFx.quaternion.setFromUnitVectors(UPV,TMP2);
+          if(Math.random()<dt*16)
+            emitBlood(this._stuckFx.position,V3(rand(-.2,.2),-.6,rand(-.2,.2)),1.3,2);
+        }
         if(this.isPlayer){
           TMP2.subVectors(this.tipTarget,TMP1);
           if(TMP2.length()>.4)S.retract+=dt*TMP2.length()*1.7;
@@ -3438,6 +3525,7 @@ Fighter.prototype.updateAlive=function(dt,opponent){
         }
       }
     }
+    if(!this.stuck&&this._stuckFx)this._stuckFx.visible=false;
     const reachMax=D.upperArm+D.foreArm+.87;
     TMP1.subVectors(this.tip,shR);
     if(TMP1.length()>reachMax){ this.tip.copy(shR).addScaledVector(TMP1.normalize(),reachMax);
@@ -5269,6 +5357,28 @@ function segPush(pt,a,b,rad){
    sculpted reference: lamellar DO cuirass, SODE shoulder guards, KUSAZURI
    tassets, KOTE forearm splints, SUNEATE shin plates. Rigid plates on the
    articulated body; the cloth flows beneath them. */
+Fighter.prototype.buildMaximus=function(){
+  /* the arena kit: overlapping steel shells on the sword shoulder, a
+     segmented leather manica down that forearm, a strap at the other
+     wrist. The pteruges hang from the pelvis (built with the hips). */
+  const P=this.parts;
+  const steel=stdMat(0x8a8d92,{roughness:.38,metalness:.75});
+  const leather=stdMat(0x4a3826,{roughness:.88});
+  for(let i=0;i<3;i++){
+    const sh=new THREE.Mesh(new THREE.SphereGeometry(
+      .088-i*.012,18,12,0,Math.PI*2,0,1.25),steel);
+    sh.position.y=.01-i*.052; sh.scale.set(1.06,.9,1.06);
+    sh.castShadow=true; P.upperArmR.add(sh);
+  }
+  for(let i=0;i<4;i++){
+    const band=new THREE.Mesh(new THREE.CylinderGeometry(
+      .052-i*.004,.056-i*.004,.055,12),leather);
+    band.position.y=-.04-i*.058; band.castShadow=true;
+    P.forearmR.add(band);
+  }
+  const cuff=new THREE.Mesh(new THREE.CylinderGeometry(.05,.054,.07,12),leather);
+  cuff.position.y=-.2; cuff.castShadow=true; P.forearmL.add(cuff);
+};
 Fighter.prototype.buildArmor=function(){
   const P=this.parts;
   const lacq=stdMat(0x1e2027,{roughness:.42,metalness:.55});
@@ -5728,6 +5838,7 @@ function disposeFighter(f){
   if(f.sleeves)for(const P of f.sleeves)scene.remove(P.mesh);
   if(f.hairCloth)scene.remove(f.hairCloth.mesh);
   if(f._gsl&&f._gsl.rig)scene.remove(f._gsl.rig);
+  if(f._stuckFx)scene.remove(f._stuckFx);
   scene.remove(f.root); scene.remove(f.katana); scene.remove(f.trailMesh);
   if(f.skin)scene.remove(f.skin.mesh);
   if(f.glint)scene.remove(f.glint);
@@ -6114,6 +6225,22 @@ function updateKillRitual(dt){
       const kata=['ff_combo','ff_a','ff_b'].filter(n=>MODELPIPE.clips[n]);
       MODELPIPE.playPuppet(vt,
         kata[Math.floor(rand(0,kata.length))%kata.length]);
+    }
+    if(kc.clipStarted&&vt._pupPlay)return;   // updateAlive renders the puppet
+  }
+  /* the FLAWLESS victor dances on it — hubris, earned. Claims the ritual
+     slot before any weapon's own celebration. */
+  if(!vt.model&&MODELPIPE.clips&&MODELPIPE.clips.dance1
+     &&vt.blood>BLOOD_TOTAL*.88&&(vt.pain||0)<35
+     &&kc.beheadDone&&kc.released&&kc.ritual>kc.thrownAt+1.6){
+    if(!kc.clipStarted){ kc.clipStarted=true;
+      const dn=['dance1','dance2','dance3','dance4']
+        .filter(n=>MODELPIPE.clips[n]);
+      const pick=dn[Math.floor(rand(0,dn.length))%dn.length];
+      if(MODELPIPE.playPuppet(vt,pick)&&vt._pupPlay)
+        vt._pupPlay.until=performance.now()
+          +Math.min(MODELPIPE.clips[pick].duration,12)*1000;
+      log('untouched — the victor DANCES',false);
     }
     if(kc.clipStarted&&vt._pupPlay)return;   // updateAlive renders the puppet
   }

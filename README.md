@@ -171,6 +171,21 @@ Kill all three: **三人斬り**.
   rhythm. Bare fists now fold hard at the knuckle (per-pose curl
   multipliers) instead of half-wrapping an invisible handle, and every
   build's neck was shortened to human proportion.
+- **The rebuilt heavyweights** — RAIDEN is now a true rikishi:
+  mountainous belly swell, bare but for a navy mawashi with sagari
+  cords and the great back knot, barefoot. The gladiator is MAXIMUS:
+  leather cuirass, steel pauldron shells on the sword shoulder, a
+  segmented manica down that forearm, studded pteruges at the hips,
+  bare muscled legs, cropped hair. Both prefer their true weapons as
+  opponents (fists / broadsword).
+- **The victory dance** — a victor who barely bled (over 88% blood,
+  little pain) claims the ritual slot after the head is thrown and
+  DANCES over the fallen: one of four mocap dances, capped at 12s.
+- **Stuck steel reads as stuck** — an embedded blade now wears a dark
+  blood collar and splash at the entry wound, weeping continuously,
+  so a lodged blade can't be mistaken for a pass-through flash. And
+  the skinned-body bones now stretch to their live joint spans, so a
+  lunging shin always reaches its boot (the onna's detached-foot bug).
 
 ## v5 — the duel becomes a life
 
