@@ -510,6 +510,11 @@ const groundMark=(()=>{
     flush(){ if(dirty){ tex.needsUpdate=true; dirty=false; } },
     setTone(t){ tones=t; },
     reset(){ base(); tex.needsUpdate=true; },
+    age(){ /* a thin overnight snowfall: the blood stays, but as an old
+              brown shadow under the new powder — the ring remembers */
+      ctx.globalAlpha=.68; base(); ctx.globalAlpha=1;
+      tex.needsUpdate=true;
+    },
   };
 })();
 const groundNrm=mkNormalTex(512,(x,w,h)=>{
@@ -2057,8 +2062,8 @@ const BUILDS={
   sumo:{label:'雷 RAIDEN — sumo',
     /* a rikishi in the ring: mountainous, bare but for the mawashi,
        barefoot, chonmage — the belt and its sagari are the whole costume */
-    sh:1.32, waist:2.35, hip:2.05, limb:1.6, hair:'topknot', bare:true,
-    mass:2.2, cloth:false, belly:.15, legsSkin:true, legR:1.5, armR:1.45,
+    sh:1.5, waist:3.1, hip:2.7, limb:2.0, hair:'topknot', bare:true,
+    mass:3, cloth:false, belly:.3, legsSkin:true, legR:1.9, armR:1.8,
     armsSkin:true, mawashi:true, barefoot:true, preferWeapon:'bare',
     palette:{kimono:0xd8a880,hakama:0x22315c,obi:0x22315c,skin:0xd8a880,
       accent:0xe8e2d0,face:{stubble:true}}}};
@@ -2651,9 +2656,9 @@ const GSLOCO=(()=>{
        crouch) stay in the clip — only the living OSCILLATION passes */
     const out=f._gslOut||(f._gslOut={bob:0,sway:0,push:0,hipYaw:0,chestYaw:0});
     L.avgY=lerp(L.avgY,_w.y,clamp(dt*.8,0,1));
-    out.bob=clamp(_w.y-L.avgY,-.065,.065);
-    out.sway=clamp(_w.x-L.avgX,-.065,.065);
-    out.push=clamp(_w.z-L.avgZ,-.065,.065);
+    out.bob=clamp(_w.y-L.avgY,-.08,.08);
+    out.sway=clamp(_w.x-L.avgX,-.08,.08);
+    out.push=clamp(_w.z-L.avgZ,-.08,.08);
     if(B.thR&&B.thL){
       B.thR.getWorldPosition(_w2); B.thL.getWorldPosition(_w3);
       const hy=Math.atan2(-(_w2.z-_w3.z),(_w2.x-_w3.x)||1e-6);
@@ -2963,6 +2968,11 @@ Fighter.prototype.updateDeadPhys=function(dt){
         for(const k in _pj2)this._lastPup[k]=_pj2[k].clone(); }
       for(const k in _pj2)this._lastPup[k].copy(_pj2[k]);
       this.renderJoints(_pj2);
+      /* the fabric falls WITH the performance — a frozen hakama hanging
+         in the air over a collapsing body was the giveaway */
+      this.tickCloth(dt,_pj2);
+      this.tickSleeves(dt,_pj2);
+      this.tickHair(dt);
       this.pos.set(_pj2.pelvis.x,0,_pj2.pelvis.z);
       return;
     }
@@ -3079,6 +3089,9 @@ Fighter.prototype.soften=function(k,v,rate,dt){
        then reclaims the follow-through and the quiet moments */
     if(k==='elR'||k==='elL'||k==='shR'||k==='shL')
       wgt*=1-clamp(this.bladeSpeed/9,0,.8);
+    /* knees track the mocap-informed IK, not the solver: XPBD leg noise
+       reads as jiggle. Impacts still break through via the stagger term. */
+    if(k==='knR'||k==='knL')wgt*=.4;
     /* under a fresh impact or a stagger the ragdoll speaks louder —
        real momentum, not scripted offsets */
     wgt*=1+clamp(this.stagger||0,0,1)*.6+clamp(this.flinch.lengthSq()*22,0,.5);
@@ -3219,7 +3232,13 @@ Fighter.prototype.updateAlive=function(dt,opponent){
 
   /* ritual moments: a mocap puppet may own this body */
   if(this._pupPlay&&(game.state==='over'||game.introT>0)){
-    if(MODELPIPE.tickPuppet(this,dt,_pj2)){ this.renderJoints(_pj2); return; }
+    if(MODELPIPE.tickPuppet(this,dt,_pj2)){
+      this.renderJoints(_pj2);
+      this.tickCloth(dt,_pj2);       // the clothes dance too
+      this.tickSleeves(dt,_pj2);
+      this.tickHair(dt);
+      return;
+    }
     this._pupPlay=null;
   }
 
@@ -3339,16 +3358,18 @@ Fighter.prototype.updateAlive=function(dt,opponent){
   this._armPh=lerp(this._armPh||0,
     ft.R.swing>0?1:(ft.L.swing>0?-1:(this._armPh||0)*.92),clamp(dt*7,0,1));
   this._ctr=lerp(this._ctr||0,strideCtr*.16*clamp(speed2d,0,1.4),clamp(dt*9,0,1));
-  /* mocap life: the greatsword clips lend the trunk their true timing */
+  /* mocap life: the loco clips lend the trunk their true timing — and
+     the faster the body moves, the more the clip owns the rhythm */
   const ML=(this.alive&&!(this.kneel>0)&&!this.begging&&typeof GSLOCO!=='undefined')
     ?GSLOCO.tick(this,dt,speed2d):null;
-  const pelvisY=D.pelvisY-hurtSag-stepDip*.024-(stepping?.008:0)
-    +Math.sin(this.breath*1.6)*.007+(this.previewBob||0)+(ML?ML.bob*1.05:0);
+  const mk=ML?1+clamp(speed2d/1.4,0,1)*.45:0;
+  const pelvisY=D.pelvisY-hurtSag-stepDip*(ML?.012:.024)-(stepping?.008:0)
+    +Math.sin(this.breath*1.6)*.007+(this.previewBob||0)+(ML?ML.bob*1.05*mk:0);
   const pelvis=V3(lerp(feetMid.x,this.pos.x,.55),pelvisY,lerp(feetMid.z,this.pos.z,.55));
-  const pelvisYawA=this.bodyYaw+this.twist*.3-this._ctr*.7+(ML?ML.hipYaw*.62:0);
+  const pelvisYawA=this.bodyYaw+this.twist*.3-this._ctr*.7+(ML?ML.hipYaw*.62*mk:0);
   const fwdP=DIRY(pelvisYawA), rightP=V3(fwdP.z,0,-fwdP.x);
-  pelvis.addScaledVector(rightP,(this._sway||0)+this._wshift+(ML?ML.sway*.92:0));
-  if(ML)pelvis.addScaledVector(fwdP,ML.push*.72);
+  pelvis.addScaledVector(rightP,(this._sway||0)+this._wshift+(ML?ML.sway*.92*mk:0));
+  if(ML)pelvis.addScaledVector(fwdP,ML.push*.72*mk);
 
   /* flinch spring: hits ripple through the trunk */
   this.flinchV.addScaledVector(this.flinch,-140*dt).addScaledVector(this.flinchV,-12*dt);
@@ -3358,7 +3379,7 @@ Fighter.prototype.updateAlive=function(dt,opponent){
   const stoop=this.build.stoop||0;    // age rounds the back
   const lean=clamp(.04+stoop+this.tipVel.length()*.007+speed2d*.016,0,.12+stoop);
   const chestYawA=this.bodyYaw+this.twist*.8+this._ctr
-    +(ML?ML.chestYaw*.72:0);
+    +(ML?ML.chestYaw*.72*mk:0);
   const fwdC=DIRY(chestYawA), rightC=V3(fwdC.z,0,-fwdC.x);
   const chestB=pelvis.clone().addScaledVector(fwdP,.03+lean*.3)
     .addScaledVector(this.flinch,.6).addScaledVector(this.leanV,.45);
@@ -3418,11 +3439,14 @@ Fighter.prototype.updateAlive=function(dt,opponent){
 
   /* ---- sword: spring-driven tip, two-handed grip ---- */
   const brRise=Math.sin(this.breath*1.6)*.0045;   // the shoulders breathe
-  const shR=chestT.clone().addScaledVector(rightC,.185).addScaledVector(fwdC,.01);
+  /* massive builds carry their shoulders OUTSIDE the barrel of the
+     torso — a fixed .185 would bury the sumo's arms in his own chest */
+  const shW=.185*Math.max(1,(this.build.sh||1)*.9);
+  const shR=chestT.clone().addScaledVector(rightC,shW).addScaledVector(fwdC,.01);
   shR.y+=brRise;
   this.soften('shR',shR,30,dt); this._K.shR.copy(shR);
   shR.y=chestT.y-.045;
-  const shL=chestT.clone().addScaledVector(rightC,-.185).addScaledVector(fwdC,.01);
+  const shL=chestT.clone().addScaledVector(rightC,-shW).addScaledVector(fwdC,.01);
   this.soften('shL',shL,30,dt); this._K.shL.copy(shL);
   shL.y=chestT.y-.045+brRise;
   const ctrl=this.swordControl;
@@ -3684,7 +3708,7 @@ Fighter.prototype.updateAlive=function(dt,opponent){
     } }
   solveIK(hipR,ankR,D.thigh,D.shin,kneeHint,knR);
   solveIK(hipL,ankL,D.thigh,D.shin,kneeHint,knL);
-  this.soften('knR',knR,42,dt); this.soften('knL',knL,42,dt);
+  this.soften('knR',knR,85,dt); this.soften('knL',knL,85,dt);
   TMP4.subVectors(knR,hipR).normalize(); knR.copy(hipR).addScaledVector(TMP4,D.thigh);
   TMP4.subVectors(knL,hipL).normalize(); knL.copy(hipL).addScaledVector(TMP4,D.thigh);
   this._K.hipR.copy(hipR); this._K.hipL.copy(hipL);
@@ -5792,7 +5816,7 @@ function applyAmbience(stage){
     hemiL.color.copy(SRGB(A.hemi));
     groundMat.color.copy(SRGB(A.ground));
     ringGroundMat.color.copy(SRGB(A.ground));
-    if(groundMark&&groundMark.setTone){ groundMark.setTone(A.snow); groundMark.reset(); }
+    if(groundMark&&groundMark.setTone){ groundMark.setTone(A.snow); groundMark.age(); }
     for(const L of lanterns)L.light.color.copy(SRGB(A.lantern));
     if(AMB.skyTex&&AMB.skyTex.image){
       const c=AMB.skyTex.image, x=c.getContext('2d');
@@ -5808,12 +5832,32 @@ function setup(){
   if(player){ disposeFighter(player); disposeFighter(enemy); }
   for(const p of bloodStains)scene.remove(p.mesh); bloodStains.length=0;
   for(const m of allStains)scene.remove(m); allStains.length=0; stainCount=0;
-  if(groundMark)groundMark.reset();   // fresh snow fell overnight
+  /* thin snowfall between duels: yesterday's blood survives as an old
+     brown shadow. A brand-new run starts on unmarked snow. */
+  if(groundMark){ if(game.stage===0&&!game.legacy)groundMark.reset();
+    else groundMark.age(); }
   player=new Fighter(BUILDS[SELECT.P].label.split(' — ')[0],
     null,-1.9,1,true,SELECT.P);
   const D=DUELISTS[game.stage];
-  const eBuild=(SELECT.E==='musashi'&&D.build)?D.build:SELECT.E;
-  const eWpn=(SELECT.WE==='katana'&&D.weapon)?D.weapon:SELECT.WE;
+  let eBuild=(SELECT.E==='musashi'&&D.build)?D.build:SELECT.E;
+  /* the road never sends the same face twice: each duelist resolves to
+     a build the player hasn't faced; only once every build has fought
+     does the pool refill. Hand-picked opponents are always honored. */
+  if(SELECT.E==='musashi'){
+    if(!D._rBuild){
+      game.fought=game.fought||[];
+      let b=eBuild;
+      if(game.fought.includes(b)){
+        let fresh=Object.keys(BUILDS).filter(k=>!game.fought.includes(k));
+        if(!fresh.length){ game.fought.length=0; fresh=Object.keys(BUILDS); }
+        b=fresh[Math.floor(Math.random()*fresh.length)];
+      }
+      game.fought.push(b); D._rBuild=b;
+    }
+    eBuild=D._rBuild;
+  }
+  const pw=BUILDS[eBuild]&&BUILDS[eBuild].preferWeapon;
+  const eWpn=(SELECT.WE==='katana')?(pw||D.weapon||'katana'):SELECT.WE;
   enemy=new Fighter(D.name,eBuild==='musashi'?D.palette:null,1.9,-1,false,eBuild,eWpn);
   enemy.speedMul=D.ai.speedMul;
   const lbl=document.getElementById('name-enemy');
