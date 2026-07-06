@@ -2172,7 +2172,8 @@ const PICKER={
     {label:BUILDS.sumo.label,build:'sumo'},
     /* the REAL meshes in the roster: loaded rigs riding the sim, with
        full severance, decals, and the head-taking ritual */
-    {label:'⚔ PELEGRINI — knight',src:'models/knight.fbx'}],
+    {label:'⚔ PELEGRINI — knight',src:'models/knight.fbx'},
+    {label:'月 ARISSA — moonblade',src:'models/arissa.fbx'}],
   cycle(slot,dir){
     this.idx[slot]=(this.idx[slot]+dir+this.roster.length)%this.roster.length;
     this.apply(slot);
@@ -2287,11 +2288,16 @@ const MODELPIPE=(()=>{
              under the moon — lift them to a dark steel that keeps shape */
           if(!c.map&&c.color){ const hsl={h:0,s:0,l:0}; c.color.getHSL(hsl);
             if(hsl.l<.06)c.color.setHSL(hsl.h,Math.min(hsl.s,.4),.16); }
-          /* faint self-light for DARK surfaces only: pale skin under the
-             moon needs no help, dark leather does */
-          if(c.emissive!==undefined&&c.color){ const hsl={h:0,s:0,l:0};
-            c.color.getHSL(hsl);
-            c.emissive.copy(c.color).multiplyScalar(hsl.l<.35?.045:0); }
+          /* faint self-light so dark costumes read under the moon. For
+             textured materials the emission follows the TEXTURE (the
+             base color is white and says nothing about darkness); for
+             flat colors, only dark ones get the lift */
+          if(c.emissive!==undefined){
+            if(c.map){ c.emissiveMap=c.map; c.emissive.setScalar(.07); }
+            else if(c.color){ const hsl={h:0,s:0,l:0};
+              c.color.getHSL(hsl);
+              c.emissive.copy(c.color).multiplyScalar(hsl.l<.35?.045:0); }
+          }
           c._base=c.color?c.color.clone():null; return c; };
         o.material=Array.isArray(o.material)?o.material.map(own):own(o.material);
       } } });
