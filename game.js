@@ -1018,7 +1018,13 @@ function buildSkinnedBody(kimonoMat,hakamaMat,B){
       const inv=1/Math.sqrt(1+slope*slope);
       for(let s=0;s<=SEG;s++){
         const a=s/SEG*Math.PI*2, cx=Math.cos(a), sz=Math.sin(a);
-        pos.push(R.c[0]+cx*R.r, R.c[1], R.c[2]+sz*R.r*(R.sz||1));
+        /* bust: a front-only two-lobe swell (R.bust metres at the apex) */
+        let bz=0;
+        if(R.bust){
+          const lobe=Math.exp(-Math.pow((Math.abs(cx)-.45)/.34,2));
+          bz=R.bust*Math.pow(Math.max(sz,0),1.25)*(.3+.7*lobe);
+        }
+        pos.push(R.c[0]+cx*R.r, R.c[1], R.c[2]+sz*R.r*(R.sz||1)+bz);
         const nx=cx, nz=sz*(R.sz||1), nh=Math.hypot(nx,nz)||1;
         nrm.push(nx/nh*inv, -slope*inv, nz/nh*inv);
         uvs.push(s/SEG,(R.c[1]-y0)/((y1-y0)||1));
@@ -1061,7 +1067,9 @@ function buildSkinnedBody(kimonoMat,hakamaMat,B){
       else if(y<1.20)skin=[S,1,Ch,0];
       else skin=blend(y,1.20,1.32,S,Ch);
       if(y>=1.32)skin=[Ch,1,S,0];
-      return {c:[0,y,0],r,sz:szz,skin};
+      /* the bust rides the chest rings, apex ~1.28 */
+      const bust=(B.bust||0)*Math.exp(-Math.pow((y-1.285)/.075,2));
+      return {c:[0,y,0],r,sz:szz,skin,bust};
     });
     tube(rings,0); }
   /* ---- upper arms with sleeve flare (kimono) ---- */
@@ -1369,6 +1377,12 @@ class Fighter{
         const tail=new THREE.Mesh(new THREE.CylinderGeometry(.017,.006,.34,8),hairM);
         tail.position.set(0,-.09,-.115); tail.rotation.x=.28;
         F.push(tie,tail);
+      } else if(HB==='long'){
+        /* a full crown; the length itself is verlet cloth (buildHair) */
+        mage.visible=false;
+        hairM.side=THREE.DoubleSide;
+        hairC.scale.set(.99,1.14,1.04); hairC.rotation.x=-.32;
+        hairC.position.y=.012;
       } else if(HB==='helmet'){
         hairC.visible=false; mage.visible=false;
         const helm=new THREE.Mesh(
@@ -1536,6 +1550,7 @@ class Fighter{
     this.buildSleeves(rimify(stdMat(this.palette.kimono,{roughness:.95,
       side:THREE.DoubleSide,map:kimonoTex||null}),.32,.42,.62,3,.2));
     if(this.build.armor)this.buildArmor();
+    if(this.build.hair==='long')this.buildHair(hairM);
     this.skinKimono=this.skin.kimono;
     const hideIn=(g,keep)=>g.traverse(o=>{
       if(o.isMesh&&!(keep&&keep(o)))o.visible=false; });
@@ -1927,8 +1942,9 @@ const BUILDS={
     palette:{kimono:0x2a4a78,hakama:0x18263e,obi:0xe8ddc0,skin:0xd0a684,
       accent:0xf2eee2,face:{}}},
   onna:{label:'鈴 SUZUME — onna-musha',
-    sh:.87, waist:.90, hip:1.05, limb:.9, hair:'pony', bare:false,
-    palette:{kimono:0x5e2440,hakama:0x241020,obi:0xd8c890,skin:0xdbb394,
+    sh:.87, waist:.90, hip:1.05, limb:.9, hair:'long', bare:false,
+    bust:.062, skirt:true,
+    palette:{kimono:0x5e2440,hakama:0x47203a,obi:0xd8c890,skin:0xdbb394,
       accent:0xf0e6da,face:{feminine:true}}},
   gladiator:{label:'Ω BRUTUS — gladiator',
     sh:1.16, waist:1.06, hip:1.02, limb:1.18, hair:'helmet', bare:true,
@@ -2620,6 +2636,7 @@ Fighter.prototype.updateDeadPhys=function(dt){
   this.renderJoints(_dj);
   this.tickCloth(dt,_dj);
   this.tickSleeves(dt,_dj);
+  this.tickHair(dt);
   /* pools follow the corpse */
   this.pos.set(_dj.pelvis.x,0,_dj.pelvis.z);
   if(this.model){
@@ -3174,6 +3191,7 @@ Fighter.prototype.updateAlive=function(dt,opponent){
   }
   this.tickCloth(dt,this._K);
   this.tickSleeves(dt,this._K);
+  this.tickHair(dt);
   this.tickFingers(dt);
   aimLimb(P.thighR,hipR,knR); aimLimb(P.shinR,knR,ankR);
   aimLimb(P.thighL,hipL,knL); aimLimb(P.shinL,knL,ankL);
@@ -4821,8 +4839,10 @@ Fighter.prototype.buildCloth=function(hakamaMat){
   this.cloth=[];
   /* ONE continuous wrap: a cloth cylinder pinned around the waist and
      seam-stitched closed — the hakama flows as a garment, not two flags */
-  const COLS=14, ROWS=7;
-  const P=mkClothPanel(COLS+1,ROWS,hakamaMat,.072,.108,.094);
+  /* skirt builds get length and flare: ankle-grazing, fuller at the hem */
+  const SK=!!this.build.skirt;
+  const COLS=14, ROWS=SK?8:7, W1=SK?.124:.108, RL=SK?.098:.094;
+  const P=mkClothPanel(COLS+1,ROWS,hakamaMat,.072,W1,RL);
   P.wrap=COLS;
   for(let r2=1;r2<ROWS;r2++)               // stitch the seam column shut
     P.cons.push([r2*(COLS+1),r2*(COLS+1)+COLS,0]);
@@ -4830,7 +4850,7 @@ Fighter.prototype.buildCloth=function(hakamaMat){
      stretched lobes when the legs spread mid-lunge */
   for(let r2=1;r2<ROWS;r2++)for(let c2=0;c2<COLS;c2++)
     P.cons.push([r2*(COLS+1)+c2,r2*(COLS+1)+((c2+2)%COLS),
-      lerp(.072,.108,r2/(ROWS-1))*1.94]);
+      lerp(.072,W1,r2/(ROWS-1))*1.94]);
   scene.add(P.mesh);
   for(const q of P.pts){ q.p.set(this.pos.x,.8,this.pos.z); q.pp.copy(q.p); }
   this.cloth.push(P);
@@ -4850,6 +4870,61 @@ Fighter.prototype.buildCloth=function(hakamaMat){
 };
 /* kimono sleeves: small verlet panels pinned along each upper arm —
    they swing with the cut and drape when the arms hang */
+/* LONG HAIR — verlet cloth pinned across the back of the skull. It flows
+   with every step and cut, drapes over a corpse, and flies with a
+   severed head (the pins ride parts.head wherever it goes). */
+Fighter.prototype.buildHair=function(mat){
+  const P=mkClothPanel(4,7,mat,.044,.054,.072);
+  P.hairPins=[];
+  for(let c=0;c<4;c++){
+    const a=Math.PI+(c/3-.5)*1.6;          // an arc across the back of the skull
+    P.hairPins.push(V3(Math.sin(a)*.084,.035,Math.cos(a)*.084));
+  }
+  scene.add(P.mesh);
+  for(const q of P.pts){ q.p.set(this.pos.x,1.45,this.pos.z); q.pp.copy(q.p); }
+  this.hairCloth=P;
+};
+Fighter.prototype.tickHair=function(dt){
+  const P=this.hairCloth; if(!P)return;
+  dt=Math.min(dt,.033);
+  const H=this.parts.head;
+  for(let c=0;c<P.cols;c++){
+    const q=P.pts[c];
+    q.p.copy(P.hairPins[c]).applyQuaternion(H.quaternion).add(H.position);
+    q.pp.copy(q.p);
+  }
+  for(let i=P.cols;i<P.pts.length;i++){
+    const q=P.pts[i];
+    TMP2.subVectors(q.p,q.pp).multiplyScalar(.9);
+    q.pp.copy(q.p); q.p.add(TMP2);
+    q.p.y-=8.5*dt*dt;
+    q.p.addScaledVector(this.vel,-dt*.15);
+    q.p.x+=Math.sin(performance.now()*.0011+i*1.7)*.0004;  // the wind in it
+  }
+  for(let it=0;it<3;it++){
+    for(const [a,b,rest] of P.cons){
+      const A=P.pts[a],B=P.pts[b];
+      TMP2.subVectors(B.p,A.p);
+      const d=TMP2.length(); if(d<1e-6)continue;
+      const diff=(d-rest)/d*.5;
+      if(!A.pin)A.p.addScaledVector(TMP2,diff*(B.pin?2:1));
+      if(!B.pin)B.p.addScaledVector(TMP2,-diff*(A.pin?2:1));
+    }
+    for(let i=P.cols;i<P.pts.length;i++){
+      const q=P.pts[i];
+      TMP2.subVectors(q.p,H.position);          // stays outside the skull
+      const d=TMP2.length();
+      if(d<.105&&d>1e-6)q.p.copy(H.position).addScaledVector(TMP2.divideScalar(d),.105);
+      if(this._K)segPush(q.p,this._K.neckT,this._K.chestB,.1);
+      if(q.p.y<.02)q.p.y=.02;
+    }
+  }
+  const pos=P.mesh.geometry.attributes.position;
+  for(let i=0;i<P.pts.length;i++)
+    pos.setXYZ(i,P.pts[i].p.x,P.pts[i].p.y,P.pts[i].p.z);
+  pos.needsUpdate=true;
+  P.mesh.geometry.computeVertexNormals();
+};
 Fighter.prototype.buildSleeves=function(mat){
   if(this.build.cloth===false||this.build.bare)return;
   this.sleeves=[];
@@ -5079,6 +5154,7 @@ function setup(){
 function disposeFighter(f){
   if(f.cloth)for(const P of f.cloth)scene.remove(P.mesh);
   if(f.sleeves)for(const P of f.sleeves)scene.remove(P.mesh);
+  if(f.hairCloth)scene.remove(f.hairCloth.mesh);
   scene.remove(f.root); scene.remove(f.katana); scene.remove(f.trailMesh);
   if(f.skin)scene.remove(f.skin.mesh);
   if(f.glint)scene.remove(f.glint);
