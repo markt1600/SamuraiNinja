@@ -2262,7 +2262,9 @@ const MODELPIPE=(()=>{
     'RightShoulder','RightArm','RightForeArm','RightHand',
     'LeftShoulder','LeftArm','LeftForeArm','LeftHand',
     'RightUpLeg','RightLeg','RightFoot','LeftUpLeg','LeftLeg','LeftFoot'];
-  const _qw=new THREE.Quaternion(), _qp=new THREE.Quaternion();
+  const _qw=new THREE.Quaternion(), _qp=new THREE.Quaternion(),
+        _qs=new THREE.Quaternion(), _q2=new THREE.Quaternion();
+  const _da=V3(), _db=V3();
   function attach(f,gltf){
     if(f.model){ scene.remove(f.model.root); }
     const root=THREE.SkeletonUtils?THREE.SkeletonUtils.clone(gltf.scene)
@@ -2305,7 +2307,28 @@ const MODELPIPE=(()=>{
     /* keep the file's own animations: Idle/Walk/Run drive locomotion */
     const anims=(gltf.animations&&gltf.animations.length?gltf.animations:
                  (gltf.scene&&gltf.scene.animations)||[])||[];
-    return {root,bones,scale:s,worldQ:{},anims};
+    /* rest-pose calibration: every rig keeps its OWN bone axes. Record
+       each bone's bind-local quaternion and its aim child; retargeting
+       later applies only the swing from rest direction to live one. */
+    root.updateMatrixWorld(true);
+    const AIMC={Hips:'Spine',Spine:'Spine1',Spine1:'Spine2',Spine2:'Neck',
+      Neck:'Head',RightShoulder:'RightArm',RightArm:'RightForeArm',
+      RightForeArm:'RightHand',LeftShoulder:'LeftArm',LeftArm:'LeftForeArm',
+      LeftForeArm:'LeftHand',RightUpLeg:'RightLeg',RightLeg:'RightFoot',
+      LeftUpLeg:'LeftLeg',LeftLeg:'LeftFoot'};
+    const TIPS={RightHand:['RightHandMiddle1','RightHandIndex1'],
+      LeftHand:['LeftHandMiddle1','LeftHandIndex1'],
+      RightFoot:['RightToeBase','RightToe_End'],
+      LeftFoot:['LeftToeBase','LeftToe_End']};
+    const aim={};
+    for(const n of CORE){ const b=bones[n]; if(!b)continue;
+      b.userData._q0=b.quaternion.clone();
+      let child=AIMC[n]?bones[AIMC[n]]:null;
+      if(TIPS[n]){ child=null;
+        for(const cn of TIPS[n]){ child=findBone(root,cn); if(child)break; } }
+      aim[n]=child||null;
+    }
+    return {root,bones,aim,scale:s,worldQ:{},anims};
   }
   /* ---- locomotion: the model's own mocap breathes under the sim ----
      Idle/Walk/Run clips (bundled Xbot/Soldier ship them) crossfade by
@@ -2365,48 +2388,90 @@ const MODELPIPE=(()=>{
       else b.quaternion.slerp(_qp,ww);
       b.updateMatrixWorld(true);
     };
-    /* hips: world position + orientation */
-    { const b=M.bones.Hips;
-      boneQuat(J.pelvis,J.chestB,fwd,_qw);
+    /* hips: world position; orientation by rest-delta + a facing twist
+       about the trunk axis (the rig's own axes are never overwritten) */
+    hipsDelta:{ const b=M.bones.Hips;
       b.parent.updateMatrixWorld(true);
-      _x.copy(J.pelvis);
-      b.parent.worldToLocal(_x);
-      b.position.copy(_x);
-      b.parent.getWorldQuaternion(_qp);
-      b.quaternion.copy(_qp.invert().multiply(_qw));
-      b.updateMatrixWorld(true);
+      _x.copy(J.pelvis); b.parent.worldToLocal(_x); b.position.copy(_x);
+      /* lean/aim via the same delta machinery (defined below) */
     }
-    /* spine chain: distribute pelvis→chestB→chestT→neck */
-    _x.lerpVectors(J.pelvis,J.chestB,.55);
-    setW('Spine',boneQuat(_x,J.chestB,fwd,_qw));
-    setW('Spine1',boneQuat(J.chestB,_y.lerpVectors(J.chestB,J.chestT,.6).clone(),fwd,_qw));
-    setW('Spine2',boneQuat(_y,J.chestT,fwd,_qw));
-    setW('Neck',boneQuat(J.chestT,J.neckT,fwd,_qw));
-    { const top=J.neckT.clone(); top.y+=.16;
-      setW('Head',boneQuat(J.neckT,top,fwd,_qw)); }
-    /* arms: hint = out+down for natural roll */
-    const right=V3(fwd.z,0,-fwd.x);
-    const hintR=V3().addScaledVector(right,.6).setY(-.6),
-          hintL=V3().addScaledVector(right,-.6).setY(-.6);
-    setW('RightShoulder',boneQuat(J.chestT,J.shR,fwd,_qw));
-    setW('RightArm',boneQuat(J.shR,J.elR,hintR,_qw));
-    setW('RightForeArm',boneQuat(J.elR,J.haR,hintR,_qw));
-    if(f.katana&&f.hasSword){ setW('RightHand',
-      _qw.copy(f.katana.quaternion).multiply(MODELPIPE._handFix)); }
-    setW('LeftShoulder',boneQuat(J.chestT,J.shL,fwd,_qw));
-    setW('LeftArm',boneQuat(J.shL,J.elL,hintL,_qw));
-    setW('LeftForeArm',boneQuat(J.elL,J.haL,hintL,_qw));
-    /* legs: hint = body forward keeps knees forward */
-    setW('RightUpLeg',boneQuat(J.hipR,J.knR,fwd,_qw));
-    setW('RightLeg',boneQuat(J.knR,J.ankR,fwd,_qw));
-    setW('LeftUpLeg',boneQuat(J.hipL,J.knL,fwd,_qw));
-    setW('LeftLeg',boneQuat(J.knL,J.ankL,fwd,_qw));
-    /* feet: flat, using our locked plant yaw */
+    /* REST-DELTA RETARGET: each bone keeps its rig's own bind axes and
+       receives only the shortest-arc swing from its rest limb direction
+       to the sim's live one. No imposed bases, no hint vectors — this is
+       what stops arbitrary rigs from arriving mangled. */
+    const aimDelta=(name,fromV,toV)=>{
+      const b=M.bones[name]; if(!b||!b.userData._q0)return;
+      const child=M.aim&&M.aim[name]; if(!child)return;
+      const ww=w*(bm&&bm[name]!==undefined?bm[name]:1);
+      _qs.copy(b.quaternion);
+      b.quaternion.copy(b.userData._q0);       // rest local
+      b.updateMatrixWorld(true);
+      b.getWorldPosition(_x); child.getWorldPosition(_y); _y.sub(_x);
+      _z.subVectors(toV,fromV);
+      if(_y.lengthSq()>1e-10&&_z.lengthSq()>1e-10){
+        _qw.setFromUnitVectors(_y.normalize(),_z.normalize());
+        b.parent.getWorldQuaternion(_qp);
+        _q2.copy(_qp).invert().multiply(_qw).multiply(_qp)
+          .multiply(b.userData._q0);
+        if(ww>=1)b.quaternion.copy(_q2);
+        else b.quaternion.copy(_qs).slerp(_q2,ww);
+      } else b.quaternion.copy(_qs);
+      b.updateMatrixWorld(true);
+    };
+    aimDelta('Hips',J.pelvis,J.chestB);
+    { /* facing: twist the pelvis about the trunk axis toward bodyYaw */
+      const b=M.bones.Hips, rl=M.bones.RightUpLeg, ll=M.bones.LeftUpLeg;
+      if(b&&rl&&ll){
+        rl.getWorldPosition(_x); ll.getWorldPosition(_y);
+        _da.subVectors(_x,_y);                       // live anatomical right
+        _z.subVectors(J.chestB,J.pelvis).normalize();
+        _da.addScaledVector(_z,-_da.dot(_z));
+        _db.crossVectors(_da,_z);                    // live forward (R×U)
+        _da.copy(fwd).addScaledVector(_z,-fwd.dot(_z));
+        if(_db.lengthSq()>1e-8&&_da.lengthSq()>1e-8){
+          _db.normalize(); _da.normalize();
+          let ang=Math.acos(clamp(_db.dot(_da),-1,1));
+          _x.crossVectors(_db,_da);
+          if(_x.dot(_z)<0)ang=-ang;
+          _qw.setFromAxisAngle(_z,ang);
+          b.parent.getWorldQuaternion(_qp);
+          _q2.copy(_qp).invert().multiply(_qw).multiply(_qp)
+            .multiply(b.quaternion);
+          b.quaternion.copy(_q2);
+          b.updateMatrixWorld(true);
+        }
+      }
+    }
+    aimDelta('Spine',J.pelvis,J.chestB);
+    _da.lerpVectors(J.chestB,J.chestT,.6);
+    aimDelta('Spine1',J.chestB,_da);
+    aimDelta('Spine2',_da,J.chestT);
+    aimDelta('Neck',J.chestT,J.neckT);
+    /* the head rides the neck in its own bind pose — never re-based */
+    aimDelta('RightShoulder',J.chestT,J.shR);
+    aimDelta('RightArm',J.shR,J.elR);
+    aimDelta('RightForeArm',J.elR,J.haR);
+    aimDelta('LeftShoulder',J.chestT,J.shL);
+    aimDelta('LeftArm',J.shL,J.elL);
+    aimDelta('LeftForeArm',J.elL,J.haL);
+    /* hands: the fingers reach along the grip toward the steel */
+    if(f.katana&&f.hasSword&&f.tip){
+      _db.subVectors(f.tip,J.haR);
+      if(_db.lengthSq()>1e-8){ _db.normalize();
+        _da.copy(J.haR).add(_db); aimDelta('RightHand',J.haR,_da);
+        _da.copy(J.haL).add(_db); aimDelta('LeftHand',J.haL,_da); }
+    }
+    aimDelta('RightUpLeg',J.hipR,J.knR);
+    aimDelta('RightLeg',J.knR,J.ankR);
+    aimDelta('LeftUpLeg',J.hipL,J.knL);
+    aimDelta('LeftLeg',J.knL,J.ankL);
+    /* feet: toes reach along our locked plant yaw */
     for(const side of ['R','L']){
-      const ft=f.feet[side==='R'?'R':'L'];
+      const ft=f.feet[side];
       const a=side==='R'?J.ankR:J.ankL;
-      _x.copy(a).addScaledVector(DIRY(ft.yaw||f.bodyYaw),.16); _x.y=a.y-.05;
-      setW(side==='R'?'RightFoot':'LeftFoot',boneQuat(a,_x,V3(0,1,0),_qw));
+      _da.copy(a).addScaledVector(DIRY(ft.yaw||f.bodyYaw),.16);
+      _da.y=a.y-.03;
+      aimDelta(side==='R'?'RightFoot':'LeftFoot',a,_da);
     }
     /* the cloth remembers the blood */
     if(f.kimonoMat&&M.root){
@@ -4978,6 +5043,16 @@ Fighter.prototype.gib=function(worldPt,dir,n,withBone){
     }
   }catch(e){}
 };
+/* a bruise is a soft-edged bloom, not a billboard: radial alpha so the
+   blunt mark melts into the surface instead of floating as a solid card */
+const bruiseTex=canTex(64,64,(x,w,h)=>{
+  x.clearRect(0,0,w,h);
+  const g=x.createRadialGradient(w/2,h/2,2,w/2,h/2,w/2);
+  g.addColorStop(0,'rgba(122,18,40,.92)');
+  g.addColorStop(.55,'rgba(96,14,34,.55)');
+  g.addColorStop(1,'rgba(80,10,28,0)');
+  x.fillStyle=g; x.fillRect(0,0,w,h);
+});
 /* bright arcade marks: a saturated slash on skin, a splatter on cloth,
    a bruise bloom from fists — unlit so the night can't mute them */
 const brightGashTex=canTex(128,64,(x,w,h)=>{
@@ -5019,11 +5094,11 @@ Fighter.prototype.addHitMark=function(partKey,worldPt,hitDir,severity,blunt){
   try{
     const onCloth=!this.build.bare&&CLOTHED.test(partKey);
     const size=(severity==='mortal'?.46:severity==='severe'?.34:.24);
-    const tex=blunt?null:(onCloth?splatTex:brightGashTex);
+    const tex=blunt?bruiseTex:(onCloth?splatTex:brightGashTex);
     const mat=new THREE.MeshBasicMaterial({
-      map:tex||null,transparent:!!tex,depthWrite:false,
-      color:blunt?0x7a1230:0xffffff,
-      opacity:blunt?.75:1,
+      map:tex||null,transparent:true,depthWrite:false,
+      color:blunt?0xb03048:0xffffff,
+      opacity:blunt?.85:1,
       polygonOffset:true,polygonOffsetFactor:-5});
     const m=new THREE.Mesh(
       new THREE.PlaneGeometry(size,blunt?size*.85:(onCloth?size:size*.45)),mat);
@@ -5033,9 +5108,15 @@ Fighter.prototype.addHitMark=function(partKey,worldPt,hitDir,severity,blunt){
       const b=MODELPIPE.findBone(this.model.root,
         MODELSEV.PART2BONE[partKey]||'Spine1');
       if(!b)return;
-      b.getWorldPosition(TMP1);
-      TMP2.subVectors(worldPt,TMP1); TMP2.y*=.3;
-      if(TMP2.lengthSq()<1e-6)TMP2.set(0,0,1); TMP2.normalize();
+      /* face the mark against the blow, or radially off the bone */
+      if(hitDir&&hitDir.lengthSq()>1e-6){
+        TMP2.copy(hitDir).negate().normalize();
+      }else{
+        b.getWorldPosition(TMP1);
+        TMP2.subVectors(worldPt,TMP1); TMP2.y*=.3;
+        if(TMP2.lengthSq()<1e-6)TMP2.set(0,0,1); TMP2.normalize();
+      }
+      if(blunt)m.scale.setScalar(.7);   // a fist marks less area than steel
       m.position.copy(worldPt).addScaledVector(TMP2,.015);
       m.lookAt(TMP1.copy(m.position).addScaledVector(TMP2,1));
       if(!blunt&&hitDir)
