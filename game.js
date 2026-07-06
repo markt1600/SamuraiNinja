@@ -2379,6 +2379,14 @@ const MODELPIPE=(()=>{
   loadClip('ff_combo','models/anims/ff/ff_combo.fbx');
   loadClip('ff_a','models/anims/ff/ff_a.fbx');
   loadClip('ff_b','models/anims/ff/ff_b.fbx');
+  /* the melee pack: axe strike arcs are HARVESTED from these (MELEEARC)
+     to become the axe's technique lines; the singles/combos also serve
+     as the axe fighter's practice chop and victory flourish */
+  loadClip('melee_dn','models/anims/melee/melee_dn.fbx');
+  loadClip('melee_hz','models/anims/melee/melee_hz.fbx');
+  loadClip('melee_c1','models/anims/melee/melee_c1.fbx');
+  loadClip('melee_c2','models/anims/melee/melee_c2.fbx');
+  loadClip('melee_c3','models/anims/melee/melee_c3.fbx');
   function playClip(f,name,fade){
     const M=f.model; if(!M||!clips[name])return false;
     try{
@@ -2569,6 +2577,98 @@ const GSLOCO=(()=>{
     return out;
   }
   return {tick};
+})();
+
+/* ---- MELEEARC: mocap axe technique ------------------------------------
+   The melee attack clips are sampled once, offline: the right hand's
+   world velocity is tracked through each clip, the fast contiguous
+   windows are the strokes (backswings rise and are filtered out), and
+   each stroke's speed-weighted direction — expressed in the performer's
+   chest frame [right, up, fwd] — becomes a technique line. When the
+   harvest yields enough strokes they REPLACE the hand-authored AXELINES,
+   so a committed axe swing is steered onto a true mocap arc. */
+const MELEEARC=(()=>{
+  const CLIPS=['melee_dn','melee_hz','melee_c1','melee_c2','melee_c3'];
+  const _a=V3(), _b=V3(), _r=V3(), _f=V3(), _v=V3(), _p=V3(), _pp=V3();
+  function harvest(){
+    const got=CLIPS.filter(n=>MODELPIPE.clips&&MODELPIPE.clips[n]&&MODELPIPE.clipRigs[n]);
+    if(!got.length)return null;
+    const lines=[];
+    for(const name of got){
+      try{
+        const rig=MODELPIPE.clipRigs[name], clip=MODELPIPE.clips[name];
+        const find=s=>{ let r=null; rig.traverse(o=>{ if(!r&&o.name&&
+          o.name.toLowerCase().replace(/[^a-z0-9]/g,'').endsWith(s))r=o; });
+          return r; };
+        const hand=find('righthand'), shR=find('rightarm'), shL=find('leftarm');
+        if(!hand||!shR||!shL)continue;
+        const mixer=new THREE.AnimationMixer(rig);
+        mixer.clipAction(clip).play();
+        const dt=1/30, N=Math.max(2,Math.floor(clip.duration/dt));
+        const dirs=[], spds=[]; let maxSp=0, first=true;
+        for(let i=0;i<N;i++){
+          mixer.update(dt); rig.updateMatrixWorld(true);
+          hand.getWorldPosition(_p);
+          if(!first){
+            _v.subVectors(_p,_pp); const sp=_v.length()/dt;
+            if(sp>1e-6){
+              shR.getWorldPosition(_a); shL.getWorldPosition(_b);
+              _r.subVectors(_a,_b); _r.y=0;
+              if(_r.lengthSq()<1e-8)_r.set(1,0,0); _r.normalize();
+              _f.set(-_r.z,0,_r.x);                    // fwd = right × up
+              _v.divideScalar(sp*dt);
+              dirs.push([_v.dot(_r),_v.y,_v.dot(_f)]); spds.push(sp);
+              if(sp>maxSp)maxSp=sp;
+            } else { dirs.push(null); spds.push(0); }
+          }
+          first=false; _pp.copy(_p);
+        }
+        mixer.stopAllAction(); mixer.uncacheRoot(rig);
+        const thr=maxSp*.55; let win=null;
+        const flush=()=>{ if(!win)return;
+          /* the stroke's meaning lives at its fast core — the impact
+             moment — not in the follow-through that arcs past the body */
+          let pk=0; for(const i of win)if(spds[i]>pk)pk=spds[i];
+          const acc=[0,0,0];
+          for(const i of win){ if(spds[i]<pk*.75)continue;
+            const w=spds[i]*spds[i];
+            acc[0]+=dirs[i][0]*w; acc[1]+=dirs[i][1]*w; acc[2]+=dirs[i][2]*w; }
+          const L2=Math.hypot(acc[0],acc[1],acc[2]);
+          if(L2>1e-6){ const d=[acc[0]/L2,acc[1]/L2,acc[2]/L2];
+            /* a strike drives level or down and never away: rising
+               backswings and rechambering pull-backs are not technique.
+               Each kept arc gains its backhand twin. */
+            if(d[1]<.3&&d[2]>-.2){ lines.push(d);
+              lines.push([-d[0],d[1],d[2]]); } }
+          win=null; };
+        for(let i=0;i<dirs.length;i++){
+          if(dirs[i]&&spds[i]>thr)(win=win||[]).push(i);
+          else flush();
+        }
+        flush();
+      }catch(e){}
+    }
+    const out=[];         // dedupe near-parallel strokes
+    for(const d of lines){
+      if(!out.some(o=>o[0]*d[0]+o[1]*d[1]+o[2]*d[2]>.9))out.push(d);
+      if(out.length>=8)break;
+    }
+    return out;
+  }
+  let tries=0;
+  const iv=setInterval(()=>{
+    tries++;
+    const got=CLIPS.filter(n=>MODELPIPE.clips&&MODELPIPE.clips[n]).length;
+    if(got<CLIPS.length&&tries<20)return;    // wait for the whole pack
+    clearInterval(iv);
+    if(!got)return;
+    const L=harvest();
+    if(L&&L.length>=3){ AXELINES.length=0;
+      for(const d of L)AXELINES.push(d); AXELINES._mocap=true; }
+    else if(L&&L.length){                    // thin harvest: augment only
+      for(const d of L)AXELINES.push(d); AXELINES._mocap='mixed'; }
+  },700);
+  return {harvest};
 })();
 
 const _pq=new THREE.Quaternion(), _pq2b=new THREE.Quaternion(), _pv=V3(), _pv2=V3();
@@ -5614,11 +5714,13 @@ function restart(){
     let hold=0;
     for(const f of [player,enemy]){ if(!f)continue;
       if(f.model){ if(MODELPIPE.playClip(f,'draw',.1))hold=Math.max(hold,1.55); continue; }
-      /* fists warm up shadowboxing; blades are drawn */
+      /* fists shadowbox, the axe takes a practice chop, blades are drawn */
       const bare=f.weapon&&f.weapon.blunt&&MODELPIPE.clips.ff_bag;
-      if(MODELPIPE.playPuppet(f,bare?'ff_bag':'draw')){
+      const axe=f.weapon===WEAPONS.axe&&MODELPIPE.clips.melee_dn;
+      const cn=bare?'ff_bag':axe?'melee_dn':'draw';
+      if(MODELPIPE.playPuppet(f,cn)){
         let d=1.55;
-        if(bare){ d=Math.min(MODELPIPE.clips.ff_bag.duration,3.0);
+        if(bare||axe){ d=Math.min(MODELPIPE.clips[cn].duration,3.0);
           if(f._pupPlay)f._pupPlay.until=performance.now()+d*1000; }
         hold=Math.max(hold,d);
       } }
@@ -5878,7 +5980,7 @@ function updateKillRitual(dt){
   const headless=!loser||!loser.parts||loser.severed.head;
   const bare=!!(vt.weapon&&vt.weapon.blunt);
   kc.sheathAt=(headless||kc.beheadDone)&&!bare
-    ?Math.max(kc.sheathAt||1.1,kc.thrownAt?kc.thrownAt+1.7:1.1):99;
+    ?(kc.thrownAt?kc.thrownAt+1.7:1.1):99;
   if(loser&&loser.dead&&(!headless||kc.beheadDone)){
     const hp=loser.parts.head.position;
     if(kc.ritual>1.2&&!kc.released){
@@ -5978,6 +6080,16 @@ function updateKillRitual(dt){
       const kata=['ff_combo','ff_a','ff_b'].filter(n=>MODELPIPE.clips[n]);
       MODELPIPE.playPuppet(vt,
         kata[Math.floor(rand(0,kata.length))%kata.length]);
+    }
+    if(kc.clipStarted&&vt._pupPlay)return;   // updateAlive renders the puppet
+  }
+  /* the axe victor: nothing to sheath — a combo flourish over the fallen */
+  if(!vt.model&&vt.weapon===WEAPONS.axe&&MODELPIPE.clips&&MODELPIPE.clips.melee_c1){
+    if(!kc.clipStarted&&kc.ritual>(kc.sheathAt||1.1)){
+      kc.clipStarted=true;
+      const fl=['melee_c1','melee_c2','melee_c3','melee_hz']
+        .filter(n=>MODELPIPE.clips[n]);
+      MODELPIPE.playPuppet(vt,fl[Math.floor(rand(0,fl.length))%fl.length]);
     }
     if(kc.clipStarted&&vt._pupPlay)return;   // updateAlive renders the puppet
   }

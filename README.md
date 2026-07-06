@@ -155,6 +155,15 @@ Kill all three: **三人斬り**.
   (elbow combo or a sparring flurry) after tearing the head free. The
   mocap layer as a whole speaks louder: wider oscillation clamps and
   heavier bob/sway/push and hip/chest yaw weights.
+- **Melee pack (the axe)** — five melee-attack clips are sampled offline
+  at load: each stroke's fast core (the impact moment, not the
+  follow-through) yields a direction in the performer's chest frame,
+  rising backswings and rechambering pull-backs are rejected, and each
+  kept arc gains its backhand twin. The surviving arcs REPLACE the
+  hand-authored axe technique lines, so a committed axe swing steers
+  onto a true mocap arc. The axe fighter also takes a mocap practice
+  chop at the bow and performs a combo flourish over the fallen in
+  place of the swordsman's noto.
 
 ## v5 — the duel becomes a life
 
