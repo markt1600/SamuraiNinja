@@ -2504,7 +2504,12 @@ const MODELPIPE=(()=>{
     _da.lerpVectors(J.chestB,J.chestT,.6);
     aimDelta('Spine1',J.chestB,_da);
     aimDelta('Spine2',_da,J.chestT);
-    aimDelta('Neck',J.chestT,J.neckT);
+    /* the neck follows the trunk's LEAN, not the vertical: a sprinting
+       chest pitches forward and a vertical neck target would counter-
+       rotate the head backwards — half spine-continuation, half sim */
+    _db.subVectors(J.chestT,J.chestB).normalize();
+    _da.copy(J.chestT).addScaledVector(_db,.12).lerp(J.neckT,.45);
+    aimDelta('Neck',J.chestT,_da);
     /* the head rides the neck in its own bind pose — never re-based */
     /* the PALM holds the steel, not the wrist: pull each wrist short of
        its grip anchor by the hand's own length along the blade */
