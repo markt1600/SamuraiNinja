@@ -149,6 +149,12 @@ Kill all three: **三人斬り**.
   high-passed so stance constants stay behind, and layered onto the
   simulated pose. The sim keeps the feet and the sword; the mocap
   breathes. Two-handed-sword mocap deaths join the death-animation pool.
+- **Fist pack (bare hands)** — bare-handed fighters draw their trunk life
+  from a fighting-idle clip instead, warm up shadowboxing on an unseen
+  bag before the duel, and finish a kill with one of three victory katas
+  (elbow combo or a sparring flurry) after tearing the head free. The
+  mocap layer as a whole speaks louder: wider oscillation clamps and
+  heavier bob/sway/push and hip/chest yaw weights.
 
 ## v5 — the duel becomes a life
 

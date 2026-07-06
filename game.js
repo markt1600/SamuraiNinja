@@ -2372,6 +2372,13 @@ const MODELPIPE=(()=>{
   loadClip('gs_run','models/anims/gs/gs_run.fbx');
   loadClip('death_gs1','models/anims/gs/gs_death1.fbx');
   loadClip('death_gs2','models/anims/gs/gs_death2.fbx');
+  /* the fist pack: trunk life for bare hands, the shadowbox warm-up,
+     and the katas a bare-handed victor performs over the fallen */
+  loadClip('ff_idle','models/anims/ff/ff_idle.fbx');
+  loadClip('ff_bag','models/anims/ff/ff_bag.fbx');
+  loadClip('ff_combo','models/anims/ff/ff_combo.fbx');
+  loadClip('ff_a','models/anims/ff/ff_a.fbx');
+  loadClip('ff_b','models/anims/ff/ff_b.fbx');
   function playClip(f,name,fade){
     const M=f.model; if(!M||!clips[name])return false;
     try{
@@ -2485,10 +2492,14 @@ const MODELPIPE=(()=>{
    ========================================================================= */
 const GSLOCO=(()=>{
   const _w=V3(), _w2=V3(), _w3=V3();
-  function mk(){
+  function mk(f){
     try{
-      const R=MODELPIPE.clipRigs&&MODELPIPE.clipRigs['gs_idle'];
-      if(!R||!MODELPIPE.clips['gs_idle'])return null;
+      /* bare hands idle from the fist pack; everyone walks/runs on gs */
+      const bare=!!(f&&f.weapon&&f.weapon.blunt
+        &&MODELPIPE.clips['ff_idle']&&MODELPIPE.clipRigs['ff_idle']);
+      const src=bare?'ff_idle':'gs_idle';
+      const R=MODELPIPE.clipRigs&&MODELPIPE.clipRigs[src];
+      if(!R||!MODELPIPE.clips[src])return null;
       const rig=THREE.SkeletonUtils?THREE.SkeletonUtils.clone(R):null;
       if(!rig)return null;
       rig.visible=false; scene.add(rig);
@@ -2503,8 +2514,8 @@ const GSLOCO=(()=>{
       const act=n=>{ const c=MODELPIPE.clips[n]; if(!c)return null;
         const a=mixer.clipAction(c); a.setLoop(THREE.LoopRepeat);
         a.play(); a.weight=0; return a; };
-      const L={rig,mixer,bones,
-        idle:act('gs_idle'),walk:act('gs_walk'),run:act('gs_run')};
+      const L={rig,mixer,bones,src,
+        idle:act(src),walk:act('gs_walk'),run:act('gs_run')};
       rig.updateMatrixWorld(true);
       bones.hips.getWorldPosition(_w);
       L.k=.9/Math.max(Math.abs(_w.y),.01);
@@ -2517,7 +2528,7 @@ const GSLOCO=(()=>{
     if(f._gsl===null)return null;
     if(!f._gsl){
       if(!MODELPIPE.clips||!MODELPIPE.clips['gs_idle'])return null; // still loading
-      f._gsl=mk(); if(!f._gsl){ f._gsl=null; return null; }
+      f._gsl=mk(f); if(!f._gsl){ f._gsl=null; return null; }
     }
     const L=f._gsl;
     const wRun=L.run?clamp((speed-1.9)/1.2,0,1):0;
@@ -2540,9 +2551,9 @@ const GSLOCO=(()=>{
        crouch) stay in the clip — only the living OSCILLATION passes */
     const out=f._gslOut||(f._gslOut={bob:0,sway:0,push:0,hipYaw:0,chestYaw:0});
     L.avgY=lerp(L.avgY,_w.y,clamp(dt*.8,0,1));
-    out.bob=clamp(_w.y-L.avgY,-.05,.05);
-    out.sway=clamp(_w.x-L.avgX,-.05,.05);
-    out.push=clamp(_w.z-L.avgZ,-.05,.05);
+    out.bob=clamp(_w.y-L.avgY,-.065,.065);
+    out.sway=clamp(_w.x-L.avgX,-.065,.065);
+    out.push=clamp(_w.z-L.avgZ,-.065,.065);
     if(B.thR&&B.thL){
       B.thR.getWorldPosition(_w2); B.thL.getWorldPosition(_w3);
       const hy=Math.atan2(-(_w2.z-_w3.z),(_w2.x-_w3.x)||1e-6);
@@ -3132,12 +3143,12 @@ Fighter.prototype.updateAlive=function(dt,opponent){
   const ML=(this.alive&&!(this.kneel>0)&&!this.begging&&typeof GSLOCO!=='undefined')
     ?GSLOCO.tick(this,dt,speed2d):null;
   const pelvisY=D.pelvisY-hurtSag-stepDip*.024-(stepping?.008:0)
-    +Math.sin(this.breath*1.6)*.007+(this.previewBob||0)+(ML?ML.bob*.8:0);
+    +Math.sin(this.breath*1.6)*.007+(this.previewBob||0)+(ML?ML.bob*1.05:0);
   const pelvis=V3(lerp(feetMid.x,this.pos.x,.55),pelvisY,lerp(feetMid.z,this.pos.z,.55));
-  const pelvisYawA=this.bodyYaw+this.twist*.3-this._ctr*.7+(ML?ML.hipYaw*.45:0);
+  const pelvisYawA=this.bodyYaw+this.twist*.3-this._ctr*.7+(ML?ML.hipYaw*.62:0);
   const fwdP=DIRY(pelvisYawA), rightP=V3(fwdP.z,0,-fwdP.x);
-  pelvis.addScaledVector(rightP,(this._sway||0)+this._wshift+(ML?ML.sway*.7:0));
-  if(ML)pelvis.addScaledVector(fwdP,ML.push*.5);
+  pelvis.addScaledVector(rightP,(this._sway||0)+this._wshift+(ML?ML.sway*.92:0));
+  if(ML)pelvis.addScaledVector(fwdP,ML.push*.72);
 
   /* flinch spring: hits ripple through the trunk */
   this.flinchV.addScaledVector(this.flinch,-140*dt).addScaledVector(this.flinchV,-12*dt);
@@ -3147,7 +3158,7 @@ Fighter.prototype.updateAlive=function(dt,opponent){
   const stoop=this.build.stoop||0;    // age rounds the back
   const lean=clamp(.04+stoop+this.tipVel.length()*.007+speed2d*.016,0,.12+stoop);
   const chestYawA=this.bodyYaw+this.twist*.8+this._ctr
-    +(ML?ML.chestYaw*.55:0);
+    +(ML?ML.chestYaw*.72:0);
   const fwdC=DIRY(chestYawA), rightC=V3(fwdC.z,0,-fwdC.x);
   const chestB=pelvis.clone().addScaledVector(fwdP,.03+lean*.3)
     .addScaledVector(this.flinch,.6).addScaledVector(this.leanV,.45);
@@ -5600,11 +5611,18 @@ function restart(){
   game.bind=null; game._bindN=0; placeIce();
   game.introT=0;
   if(MODELPIPE.enabled)setTimeout(()=>{
-    let any=false;
+    let hold=0;
     for(const f of [player,enemy]){ if(!f)continue;
-      if(f.model)any=MODELPIPE.playClip(f,'draw',.1)||any;
-      else any=MODELPIPE.playPuppet(f,'draw')||any; }
-    if(any)game.introT=1.55;
+      if(f.model){ if(MODELPIPE.playClip(f,'draw',.1))hold=Math.max(hold,1.55); continue; }
+      /* fists warm up shadowboxing; blades are drawn */
+      const bare=f.weapon&&f.weapon.blunt&&MODELPIPE.clips.ff_bag;
+      if(MODELPIPE.playPuppet(f,bare?'ff_bag':'draw')){
+        let d=1.55;
+        if(bare){ d=Math.min(MODELPIPE.clips.ff_bag.duration,3.0);
+          if(f._pupPlay)f._pupPlay.until=performance.now()+d*1000; }
+        hold=Math.max(hold,d);
+      } }
+    if(hold)game.introT=hold;
   },250);
   document.body.classList.remove('cine');
   document.getElementById('verdict').classList.add('hidden');
@@ -5951,6 +5969,17 @@ function updateKillRitual(dt){
         }
       }
     }
+  }
+  /* bare-handed victor: no steel to sheath — a kata over the fallen */
+  if(!vt.model&&bare&&MODELPIPE.clips&&MODELPIPE.clips.ff_combo){
+    if(!kc.clipStarted&&kc.beheadDone&&kc.released
+       &&kc.ritual>kc.thrownAt+2.0){
+      kc.clipStarted=true;
+      const kata=['ff_combo','ff_a','ff_b'].filter(n=>MODELPIPE.clips[n]);
+      MODELPIPE.playPuppet(vt,
+        kata[Math.floor(rand(0,kata.length))%kata.length]);
+    }
+    if(kc.clipStarted&&vt._pupPlay)return;   // updateAlive renders the puppet
   }
   /* procedural victor: puppet performs the noto */
   if(!vt.model&&MODELPIPE.clips&&MODELPIPE.clips.sheath){
