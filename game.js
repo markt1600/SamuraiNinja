@@ -2528,13 +2528,14 @@ const MODELPIPE=(()=>{
     if(armed){ _db.subVectors(f.tip,J.haR);
       if(_db.lengthSq()>1e-8)gdir=_db.normalize(); }
     const hOff=(M.hLen||.07)*.55;   // handle in the FINGERS, not the heel
+    /* a hand only gets grip treatment while it is ON the weapon: the
+       sim frees the off-hand for balance and damage, and a stale grip
+       correction would drag that free arm across the torso */
+    const twoHand=!!gdir&&J.haL.distanceTo(J.haR)<.32;
     const hrR=gdir?_dc.copy(J.haR).addScaledVector(gdir,-hOff):_dc.copy(J.haR);
-    const hrL=gdir?_dd.copy(J.haL).addScaledVector(gdir,-hOff):_dd.copy(J.haL);
-    /* converge the CURL CENTER onto the anchor: last frame's error
-       between where the fist actually closed and where the grip is
-       nudges this frame's wrist — the handle settles into the fingers */
-    if(M._geR)hrR.add(M._geR);
-    if(M._geL)hrL.add(M._geL);
+    const hrL=twoHand?_dd.copy(J.haL).addScaledVector(gdir,-hOff):_dd.copy(J.haL);
+    if(M._geR){ if(gdir)hrR.add(M._geR); else M._geR.multiplyScalar(.8); }
+    if(M._geL){ if(twoHand)hrL.add(M._geL); else M._geL.multiplyScalar(.8); }
     aimDelta('RightShoulder',J.chestT,J.shR);
     aimDelta('RightArm',J.shR,J.elR);
     aimDelta('RightForeArm',J.elR,hrR);
@@ -2544,9 +2545,10 @@ const MODELPIPE=(()=>{
     /* fingers reach along the grip toward the steel */
     if(gdir){
       _da.copy(hrR).add(gdir); aimDelta('RightHand',hrR,_da);
-      _da.copy(hrL).add(gdir); aimDelta('LeftHand',hrL,_da);
+      if(twoHand){ _da.copy(hrL).add(gdir); aimDelta('LeftHand',hrL,_da); }
       /* measure this frame's fist-to-anchor error for the next frame */
       for(const side of ['Right','Left']){
+        if(side==='Left'&&!twoHand)continue;
         const gl=M.gripLoc&&M.gripLoc[side], hb=M.bones[side+'Hand'];
         if(!gl||!hb)continue;
         _da.copy(gl); hb.localToWorld(_da);
