@@ -2267,7 +2267,8 @@ const MODELPIPE=(()=>{
     'RightUpLeg','RightLeg','RightFoot','LeftUpLeg','LeftLeg','LeftFoot'];
   const _qw=new THREE.Quaternion(), _qp=new THREE.Quaternion(),
         _qs=new THREE.Quaternion(), _q2=new THREE.Quaternion();
-  const _da=V3(), _db=V3(), _dc=V3(), _dd=V3();
+  const _da=V3(), _db=V3(), _dc=V3(), _dd=V3(),
+        _ea=V3(), _eb=V3(), _ec=V3(), _ed=V3();
   function attach(f,gltf){
     if(f.model){ scene.remove(f.model.root); }
     const root=THREE.SkeletonUtils?THREE.SkeletonUtils.clone(gltf.scene)
@@ -2396,7 +2397,16 @@ const MODELPIPE=(()=>{
       bones.LeftUpLeg.getWorldPosition(_db);
       if(_da.x-_db.x<0)fSign=-1;
     }
-    return {root,bones,aim,hLen,fSign,gripLoc,scale:s,worldQ:{},anims};
+    /* the model's own arm segment lengths: its elbows must bend where
+       ITS anatomy says, not where the sim body's proportions fall */
+    const armL={};
+    for(const s2 of ['Right','Left']){
+      const A=bones[s2+'Arm'],F=bones[s2+'ForeArm'],H=bones[s2+'Hand'];
+      if(A&&F&&H){ A.getWorldPosition(_da); F.getWorldPosition(_db);
+        const l1=_da.distanceTo(_db); H.getWorldPosition(_da);
+        armL[s2]=[l1,_db.distanceTo(_da)]; }
+    }
+    return {root,bones,aim,hLen,fSign,gripLoc,armL,scale:s,worldQ:{},anims};
   }
   /* ---- locomotion: the model's own mocap breathes under the sim ----
      Idle/Walk/Run clips (bundled Xbot/Soldier ship them) crossfade by
@@ -2537,11 +2547,35 @@ const MODELPIPE=(()=>{
     if(M._geR){ if(gdir)hrR.add(M._geR); else M._geR.multiplyScalar(.8); }
     if(M._geL){ if(twoHand)hrL.add(M._geL); else M._geL.multiplyScalar(.8); }
     aimDelta('RightShoulder',J.chestT,J.shR);
-    aimDelta('RightArm',J.shR,J.elR);
-    aimDelta('RightForeArm',J.elR,hrR);
     aimDelta('LeftShoulder',J.chestT,J.shL);
-    aimDelta('LeftArm',J.shL,J.elL);
-    aimDelta('LeftForeArm',J.elL,hrL);
+    /* two-bone IK with the MODEL's segment lengths: reach the sim's
+       wrist, bend where this rig's elbow belongs, use the sim's elbow
+       only as the bend-direction hint */
+    const solveArm=(side,tgt,hint)=>{
+      const A=M.bones[side+'Arm'];
+      const L=(M.armL&&M.armL[side])||null;
+      if(!A||!L){ aimDelta(side+'Arm',side==='Right'?J.shR:J.shL,hint);
+        aimDelta(side+'ForeArm',hint,tgt); return; }
+      A.getWorldPosition(_ea);
+      _eb.subVectors(tgt,_ea);
+      let d=_eb.length()||1e-6;
+      const reach=(L[0]+L[1])*.999;
+      if(d>reach){ _eb.multiplyScalar(reach/d); d=reach; }
+      _ec.copy(_ea).add(_eb);
+      _eb.divideScalar(d);
+      const a=(L[0]*L[0]-L[1]*L[1]+d*d)/(2*d);
+      const r=Math.sqrt(Math.max(L[0]*L[0]-a*a,0));
+      _ed.subVectors(hint,_ea);
+      _ed.addScaledVector(_eb,-_ed.dot(_eb));
+      if(_ed.lengthSq()<1e-8)_ed.crossVectors(_eb,UPY);
+      if(_ed.lengthSq()<1e-8)_ed.set(0,0,1);
+      _ed.normalize();
+      _da.copy(_ea).addScaledVector(_eb,a).addScaledVector(_ed,r);
+      aimDelta(side+'Arm',_ea,_da);
+      aimDelta(side+'ForeArm',_da,_ec);
+    };
+    solveArm('Right',hrR,J.elR);
+    solveArm('Left',hrL,J.elL);
     /* fingers reach along the grip toward the steel */
     if(gdir){
       _da.copy(hrR).add(gdir); aimDelta('RightHand',hrR,_da);
