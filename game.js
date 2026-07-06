@@ -992,7 +992,7 @@ function sculptSkull(geo,r,age){
    and legs, weighted across world-space bones driven by the same IK
    joints as the capsule skeleton. Joints deform instead of hinging.
    ========================================================================= */
-function buildSkinnedBody(kimonoMat,hakamaMat,B){
+function buildSkinnedBody(kimonoMat,hakamaMat,B,skinMat){
   B=B||BUILDS.musashi;
   const BONES={pelvis:0,spine:1,chest:2,uaR:3,uaL:4,thR:5,shR:6,thL:7,shL:8};
   const bindPos={
@@ -1100,7 +1100,14 @@ function buildSkinnedBody(kimonoMat,hakamaMat,B){
   for(const side of [1,-1]){
     const TH=side>0?BONES.thR:BONES.thL, SH=side>0?BONES.shR:BONES.shL;
     const x=.10*side;
-    const prof=[ // y, r
+    /* bare-leg builds get ANATOMY, not a deflated hakama: thigh taper,
+       knee, calf swell, ankle */
+    const BARE=!!B.legsSkin;
+    const prof=BARE?[
+      [.88,.096],[.81,.094],[.74,.090],[.67,.084],[.60,.076],[.54,.068],
+      [.49,.062],[.45,.060],[.41,.063],[.36,.068],[.30,.069],[.25,.062],
+      [.19,.052],[.13,.046],[.09,.043],[.05,.041]]
+    :[ // y, r — the hakama tube
       [.88,.115],[.825,.121],[.77,.126],[.715,.131],[.66,.135],[.605,.138],
       [.55,.140],[.495,.141],[.44,.142],[.385,.136],[.33,.128],[.275,.116],
       [.22,.104],[.165,.090],[.13,.078],[.09,.068],[.05,.058]];
@@ -1111,7 +1118,7 @@ function buildSkinnedBody(kimonoMat,hakamaMat,B){
       else skin=[SH,1,TH,0];
       return {c:[x,y,0],r,sz:1,skin};
     });
-    tube(rings,1);
+    tube(rings,BARE?2:1);
   }
 
   const geo=new THREE.BufferGeometry();
@@ -1127,8 +1134,9 @@ function buildSkinnedBody(kimonoMat,hakamaMat,B){
   if(kimonoTex&&!km.map)km.map=kimonoTex;
   const hm=hakamaMat.clone(); hm.skinning=true;
   if(hakamaTex&&!hm.map)hm.map=hakamaTex;
+  const sk=(skinMat||hakamaMat).clone(); sk.skinning=true;
   km.roughness=.94; hm.roughness=.96;
-  const mesh=new THREE.SkinnedMesh(geo,[km,hm]);
+  const mesh=new THREE.SkinnedMesh(geo,[km,hm,sk]);
   mesh.castShadow=true; mesh.frustumCulled=false;
   mesh.add(root);
   const skel=new THREE.Skeleton(bones);
@@ -1234,13 +1242,13 @@ function aimLimb(g,from,to){
 }
 
 class Fighter{
-  constructor(name,palette,x,facing,isPlayer,buildKey){
+  constructor(name,palette,x,facing,isPlayer,buildKey,weaponKey){
     this.build=BUILDS[buildKey||'musashi']||BUILDS.musashi;
     /* the build owns the costume; the duelist keeps his soul */
     palette=Object.assign({},this.build.palette,
       {face:Object.assign({},this.build.palette.face,(palette&&palette.face)||{})});
     this.name=name; this.isPlayer=isPlayer; this.palette=palette;
-    this.weapon=WEAPONS[(isPlayer?SELECT.WP:SELECT.WE)]||WEAPONS.katana;
+    this.weapon=WEAPONS[weaponKey||(isPlayer?SELECT.WP:SELECT.WE)]||WEAPONS.katana;
     this.pos=V3(x,0,0); this.vel=V3();
     this.facing=facing;
     this.dead=false; this.downed=false; this.deathCause=null;
@@ -1566,7 +1574,7 @@ class Fighter{
     this.katana=weaponMesh(this.weapon); scene.add(this.katana);
 
     /* continuous skinned body over torso, upper arms, legs */
-    this.skin=buildSkinnedBody(this.build.bare?skin:kimono,hakama,this.build);
+    this.skin=buildSkinnedBody(this.build.bare?skin:kimono,hakama,this.build,skin);
     scene.add(this.skin.mesh);
     this.buildCloth(rimify(stdMat(this.palette.skirt||this.palette.hakama,{roughness:.96,
       side:THREE.DoubleSide,map:hakamaTex||null}),.3,.38,.58,3,.22),
@@ -1971,7 +1979,7 @@ const BUILDS={
       accent:0xf2eee2,face:{}}},
   onna:{label:'鈴 SUZUME — onna-musha',
     sh:.87, waist:.90, hip:1.05, limb:.9, hair:'long', bare:false,
-    bust:.088, skirt:true,
+    bust:.088, skirt:true, legsSkin:true,
     palette:{kimono:0xf2c4d2,hakama:0x33262f,skirt:0x8a4a62,obi:0x9c2f4a,
       skin:0xdbb394,accent:0xfdf4f0,face:{feminine:true}}},
   gladiator:{label:'Ω BRUTUS — gladiator',
@@ -2848,6 +2856,8 @@ Fighter.prototype.stepFoot=function(f,target,dt,otherPlanted,disabled,speed2d,ur
     if(disabled&&groundMark&&f.p.distanceToSquared(f.from)>.002)
       groundMark.drag(f.from.x,f.from.z,f.p.x,f.p.z);
     if(f.swing>=1){ f.swing=0; f.lift=0; f.settle=.09;
+      /* the body SETTLES onto the landed foot — weight, not gliding */
+      this.softHit&&this.softHit('chestB',V3(0,-1,0),.22+speed2d*.18);
       Sound.step&&Sound.step(speed2d);
       if(!disabled&&groundMark&&!onIce(f.p))groundMark.foot(f.p.x,f.p.z,f.yaw); }
   } else {
@@ -3024,6 +3034,9 @@ Fighter.prototype.updateAlive=function(dt,opponent){
   else if(ft.L.swing>0&&ft.R.swing===0){ wshift=1;
     stepDip=Math.sin(Math.min(ft.L.swing,1)*Math.PI); strideCtr=.5-ft.L.swing; }
   this._wshift=lerp(this._wshift||0,wshift*.034,clamp(dt*9,0,1));
+  /* which leg is swinging drives the arm-swing phase */
+  this._armPh=lerp(this._armPh||0,
+    ft.R.swing>0?1:(ft.L.swing>0?-1:(this._armPh||0)*.92),clamp(dt*7,0,1));
   this._ctr=lerp(this._ctr||0,strideCtr*.16*clamp(speed2d,0,1.4),clamp(dt*9,0,1));
   const pelvisY=D.pelvisY-hurtSag-stepDip*.024-(stepping?.008:0)
     +Math.sin(this.breath*1.6)*.007+(this.previewBob||0);
@@ -3086,6 +3099,11 @@ Fighter.prototype.updateAlive=function(dt,opponent){
     P.head.lookAt(TMP3);
     _headQ.setFromAxisAngle(UPY,chestYawA);
     P.head.quaternion.slerp(_headQ,.35);
+    /* ease toward the target orientation at a RATE, not per-frame — the
+       head turns like a neck, not a servo */
+    if(this._headQ2){ this._headQ2.slerp(P.head.quaternion,clamp(dt*14,0,1));
+      P.head.quaternion.copy(this._headQ2); }
+    else this._headQ2=P.head.quaternion.clone();
     const droop=(this.begging?.45:0)+clamp((this.pain-22)/140,0,.42)
                +clamp((78-this.consciousness)/170,0,.38);
     if(droop>0){ _pq.setFromAxisAngle(rightC,droop*.6);
@@ -3417,10 +3435,15 @@ Fighter.prototype.pleadArm=function(side,sh,fwd,P){
 Fighter.prototype.hangArm=function(side,sh,right,P){
   const D=this.dims;
   const dir=side==='R'?1:-1;
-  const el=sh.clone().addScaledVector(right,dir*.06); el.y-=D.upperArm;
+  /* arms swing opposite the stepping leg — dead arms hang, live arms walk */
+  const fwd=_haF.set(-right.z,0,right.x);
+  const ph=this._armPh||0;
+  const sw=(side==='R'?-ph:ph)*.16*clamp(Math.hypot(this.vel.x,this.vel.z),0,1.3);
+  const el=sh.clone().addScaledVector(right,dir*.06).addScaledVector(fwd,sw*.5);
+  el.y-=D.upperArm;
   TMP4.subVectors(el,sh).normalize();
   el.copy(sh).addScaledVector(TMP4,D.upperArm);       // exact bone length
-  const ha=el.clone(); ha.y-=D.foreArm;
+  const ha=el.clone().addScaledVector(fwd,sw); ha.y-=D.foreArm;
   (side==='R'?this._K.elR:this._K.elL).copy(el);
   (side==='R'?this._K.haR:this._K.haL).copy(ha);
   const ua=side==='R'?P.upperArmR:P.upperArmL, fa=side==='R'?P.forearmR:P.forearmL;
@@ -3519,9 +3542,20 @@ function playerIntent(pl,en){
 
 /* ================================ AI =================================== */
 class AI{
-  constructor(f,P){ this.f=f; this.P=P||{skill:.82,reaction:.19,engage:[1.6,2.6],
+  constructor(f,P){ this.f=f; P=P||{skill:.82,reaction:.19,engage:[1.6,2.6],
       atkCircle:.5,atkBlock:.38,windupT:[.28,.46],strikeT:[.3,.44],
       speedMul:.85,parry:.2,maai:2.15,tempo:[.8,1.9]};
+    /* THE ROAD HARDENS: every rung of the ladder breeds a meaner opponent —
+       more attacks, shorter pauses, quicker wind-ups, tighter distance */
+    { const ag=1+Math.min(game.stage||0,10)*.14;
+      P=Object.assign({},P);
+      P.atkCircle=Math.min(.95,P.atkCircle*ag);
+      P.atkBlock=Math.min(.9,P.atkBlock*ag);
+      P.tempo=[P.tempo[0]/ag,P.tempo[1]/ag];
+      P.windupT=[P.windupT[0]/Math.sqrt(ag),P.windupT[1]/Math.sqrt(ag)];
+      P.maai=Math.max(1.6,P.maai-(game.stage||0)*.05);
+      P.reaction=Math.max(.08,P.reaction/Math.sqrt(ag)); }
+    this.P=P;
     this.state='circle'; this.t=rand(this.P.engage[0],this.P.engage[1]); // sizes you up first
     this.strafe=Math.random()<.5?1:-1; this.plan=null;
     this.reaction=this.P.reaction; this.alert=0;
@@ -3726,6 +3760,7 @@ function bladeVsBody(att,def,log){
       def.lastHitDir=dir.clone();
       const sevBefore=(def.severed.head?1:0)+(def.severed.armR?1:0)+(def.severed.armL?1:0);
       const res=def.applyCut(key,energy,align,att.thrust,hitTmpB.clone(),dir.clone(),log);
+      if(res)def._lastWoundPart=key;
       if(res)def.addHitMark(key,hitTmpB.clone(),dir,res.severity||'minor',AW.blunt);
       const severedNow=((def.severed.head?1:0)+(def.severed.armR?1:0)+(def.severed.armL?1:0))>sevBefore;
       /* THE BLADE BITES: a committed cut or thrust that does not pass
@@ -5181,7 +5216,7 @@ Fighter.prototype.buildSleeves=function(mat){
     this.sleeves.push(P);
   }
 };
-const _slA=V3(),_slB=V3(),_slO=V3();
+const _slA=V3(),_slB=V3(),_slO=V3(),_haF=V3();
 Fighter.prototype.tickSleeves=function(dt,J){
   if(!this.sleeves)return;
   dt=Math.min(dt,.033);
@@ -5326,7 +5361,7 @@ const KAMAE={
 
 /* ------------------------- the opponent ladder ------------------------- */
 const DUELISTS=[
-  {name:'KIYOMASA', kanji:'猪', epithet:'the Boar',
+  {name:'KIYOMASA', kanji:'猪', epithet:'the Boar', build:'yoroi',
    palette:{kimono:0x542c20,hakama:0x2a1810,obi:0xc07a20,skin:0xbf9276,accent:0x101010,
      face:{beard:true}},
    ai:{skill:.72,reaction:.24,engage:[1.2,2.0],atkCircle:.62,atkBlock:.3,
@@ -5337,7 +5372,7 @@ const DUELISTS=[
    ai:{skill:.86,reaction:.14,engage:[2.2,3.4],atkCircle:.16,atkBlock:.66,
        windupT:[.3,.42],strikeT:[.28,.4],speedMul:.9,parry:.5,maai:2.3,tempo:[.9,1.9],
        kamae:'seigan'}},
-  {name:'SHIZUKA', kanji:'静', epithet:'First Draw',
+  {name:'SHIZUKA', kanji:'静', epithet:'First Draw', build:'onna',
    palette:{kimono:0x46302a,hakama:0x241a14,obi:0xa82424,skin:0xbf9276,accent:0x101010,
      face:{mustache:true}},
    ai:{skill:.95,reaction:.11,engage:[2.6,4.2],atkCircle:.32,atkBlock:.28,
@@ -5359,9 +5394,13 @@ const GEN={
 function genDuelist(stage){
   const name=(GEN.syl[Math.floor(Math.random()*GEN.syl.length)]
     +GEN.syl2[Math.floor(Math.random()*GEN.syl2.length)]).toUpperCase();
+  /* the road provides EVERY kind of fighter */
+  const build=['musashi','yoroi','okina','gladiator','sumo','onna','ryu',
+    'musashi','yoroi','onna'][Math.floor(Math.random()*10)];
+  const wpn=['katana','katana','katana','broadsword','axe'][Math.floor(Math.random()*5)];
   const s=Math.min(.985,.8+stage*.018+Math.random()*.05);
   const arch=Math.random();          // blend of the three schools
-  return {name,
+  return {name,build,weapon:build==='ryu'?'bare':wpn,
     kanji:GEN.kanji[Math.floor(Math.random()*GEN.kanji.length)],
     epithet:GEN.epi[Math.floor(Math.random()*GEN.epi.length)],
     palette:{kimono:[0x3a2420,0x27313d,0x352822,0x2c3527,0x3d2733][Math.floor(Math.random()*5)],
@@ -5423,7 +5462,9 @@ function setup(){
   player=new Fighter(BUILDS[SELECT.P].label.split(' — ')[0],
     null,-1.9,1,true,SELECT.P);
   const D=DUELISTS[game.stage];
-  enemy=new Fighter(D.name,SELECT.E==='musashi'?D.palette:null,1.9,-1,false,SELECT.E);
+  const eBuild=(SELECT.E==='musashi'&&D.build)?D.build:SELECT.E;
+  const eWpn=(SELECT.WE==='katana'&&D.weapon)?D.weapon:SELECT.WE;
+  enemy=new Fighter(D.name,eBuild==='musashi'?D.palette:null,1.9,-1,false,eBuild,eWpn);
   enemy.speedMul=D.ai.speedMul;
   const lbl=document.getElementById('name-enemy');
   if(lbl)lbl.innerHTML='<span style="color:var(--dim)">'+D.kanji+' </span>'+D.name
@@ -6009,11 +6050,27 @@ function frame(now){
       else if(f.ragdoll)f.updateRagdoll(dt);
       else{ f.updateAlive(dt,f===player?enemy:player); f.updatePhysiology(dt,log); }
       updateLoose(f,dt);
-      if(!f.dead&&f.arterialWound&&f.bleedRate>15){
+      if(!f.dead&&(f.arterialWound||f.bleedRate>20)){
         if(f.pulseT>60/(100+(1-f.bloodFrac)*80)){ f.pulseT=0;
-          const c=f.capsules[f.arterialWound.part];
-          TMP1.addVectors(c.a,c.b).multiplyScalar(.5);
-          emitBlood(TMP1,V3(rand(-.5,.5),1,rand(-.5,.5)),2.6,5); }
+          const part=(f.arterialWound&&f.arterialWound.part)||f._lastWoundPart||'chest';
+          const c=f.capsules[part];
+          if(c){ TMP1.addVectors(c.a,c.b).multiplyScalar(.5);
+            /* the heart DRIVES it out — a jet you can see across the ring */
+            emitBlood(TMP1,V3(rand(-.8,.8),1.3,rand(-.8,.8)),3.6,14);
+            if(f.bleedRate>28)addSquirt(f,part,TMP1.clone(),3.4,.5); }
+        }
+      }
+      /* a severed stump PUMPS with every heartbeat while the heart lives */
+      if(!f.dead&&f.alive&&(f.severed.armR||f.severed.armL)){
+        f._stumpT=(f._stumpT||0)-dt;
+        if(f._stumpT<=0){
+          f._stumpT=.55+Math.random()*.35;
+          const key=f.severed.armR?'upperArmR':'upperArmL';
+          const c=f.capsules[key];
+          if(c){ TMP1.copy(c.b);
+            addSquirt(f,key,TMP1.clone(),3.6,.9);
+            emitBlood(TMP1,V3(rand(-1,1),1.6,rand(-1,1)),3.8,16); }
+        }
       }
       if(!f.dead&&f.pool){ f.pool.r=Math.min(2.4,f.pool.r+f.bleedRate*dt*.0026);
         f.pool.mesh.position.set(f.pos.x,.007,f.pos.z); }
