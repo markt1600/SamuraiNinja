@@ -1145,6 +1145,10 @@ function buildSkinnedBody(kimonoMat,hakamaMat,B,skinMat){
   const hm=hakamaMat.clone(); hm.skinning=true;
   if(hakamaTex&&!hm.map)hm.map=hakamaTex;
   const sk=(skinMat||hakamaMat).clone(); sk.skinning=true;
+  /* cloth has an INSIDE: a hard lean folding the open tube must show
+     dark fabric interior, not the world behind. Skin stays front-only
+     (a lit skin backface reads as a dark growth at open ankle ends). */
+  km.side=THREE.DoubleSide; hm.side=THREE.DoubleSide;
   km.roughness=.94; hm.roughness=.96;
   const mesh=new THREE.SkinnedMesh(geo,[km,hm,sk]);
   mesh.castShadow=true; mesh.frustumCulled=false;
@@ -1386,6 +1390,17 @@ class Fighter{
           st.position.set(0,-.1,.008); s.add(st);
           parts.pelvis.add(s);
         }
+      }
+      /* a dark core fills EVERY trunk: whatever the camera catches
+         through a fold or the tube's open ends, it meets shadowed cloth
+         interior — never the arena behind the man */
+      { const wS2=Math.min(this.build.waist||1,1.6);
+        const core=new THREE.Mesh(new THREE.CylinderGeometry(.1,.107,.6,14),
+          stdMat(new THREE.Color(this.palette.hakama).multiplyScalar(.35).getHex(),
+            {roughness:1}));
+        core.scale.set(wS2,1,wS2*.78);
+        core.position.y=.16;
+        parts.pelvis.add(core);
       }
       this.skirtF=skirtF; this.skirtB=skirtB;
     }
@@ -1893,6 +1908,15 @@ class Fighter{
     const hand=limb==='armR'?this.parts.handR:this.parts.handL;
     scene.attach(fore); scene.attach(hand);
     hand.position.copy(fore.position);
+    /* a LOADED model: bake the real forearm+hand geometry into a rigid
+       piece and let it ride the invisible procedural carrier — physics
+       and the ritual never know the difference */
+    if(this.model&&typeof MODELSEV!=='undefined'){
+      fore.traverse(o=>{ if(o.isMesh)o.visible=false; });
+      hand.traverse(o=>{ if(o.isMesh)o.visible=false; });
+      const pc=MODELSEV.sever(this,limb==='armR'?'RightForeArm':'LeftForeArm');
+      if(pc)fore.attach(pc);
+    }
     /* the torn ends: jagged flesh, protruding bone */
     const ua=limb==='armR'?this.parts.upperArmR:this.parts.upperArmL;
     this.stumpAt=attachStump(ua,-this.dims.upperArm,.052);   // on the body
@@ -2145,7 +2169,9 @@ const PICKER={
     {label:BUILDS.okina.label,build:'okina'},
     {label:BUILDS.ryu.label,build:'ryu'},
     {label:BUILDS.gladiator.label,build:'gladiator'},
-    {label:BUILDS.sumo.label,build:'sumo'}],
+    {label:BUILDS.sumo.label,build:'sumo'},
+    /* the first REAL mesh in the roster: the knight rides the sim */
+    {label:'⚔ PELEGRINI — knight',src:'models/knight.fbx'}],
   cycle(slot,dir){
     this.idx[slot]=(this.idx[slot]+dir+this.roster.length)%this.roster.length;
     this.apply(slot);
@@ -2576,9 +2602,136 @@ const MODELPIPE=(()=>{
   const current={P:null,E:null};
   return {enabled:true,sources,load,attach,drive,boneQuat,playClip,tickClips,clips,
     clipRigs,tickLoco,blendMap:null,
-    playPuppet,tickPuppet,current,
+    playPuppet,tickPuppet,current,findBone,
     _handFix:new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1,0,0),-Math.PI/2),
     mode:0};
+})();
+
+/* =========================================================================
+   MODELSEV — dismemberment for REAL skinned meshes. The blade decides on
+   capsules exactly as before; this module makes the loaded model obey:
+   the severed subtree's triangles are BAKED in this instant's pose into a
+   static piece (which rides the same invisible carrier the procedural
+   piece uses, so physics, the ritual, and the head-throw are unchanged),
+   the body keeps the remaining triangles, the orphaned bones collapse to
+   a point so leftover skin weights can't smear, and a flesh-and-bone
+   stump cap is planted on the cut.
+   ========================================================================= */
+const MODELSEV=(()=>{
+  const PART2BONE={head:'Head',neck:'Neck',chest:'Spine2',abdomen:'Spine',
+    pelvis:'Hips',upperArmR:'RightArm',forearmR:'RightForeArm',
+    upperArmL:'LeftArm',forearmL:'LeftForeArm',handR:'RightHand',
+    handL:'LeftHand',thighR:'RightUpLeg',shinR:'RightLeg',
+    thighL:'LeftUpLeg',shinL:'LeftLeg'};
+  const _v=new THREE.Vector3(), _w=new THREE.Vector3();
+  const clean=s=>s.toLowerCase().replace(/[^a-z0-9]/g,'');
+  function subtreeSet(skel,rootName){
+    const idx=new Set(), want=clean(rootName);
+    for(let i=0;i<skel.bones.length;i++){
+      let p=skel.bones[i];
+      while(p){ if(p.name&&clean(p.name).endsWith(want)){ idx.add(i); break; }
+        p=p.parent; }
+    }
+    return idx;
+  }
+  function sever(f,boneName){
+    const M=f.model; if(!M)return null;
+    const cutBone=MODELPIPE.findBone(M.root,boneName);
+    if(!cutBone)return null;
+    const smList=[]; M.root.traverse(o=>{ if(o.isSkinnedMesh)smList.push(o); });
+    if(!smList.length)return null;
+    M.root.updateMatrixWorld(true);
+    const pivot=new THREE.Vector3(); cutBone.getWorldPosition(pivot);
+    const piece=new THREE.Group(); let any=false;
+    for(const sm of smList){
+      try{
+        const geo=sm.geometry, skel=sm.skeleton;
+        const sub=subtreeSet(skel,boneName);
+        if(!sub.size)continue;
+        const si=geo.attributes.skinIndex, sw=geo.attributes.skinWeight;
+        const pos=geo.attributes.position, uv=geo.attributes.uv;
+        const n=pos.count, inSub=new Uint8Array(n);
+        for(let v2=0;v2<n;v2++){
+          let bw=-1,bi=0;
+          const xs=[si.getX(v2),si.getY(v2),si.getZ(v2),si.getW(v2)];
+          const ws=[sw.getX(v2),sw.getY(v2),sw.getZ(v2),sw.getW(v2)];
+          for(let k=0;k<4;k++)if(ws[k]>bw){ bw=ws[k]; bi=xs[k]; }
+          inSub[v2]=sub.has(bi)?1:0;
+        }
+        let idx;
+        if(geo.index)idx=geo.index.array;
+        else { idx=new Uint32Array(n); for(let i=0;i<n;i++)idx[i]=i; }
+        const groups=(geo.groups&&geo.groups.length)?geo.groups
+          :[{start:0,count:idx.length,materialIndex:0}];
+        const kept=[],cut=[],keptG=[],cutG=[];
+        for(const g of groups){
+          const k0=kept.length,c0=cut.length;
+          const end=Math.min(g.start+g.count,idx.length);
+          for(let i=g.start;i<end;i+=3){
+            const a=idx[i],b=idx[i+1],c=idx[i+2];
+            if(inSub[a]+inSub[b]+inSub[c]>=2)cut.push(a,b,c);
+            else kept.push(a,b,c);
+          }
+          if(kept.length>k0)keptG.push({start:k0,count:kept.length-k0,materialIndex:g.materialIndex});
+          if(cut.length>c0)cutG.push({start:c0,count:cut.length-c0,materialIndex:g.materialIndex});
+        }
+        if(!cut.length)continue;
+        any=true;
+        /* the body keeps the rest */
+        const g2=geo.clone();
+        g2.setIndex(kept);
+        g2.clearGroups(); for(const gg of keptG)g2.addGroup(gg.start,gg.count,gg.materialIndex);
+        sm.geometry=g2;
+        /* the piece: baked rigid, frozen in this instant's pose */
+        sm.updateMatrixWorld(true);
+        const map=new Map(), vlist=[];
+        for(const i of cut){ if(!map.has(i)){ map.set(i,vlist.length); vlist.push(i); } }
+        const parr=new Float32Array(vlist.length*3);
+        const uarr=uv?new Float32Array(vlist.length*2):null;
+        for(let j=0;j<vlist.length;j++){
+          const i=vlist[j];
+          _v.fromBufferAttribute(pos,i);
+          if(sm.applyBoneTransform)sm.applyBoneTransform(i,_v);
+          else if(sm.boneTransform)sm.boneTransform(i,_v);
+          _v.applyMatrix4(sm.matrixWorld).sub(pivot);
+          parr[j*3]=_v.x; parr[j*3+1]=_v.y; parr[j*3+2]=_v.z;
+          if(uarr){ uarr[j*2]=uv.getX(i); uarr[j*2+1]=uv.getY(i); }
+        }
+        const pg=new THREE.BufferGeometry();
+        pg.setAttribute('position',new THREE.BufferAttribute(parr,3));
+        if(uarr)pg.setAttribute('uv',new THREE.BufferAttribute(uarr,2));
+        pg.setIndex(cut.map(i=>map.get(i)));
+        pg.clearGroups(); for(const gg of cutG)pg.addGroup(gg.start,gg.count,gg.materialIndex);
+        pg.computeVertexNormals();
+        const pm=new THREE.Mesh(pg,sm.material);
+        pm.castShadow=true; pm.frustumCulled=false;
+        piece.add(pm);
+      }catch(e){}
+    }
+    if(!any)return null;
+    /* orphaned bones collapse into the cut: leftover weights can't smear */
+    cutBone.scale.setScalar(.0001);
+    /* the stump cap on the body: raw flesh and a jut of bone */
+    try{
+      const pb=cutBone.parent;
+      if(pb){
+        const cap=new THREE.Group();
+        const flesh=new THREE.Mesh(new THREE.SphereGeometry(.055,12,9),
+          stdMat(0x6e1216,{roughness:.5}));
+        flesh.scale.set(1,.55,1);
+        const bone=new THREE.Mesh(new THREE.CylinderGeometry(.012,.014,.07,7),
+          stdMat(0xe6dfc9,{roughness:.4}));
+        bone.position.y=.03;
+        cap.add(flesh,bone);
+        cap.position.copy(pivot);
+        scene.add(cap); pb.attach(cap);
+      }
+    }catch(e){}
+    piece.position.copy(pivot);
+    scene.add(piece);
+    return piece;
+  }
+  return {sever,PART2BONE};
 })();
 /* the picker offers ONLY the procedural fighters. Bundled model files are
    not surfaced; dropping a .glb/.fbx onto the page remains the back door. */
@@ -3035,10 +3188,16 @@ Fighter.prototype.updateDeadPhys=function(dt){
 };
 Fighter.prototype.setModel=function(gltf){
   if(!MODELPIPE.enabled)return;
+  const fabric=(vis)=>{ // the verlet costume belongs to the tube body
+    if(this.cloth)for(const P of this.cloth)P.mesh.visible=vis;
+    if(this.sleeves)for(const P of this.sleeves)P.mesh.visible=vis;
+    if(this.hairCloth)this.hairCloth.mesh.visible=vis;
+  };
   if(!gltf){ // back to the procedural samurai
     if(this.model){ scene.remove(this.model.root); this.model=null; }
     this.root.visible=true;
     if(this.skin)this.skin.mesh.visible=true;
+    fabric(true);
     return;
   }
   const m=MODELPIPE.attach(this,gltf);
@@ -3046,6 +3205,7 @@ Fighter.prototype.setModel=function(gltf){
   this.model=m;
   this.root.visible=false;             // hide procedural body...
   if(this.skin)this.skin.mesh.visible=false;
+  fabric(false);                       // ...its flowing costume too...
   this.katana.visible=true;            // ...but the steel is always ours
 };
 Fighter.prototype._bob=function(y){ return y+(this.previewBob||0); };
@@ -4561,6 +4721,13 @@ Fighter.prototype.decapitate=function(worldPt,hitDir){
   try{
     const head=this.parts.head;
     scene.attach(head);
+    /* a LOADED model loses its REAL head — baked with helmet and all,
+       riding the invisible procedural head the ritual already carries */
+    if(this.model&&typeof MODELSEV!=='undefined'){
+      head.traverse(o=>{ if(o.isMesh)o.visible=false; });
+      const pc=MODELSEV.sever(this,'Head');
+      if(pc)head.attach(pc);
+    }
     this.severedPieces=this.severedPieces||[];
     this.severedPieces.push({mesh:head,bleed:3,
       vel:V3(hitDir.x*2.6+rand(-.6,.6),rand(2.8,3.8),hitDir.z*2.6+rand(-.6,.6)),
@@ -4860,10 +5027,26 @@ Fighter.prototype.addHitMark=function(partKey,worldPt,hitDir,severity,blunt){
       polygonOffset:true,polygonOffsetFactor:-5});
     const m=new THREE.Mesh(
       new THREE.PlaneGeometry(size,blunt?size*.85:(onCloth?size:size*.45)),mat);
+    m.renderOrder=4;
+    if(this.model&&typeof MODELSEV!=='undefined'){
+      /* a LOADED model wears its wounds on the bone */
+      const b=MODELPIPE.findBone(this.model.root,
+        MODELSEV.PART2BONE[partKey]||'Spine1');
+      if(!b)return;
+      b.getWorldPosition(TMP1);
+      TMP2.subVectors(worldPt,TMP1); TMP2.y*=.3;
+      if(TMP2.lengthSq()<1e-6)TMP2.set(0,0,1); TMP2.normalize();
+      m.position.copy(worldPt).addScaledVector(TMP2,.015);
+      m.lookAt(TMP1.copy(m.position).addScaledVector(TMP2,1));
+      if(!blunt&&hitDir)
+        m.rotation.z=-Math.atan2(hitDir.y,
+          Math.hypot(hitDir.x,hitDir.z)+.001)*1.1+rand(-.25,.25);
+      scene.add(m); b.attach(m);
+      return;
+    }
     part.updateMatrixWorld(true);
     m.position.copy(part.worldToLocal(worldPt.clone())).multiplyScalar(1.08);
     m.lookAt(m.position.clone().multiplyScalar(3));
-    m.renderOrder=4;
     /* the stripe follows the cut's line */
     if(!blunt&&hitDir)
       m.rotation.z=-Math.atan2(hitDir.y,
@@ -5980,11 +6163,13 @@ function restart(){
   document.body.classList.remove('cine');
   document.getElementById('verdict').classList.add('hidden');
   setTimeout(grabPointer,60);
+  setup(); game.state='fight'; game.timeScale=1; game.duelTime=0;
+  /* AFTER setup: the fighters setup just built are the ones who fight —
+     dressing the old, about-to-be-disposed pair was a silent no-op */
   if(MODELPIPE.enabled){
     if(MODELPIPE.current.P)player.setModel(MODELPIPE.current.P);
     if(MODELPIPE.current.E)enemy.setModel(MODELPIPE.current.E);
   }
-  setup(); game.state='fight'; game.timeScale=1; game.duelTime=0;
   if(climbed)showLadder();       // the sense of ascent, before the bow
 }
 /* mercy granted: the duel ends without a death. The road goes on. */

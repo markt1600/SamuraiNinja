@@ -188,6 +188,16 @@ Kill all three: **三人斬り**.
   rung resolves once to an unfought build, a hand-picked opponent is
   honored for the first duel only, and a loss or a return to the menu
   resets the roster for a fresh climb.
+- **THE KNIGHT — the first real mesh in the roster.** A rigged,
+  textured character (models/knight.fbx) rides the full simulation:
+  the picker offers him alongside the procedural cast, and MODELSEV
+  gives loaded models true dismemberment — at a severance the subtree's
+  triangles are baked in that instant's pose into a rigid piece that
+  rides the same invisible carrier as the procedural limb (physics,
+  head-throw ritual, everything unchanged), the body keeps the rest,
+  orphaned bones collapse into the cut, and a flesh-and-bone stump cap
+  is planted on the model bone. Blood decals mount to the bones. The
+  procedural verlet costume hides while a model is worn.
 - **Stuck steel reads as stuck** — an embedded blade now wears a dark
   blood collar and splash at the entry wound, weeping continuously,
   so a lodged blade can't be mistaken for a pass-through flash. And
