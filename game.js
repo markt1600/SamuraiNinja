@@ -590,8 +590,10 @@ function mkContactShadow(){
     const a=i/N*Math.PI*2, x=Math.cos(a)*(RING_R+.32), z=Math.sin(a)*(RING_R+.32);
     const post=new THREE.Mesh(new THREE.CylinderGeometry(.045,.06,1.02,8),wood);
     post.position.set(x,.51,z); post.castShadow=true; scene.add(post);
-    const cap=new THREE.Mesh(new THREE.SphereGeometry(.05,8,6),stdMat(0xdfe4e8,{roughness:.9}));
-    cap.position.set(x,1.03,z); scene.add(cap);
+    /* snow cap SUNK into the post top — a cap floating above a post that
+       vanishes against the dark treeline reads as a levitating ball */
+    const cap=new THREE.Mesh(new THREE.SphereGeometry(.046,10,8),stdMat(0xcdd4da,{roughness:.95}));
+    cap.position.set(x,.995,z); cap.scale.y=.75; scene.add(cap);
     tops.push(V3(x,.98,z));
   }
   for(let i=0;i<N;i++){
@@ -1040,7 +1042,7 @@ function buildSkinnedBody(kimonoMat,hakamaMat,B){
   /* ---- torso (kimono) ---- */
   { const P=BONES.pelvis,S=BONES.spine,Ch=BONES.chest;
     const prof=[ // y, radius, depth-scale — a torso, not a pipe
-      [.78,.150,.82],[ .84,.154,.85],[ .90,.155,.86],[ .96,.146,.84],
+      [.72,.144,.80],[.78,.150,.82],[ .84,.154,.85],[ .90,.155,.86],[ .96,.146,.84],
       [1.02,.134,.81],[1.07,.127,.79],[1.12,.128,.79],[1.18,.134,.79],
       [1.24,.146,.80],[1.30,.158,.82],[1.36,.170,.85],[1.41,.172,.87],
       [1.45,.148,.88],[1.475,.120,.88]];
@@ -1529,8 +1531,8 @@ class Fighter{
     /* continuous skinned body over torso, upper arms, legs */
     this.skin=buildSkinnedBody(this.build.bare?skin:kimono,hakama,this.build);
     scene.add(this.skin.mesh);
-    this.buildCloth(rimify(stdMat(this.palette.hakama,{roughness:.94,
-      side:THREE.DoubleSide,map:hakamaTex||null}),.3,.38,.58,3,.4));
+    this.buildCloth(rimify(stdMat(this.palette.hakama,{roughness:.96,
+      side:THREE.DoubleSide,map:hakamaTex||null}),.3,.38,.58,3,.22));
     this.buildSleeves(rimify(stdMat(this.palette.kimono,{roughness:.95,
       side:THREE.DoubleSide,map:kimonoTex||null}),.32,.42,.62,3,.2));
     if(this.build.armor)this.buildArmor();
@@ -2956,7 +2958,10 @@ Fighter.prototype.updateAlive=function(dt,opponent){
   aimLimb(P.abdomen,chestB,pelvis);
   aimLimb(P.chest,chestT,chestB);
   aimLimb(P.neck,neckT,chestT);
-  this.setPelvisBone(pelvis,pelvisYawA);
+  { /* the skinned torso's root follows the SAME tilted orientation as the
+       pelvis kit — a hard lean must not open a seam at the waist */
+    const b=this.skin.bones[this.skin.BONES.pelvis];
+    b.position.copy(pelvis); b.quaternion.copy(P.pelvis.quaternion); }
   this.setBone('spine',chestB,pelvis);
   this.setBone('chest',chestT,chestB);
   this._K.pelvis.copy(pelvis); this._K.chestB.copy(chestB);
@@ -4713,6 +4718,7 @@ function mkClothPanel(cols,rows,mat,w0,w1,rowL){
   const geo=new THREE.PlaneGeometry(1,1,cols-1,rows-1);
   const mesh=new THREE.Mesh(geo,mat);
   mesh.frustumCulled=false; mesh.castShadow=true;
+  mesh.receiveShadow=true;   // shaded by the body: cloth, not ghost-paper
   const pts=[];
   for(let r=0;r<rows;r++)for(let c=0;c<cols;c++)
     pts.push({p:V3(),pp:V3(),pin:r===0});
@@ -4828,11 +4834,13 @@ Fighter.prototype.buildCloth=function(hakamaMat){
   scene.add(P.mesh);
   for(const q of P.pts){ q.p.set(this.pos.x,.8,this.pos.z); q.pp.copy(q.p); }
   this.cloth.push(P);
-  /* obi tails: two ribbons off the back knot, never quite still */
-  const tailM=rimify(stdMat(this.palette.obi,{roughness:.9,
-    side:THREE.DoubleSide}),.3,.36,.5,3,.25);
+  /* obi tails: two ribbons off the back knot, never quite still —
+     dimmed and small so they read as sash ends, not paper streamers */
+  const tailM=new THREE.MeshStandardMaterial({
+    color:SRGB(this.palette.obi).multiplyScalar(.68),
+    roughness:1,side:THREE.DoubleSide});
   for(const s of [-1,1]){
-    const T=mkClothPanel(2,5,tailM,.048,.052,.06);
+    const T=mkClothPanel(2,4,tailM,.04,.044,.05);
     T.tail=s; scene.add(T.mesh);
     for(const q of T.pts){ q.p.set(this.pos.x,.9,this.pos.z); q.pp.copy(q.p); }
     this.cloth.push(T);
