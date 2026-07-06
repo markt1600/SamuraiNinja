@@ -164,6 +164,13 @@ Kill all three: **三人斬り**.
   onto a true mocap arc. The axe fighter also takes a mocap practice
   chop at the bow and performs a combo flourish over the fallen in
   place of the swordsman's noto.
+- **Axe locomotion pack** — the axe fighter's trunk life comes from an
+  armed standing idle plus four directional walks, blended by where the
+  body is going relative to where it faces: circling a foe reads as a
+  true strafe, retreating as a backpedal, each with its own mocap
+  rhythm. Bare fists now fold hard at the knuckle (per-pose curl
+  multipliers) instead of half-wrapping an invisible handle, and every
+  build's neck was shortened to human proportion.
 
 ## v5 — the duel becomes a life
 

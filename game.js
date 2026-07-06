@@ -1301,7 +1301,7 @@ class Fighter{
       torso:.5,pelvisY:.9,
       upperArm:.29,foreArm:.27,
       thigh:.44,shin:.40,
-      headR:.1,neck:.085,
+      headR:.1,neck:.055,
     };
 
     this.root=new THREE.Group(); scene.add(this.root);
@@ -1512,16 +1512,20 @@ class Fighter{
       const palm=new THREE.Mesh(new THREE.SphereGeometry(.036,14,10),skin);
       palm.scale.set(.78,1.1,.44); palm.position.z=-.022; gAdd(palm);
       const curl=pose==='fist'?1.9:1.25;      // radians of finger wrap
+      /* a fist folds at the knuckle far harder than a hand wrapping a
+         handle — per-pose joint multipliers, reused by tickFingers */
+      const m1=pose==='fist'?.85:.55, m2=pose==='fist'?.95:.7;
+      g.userData.curlM=[m1,m2];
       g.userData.joints=[];
       /* capsule fingers: rounded flesh, not matchsticks */
       for(let i=0;i<4;i++){
         const fx=(i-1.5)*.014*s;
         const seg1=new THREE.Mesh(new THREE.CapsuleGeometry(.0062,.026,3,10),skin);
         const j1=new THREE.Group();
-        j1.position.set(fx,.038,.006); j1.rotation.x=curl*.55;
+        j1.position.set(fx,.038,.006); j1.rotation.x=curl*m1;
         seg1.position.y=.018; j1.add(seg1);
         const j2=new THREE.Group();
-        j2.position.y=.036; j2.rotation.x=curl*.7;
+        j2.position.y=.036; j2.rotation.x=curl*m2;
         const seg2=new THREE.Mesh(new THREE.CapsuleGeometry(.0056,.02,3,10),skin);
         seg2.position.y=.015; j2.add(seg2); j1.add(j2);
         g.add(j1);
@@ -1529,11 +1533,11 @@ class Fighter{
       }
       const tj=new THREE.Group();
       tj.position.set(.028*s,-.006,.012);
-      tj.rotation.set(pose==='fist'?1.1:.7,0,-.9*s);
+      tj.rotation.set(pose==='fist'?1.35:.7,0,-.9*s);
       const th1=new THREE.Mesh(new THREE.CapsuleGeometry(.0072,.022,3,10),skin);
       th1.position.y=.017; tj.add(th1);
       const th2=new THREE.Mesh(new THREE.CapsuleGeometry(.0064,.016,3,10),skin);
-      th2.position.y=.045; th2.rotation.x=pose==='fist'?.9:.6; tj.add(th2);
+      th2.position.y=.045; th2.rotation.x=pose==='fist'?1.15:.6; tj.add(th2);
       gAdd(tj);
       g.traverse(o=>{ if(o.isMesh)o.castShadow=true; });
       return g;
@@ -2387,6 +2391,13 @@ const MODELPIPE=(()=>{
   loadClip('melee_c1','models/anims/melee/melee_c1.fbx');
   loadClip('melee_c2','models/anims/melee/melee_c2.fbx');
   loadClip('melee_c3','models/anims/melee/melee_c3.fbx');
+  /* axe locomotion: armed idle + four directional walks (GSLOCO blends
+     them by movement direction, so circling a foe reads as a strafe) */
+  loadClip('ax_idle','models/anims/ax/ax_idle.fbx');
+  loadClip('ax_fwd','models/anims/ax/ax_fwd.fbx');
+  loadClip('ax_back','models/anims/ax/ax_back.fbx');
+  loadClip('ax_left','models/anims/ax/ax_left.fbx');
+  loadClip('ax_right','models/anims/ax/ax_right.fbx');
   function playClip(f,name,fade){
     const M=f.model; if(!M||!clips[name])return false;
     try{
@@ -2502,10 +2513,14 @@ const GSLOCO=(()=>{
   const _w=V3(), _w2=V3(), _w3=V3();
   function mk(f){
     try{
-      /* bare hands idle from the fist pack; everyone walks/runs on gs */
+      /* bare hands idle from the fist pack, the axe carries its own
+         armed idle + four directional walks; everyone else lives on gs */
       const bare=!!(f&&f.weapon&&f.weapon.blunt
         &&MODELPIPE.clips['ff_idle']&&MODELPIPE.clipRigs['ff_idle']);
-      const src=bare?'ff_idle':'gs_idle';
+      const axe=!!(f&&f.weapon===WEAPONS.axe&&MODELPIPE.clipRigs['ax_idle']
+        &&['ax_idle','ax_fwd','ax_back','ax_left','ax_right']
+          .every(n=>MODELPIPE.clips[n]));
+      const src=axe?'ax_idle':bare?'ff_idle':'gs_idle';
       const R=MODELPIPE.clipRigs&&MODELPIPE.clipRigs[src];
       if(!R||!MODELPIPE.clips[src])return null;
       const rig=THREE.SkeletonUtils?THREE.SkeletonUtils.clone(R):null;
@@ -2523,7 +2538,9 @@ const GSLOCO=(()=>{
         const a=mixer.clipAction(c); a.setLoop(THREE.LoopRepeat);
         a.play(); a.weight=0; return a; };
       const L={rig,mixer,bones,src,
-        idle:act(src),walk:act('gs_walk'),run:act('gs_run')};
+        idle:act(src),walk:axe?null:act('gs_walk'),run:act('gs_run'),
+        wF:axe?act('ax_fwd'):null,wB:axe?act('ax_back'):null,
+        wL:axe?act('ax_left'):null,wR:axe?act('ax_right'):null};
       rig.updateMatrixWorld(true);
       bones.hips.getWorldPosition(_w);
       L.k=.9/Math.max(Math.abs(_w.y),.01);
@@ -2540,12 +2557,28 @@ const GSLOCO=(()=>{
     }
     const L=f._gsl;
     const wRun=L.run?clamp((speed-1.9)/1.2,0,1):0;
-    const wWalk=L.walk?clamp(speed/.8,0,1)*(1-wRun):0;
+    const wWalk=(L.walk||L.wF)?clamp(speed/.8,0,1)*(1-wRun):0;
     const wIdle=L.idle?Math.max(0,1-wWalk-wRun):0;
     const k=clamp(dt*5,0,1);
     if(L.idle)L.idle.weight=lerp(L.idle.weight,wIdle,k);
     if(L.walk){ L.walk.weight=lerp(L.walk.weight,wWalk,k);
       L.walk.timeScale=clamp(speed/1.35,.6,1.9); }
+    else if(L.wF){
+      /* directional pack: split the walk among fwd/back/left/right by
+         where the body is actually going relative to where it faces */
+      let dF=1,dR=0;
+      if(speed>.05){ const fw=DIRY(f.bodyYaw);
+        dF=(f.vel.x*fw.x+f.vel.z*fw.z)/speed;
+        dR=(f.vel.x*fw.z-f.vel.z*fw.x)/speed; }
+      const nrm=Math.max(Math.abs(dF)+Math.abs(dR),1e-6);
+      const ts=clamp(speed/1.35,.6,1.9);
+      const setW=(a,w)=>{ if(!a)return;
+        a.weight=lerp(a.weight,w,k); a.timeScale=ts; };
+      setW(L.wF,wWalk*Math.max(dF,0)/nrm);
+      setW(L.wB,wWalk*Math.max(-dF,0)/nrm);
+      setW(L.wR,wWalk*Math.max(dR,0)/nrm);
+      setW(L.wL,wWalk*Math.max(-dR,0)/nrm);
+    }
     if(L.run){ L.run.weight=lerp(L.run.weight,wRun,k);
       L.run.timeScale=clamp(speed/3,.6,1.6); }
     L.mixer.update(dt);
@@ -2941,10 +2974,11 @@ Fighter.prototype.tickFingers=function(dt){
   for(const hand of [this.parts.handR,this.parts.handL]){
     const J=hand&&hand.userData&&hand.userData.joints;
     if(!J)continue;
+    const M=hand.userData.curlM||[.55,.7];   // fists fold harder than grips
     for(const f of J){
       const t=target+Math.sin(this.breath*2.1+f.ph)*.03; // fingers are never still
-      f.j1.rotation.x+=(t*.55-f.j1.rotation.x)*k;
-      f.j2.rotation.x+=(t*.7-f.j2.rotation.x)*k;
+      f.j1.rotation.x+=(t*M[0]-f.j1.rotation.x)*k;
+      f.j2.rotation.x+=(t*M[1]-f.j2.rotation.x)*k;
     }
   }
 };
@@ -3298,7 +3332,7 @@ Fighter.prototype.updateAlive=function(dt,opponent){
   /* head tracks the opponent, clamped toward the chest's facing */
   const headPos=neckT.clone().addScaledVector(fwdC,.028)
     .addScaledVector(this.flinch,1.25);
-  headPos.y=neckT.y+.085+this.flinch.y*1.25;
+  headPos.y=neckT.y+.07+this.flinch.y*1.25;
   if(!this.severed.head)P.head.position.copy(headPos);
   TMP3.copy(opponent.parts.head?opponent.parts.head.position:opponent.pos);
   if(TMP3.distanceToSquared(headPos)>.04){
