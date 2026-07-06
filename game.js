@@ -2264,7 +2264,7 @@ const MODELPIPE=(()=>{
     'RightUpLeg','RightLeg','RightFoot','LeftUpLeg','LeftLeg','LeftFoot'];
   const _qw=new THREE.Quaternion(), _qp=new THREE.Quaternion(),
         _qs=new THREE.Quaternion(), _q2=new THREE.Quaternion();
-  const _da=V3(), _db=V3();
+  const _da=V3(), _db=V3(), _dc=V3(), _dd=V3();
   function attach(f,gltf){
     if(f.model){ scene.remove(f.model.root); }
     const root=THREE.SkeletonUtils?THREE.SkeletonUtils.clone(gltf.scene)
@@ -2328,7 +2328,24 @@ const MODELPIPE=(()=>{
         for(const cn of TIPS[n]){ child=findBone(root,cn); if(child)break; } }
       aim[n]=child||null;
     }
-    return {root,bones,aim,scale:s,worldQ:{},anims};
+    /* the hand's own length: wrist→knuckles, so the PALM can hold the
+       grip instead of the wrist floating at it */
+    let hLen=.07;
+    if(bones.RightHand&&aim.RightHand){
+      bones.RightHand.getWorldPosition(_da);
+      aim.RightHand.getWorldPosition(_db);
+      hLen=clamp(_da.distanceTo(_db)*1.5,.05,.13);
+    }
+    /* facing calibration: forward derived from the leg bones (F = R×U,
+       so F.z = right.x) must agree with the file's own +Z facing — a
+       mirror-labeled rig would otherwise lock in 180° backwards */
+    let fSign=1;
+    if(bones.RightUpLeg&&bones.LeftUpLeg){
+      bones.RightUpLeg.getWorldPosition(_da);
+      bones.LeftUpLeg.getWorldPosition(_db);
+      if(_da.x-_db.x<0)fSign=-1;
+    }
+    return {root,bones,aim,hLen,fSign,scale:s,worldQ:{},anims};
   }
   /* ---- locomotion: the model's own mocap breathes under the sim ----
      Idle/Walk/Run clips (bundled Xbot/Soldier ship them) crossfade by
@@ -2423,7 +2440,7 @@ const MODELPIPE=(()=>{
       const b=M.bones.Hips, rl=M.bones.RightUpLeg, ll=M.bones.LeftUpLeg;
       if(b&&rl&&ll){
         rl.getWorldPosition(_x); ll.getWorldPosition(_y);
-        _da.subVectors(_x,_y);                       // live anatomical right
+        _da.subVectors(_x,_y).multiplyScalar(M.fSign||1); // live anatomical right
         _z.subVectors(J.chestB,J.pelvis).normalize();
         _da.addScaledVector(_z,-_da.dot(_z));
         _db.crossVectors(_da,_z);                    // live forward (R×U)
@@ -2448,18 +2465,25 @@ const MODELPIPE=(()=>{
     aimDelta('Spine2',_da,J.chestT);
     aimDelta('Neck',J.chestT,J.neckT);
     /* the head rides the neck in its own bind pose — never re-based */
+    /* the PALM holds the steel, not the wrist: pull each wrist short of
+       its grip anchor by the hand's own length along the blade */
+    const armed=f.katana&&f.hasSword&&f.tip;
+    let gdir=null;
+    if(armed){ _db.subVectors(f.tip,J.haR);
+      if(_db.lengthSq()>1e-8)gdir=_db.normalize(); }
+    const hOff=(M.hLen||.07)*.8;
+    const hrR=gdir?_dc.copy(J.haR).addScaledVector(gdir,-hOff):J.haR;
+    const hrL=gdir?_dd.copy(J.haL).addScaledVector(gdir,-hOff):J.haL;
     aimDelta('RightShoulder',J.chestT,J.shR);
     aimDelta('RightArm',J.shR,J.elR);
-    aimDelta('RightForeArm',J.elR,J.haR);
+    aimDelta('RightForeArm',J.elR,hrR);
     aimDelta('LeftShoulder',J.chestT,J.shL);
     aimDelta('LeftArm',J.shL,J.elL);
-    aimDelta('LeftForeArm',J.elL,J.haL);
-    /* hands: the fingers reach along the grip toward the steel */
-    if(f.katana&&f.hasSword&&f.tip){
-      _db.subVectors(f.tip,J.haR);
-      if(_db.lengthSq()>1e-8){ _db.normalize();
-        _da.copy(J.haR).add(_db); aimDelta('RightHand',J.haR,_da);
-        _da.copy(J.haL).add(_db); aimDelta('LeftHand',J.haL,_da); }
+    aimDelta('LeftForeArm',J.elL,hrL);
+    /* fingers reach along the grip toward the steel */
+    if(gdir){
+      _da.copy(hrR).add(gdir); aimDelta('RightHand',hrR,_da);
+      _da.copy(hrL).add(gdir); aimDelta('LeftHand',hrL,_da);
     }
     aimDelta('RightUpLeg',J.hipR,J.knR);
     aimDelta('RightLeg',J.knR,J.ankR);
@@ -6228,7 +6252,10 @@ function restart(){
   if(MODELPIPE.enabled)setTimeout(()=>{
     let hold=0;
     for(const f of [player,enemy]){ if(!f)continue;
-      if(f.model){ if(MODELPIPE.playClip(f,'draw',.1))hold=Math.max(hold,1.55); continue; }
+      /* a model holds the sim's guard from frame one: a draw clip would
+         own the skeleton while the sim owns the sword — they'd disagree
+         until the first step */
+      if(f.model)continue;
       /* fists shadowbox, the axe takes a practice chop, blades are drawn */
       const bare=f.weapon&&f.weapon.blunt&&MODELPIPE.clips.ff_bag;
       const axe=f.weapon===WEAPONS.axe&&MODELPIPE.clips.melee_dn;
