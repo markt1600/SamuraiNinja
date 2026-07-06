@@ -2172,8 +2172,7 @@ const PICKER={
     {label:BUILDS.sumo.label,build:'sumo'},
     /* the REAL meshes in the roster: loaded rigs riding the sim, with
        full severance, decals, and the head-taking ritual */
-    {label:'⚔ PELEGRINI — knight',src:'models/knight.fbx'},
-    {label:'屍 ZOMBIEGIRL — the returned',src:'models/Zombiegirl W Kurniawan.fbx'}],
+    {label:'⚔ PELEGRINI — knight',src:'models/knight.fbx'}],
   cycle(slot,dir){
     this.idx[slot]=(this.idx[slot]+dir+this.roster.length)%this.roster.length;
     this.apply(slot);
