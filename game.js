@@ -2282,6 +2282,10 @@ const MODELPIPE=(()=>{
              under the moon — lift them to a dark steel that keeps shape */
           if(!c.map&&c.color){ const hsl={h:0,s:0,l:0}; c.color.getHSL(hsl);
             if(hsl.l<.06)c.color.setHSL(hsl.h,Math.min(hsl.s,.4),.16); }
+          /* and every model gets a faint self-light: the moonlit night
+             is authored for our pale procedural cloth, not dark leather */
+          if(c.emissive!==undefined&&c.color)
+            c.emissive.copy(c.color).multiplyScalar(.09);
           c._base=c.color?c.color.clone():null; return c; };
         o.material=Array.isArray(o.material)?o.material.map(own):own(o.material);
       } } });
@@ -2335,6 +2339,32 @@ const MODELPIPE=(()=>{
       bones.RightHand.getWorldPosition(_da);
       aim.RightHand.getWorldPosition(_db);
       hLen=clamp(_da.distanceTo(_db)*1.5,.05,.13);
+    }
+    /* GRIP: curl the fingers once at attach. The flexion sign is
+       MEASURED, not assumed — rotate the index proximal, see whether
+       the fingertip approached the forearm (flexion) or fled (hyper-
+       extension), and curl every finger with the winning sign. */
+    for(const side of ['Right','Left']){
+      const w=bones[side+'Hand'], fa=bones[side+'ForeArm'];
+      const b1=findBone(root,side+'HandIndex1');
+      const tip=findBone(root,side+'HandIndex3')||findBone(root,side+'HandIndex2');
+      if(!w||!fa||!b1||!tip)continue;
+      root.updateMatrixWorld(true);
+      fa.getWorldPosition(_db);
+      const d0=tip.getWorldPosition(_da).distanceTo(_db);
+      b1.rotation.z+=.7; b1.updateMatrixWorld(true);
+      const d1=tip.getWorldPosition(_da).distanceTo(_db);
+      b1.rotation.z-=.7; b1.updateMatrixWorld(true);
+      const sign=d1<d0?1:-1;
+      for(const fn of ['Thumb','Index','Middle','Ring','Pinky'])
+        for(let seg=1;seg<=3;seg++){
+          const b=findBone(root,side+'Hand'+fn+seg);
+          if(!b)continue;
+          const amt=fn==='Thumb'?(seg===1?.25:.45)
+            :(seg===1?.8:seg===2?1.0:.75);
+          b.rotation.z+=sign*amt;
+        }
+      root.updateMatrixWorld(true);
     }
     /* facing calibration: forward derived from the leg bones (F = R×U,
        so F.z = right.x) must agree with the file's own +Z facing — a
