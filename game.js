@@ -2285,7 +2285,7 @@ const MODELPIPE=(()=>{
           /* and every model gets a faint self-light: the moonlit night
              is authored for our pale procedural cloth, not dark leather */
           if(c.emissive!==undefined&&c.color)
-            c.emissive.copy(c.color).multiplyScalar(.09);
+            c.emissive.copy(c.color).multiplyScalar(.045);
           c._base=c.color?c.color.clone():null; return c; };
         o.material=Array.isArray(o.material)?o.material.map(own):own(o.material);
       } } });
@@ -2360,8 +2360,8 @@ const MODELPIPE=(()=>{
         for(let seg=1;seg<=3;seg++){
           const b=findBone(root,side+'Hand'+fn+seg);
           if(!b)continue;
-          const amt=fn==='Thumb'?(seg===1?.25:.45)
-            :(seg===1?.8:seg===2?1.0:.75);
+          const amt=fn==='Thumb'?(seg===1?.4:.7)
+            :(seg===1?1.05:seg===2?1.3:1.0);
           b.rotation.z+=sign*amt;
         }
       root.updateMatrixWorld(true);
@@ -2501,7 +2501,7 @@ const MODELPIPE=(()=>{
     let gdir=null;
     if(armed){ _db.subVectors(f.tip,J.haR);
       if(_db.lengthSq()>1e-8)gdir=_db.normalize(); }
-    const hOff=(M.hLen||.07)*.8;
+    const hOff=(M.hLen||.07)*.55;   // handle in the FINGERS, not the heel
     const hrR=gdir?_dc.copy(J.haR).addScaledVector(gdir,-hOff):J.haR;
     const hrL=gdir?_dd.copy(J.haL).addScaledVector(gdir,-hOff):J.haL;
     aimDelta('RightShoulder',J.chestT,J.shR);
