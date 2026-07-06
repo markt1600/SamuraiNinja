@@ -2366,6 +2366,17 @@ const MODELPIPE=(()=>{
         }
       root.updateMatrixWorld(true);
     }
+    /* where the curled fingers actually close, in hand-local space —
+       the drive loop steers THIS point onto the grip anchor, so the
+       handle sits inside the fist instead of across the back of it */
+    const gripLoc={};
+    for(const side of ['Right','Left']){
+      const w=bones[side+'Hand']; if(!w)continue;
+      const k=findBone(root,side+'HandIndex2')||findBone(root,side+'HandMiddle2');
+      if(!k)continue;
+      k.getWorldPosition(_da);
+      gripLoc[side]=w.worldToLocal(_da.clone());
+    }
     /* facing calibration: forward derived from the leg bones (F = R×U,
        so F.z = right.x) must agree with the file's own +Z facing — a
        mirror-labeled rig would otherwise lock in 180° backwards */
@@ -2375,7 +2386,7 @@ const MODELPIPE=(()=>{
       bones.LeftUpLeg.getWorldPosition(_db);
       if(_da.x-_db.x<0)fSign=-1;
     }
-    return {root,bones,aim,hLen,fSign,scale:s,worldQ:{},anims};
+    return {root,bones,aim,hLen,fSign,gripLoc,scale:s,worldQ:{},anims};
   }
   /* ---- locomotion: the model's own mocap breathes under the sim ----
      Idle/Walk/Run clips (bundled Xbot/Soldier ship them) crossfade by
@@ -2502,8 +2513,13 @@ const MODELPIPE=(()=>{
     if(armed){ _db.subVectors(f.tip,J.haR);
       if(_db.lengthSq()>1e-8)gdir=_db.normalize(); }
     const hOff=(M.hLen||.07)*.55;   // handle in the FINGERS, not the heel
-    const hrR=gdir?_dc.copy(J.haR).addScaledVector(gdir,-hOff):J.haR;
-    const hrL=gdir?_dd.copy(J.haL).addScaledVector(gdir,-hOff):J.haL;
+    const hrR=gdir?_dc.copy(J.haR).addScaledVector(gdir,-hOff):_dc.copy(J.haR);
+    const hrL=gdir?_dd.copy(J.haL).addScaledVector(gdir,-hOff):_dd.copy(J.haL);
+    /* converge the CURL CENTER onto the anchor: last frame's error
+       between where the fist actually closed and where the grip is
+       nudges this frame's wrist — the handle settles into the fingers */
+    if(M._geR)hrR.add(M._geR);
+    if(M._geL)hrL.add(M._geL);
     aimDelta('RightShoulder',J.chestT,J.shR);
     aimDelta('RightArm',J.shR,J.elR);
     aimDelta('RightForeArm',J.elR,hrR);
@@ -2514,6 +2530,16 @@ const MODELPIPE=(()=>{
     if(gdir){
       _da.copy(hrR).add(gdir); aimDelta('RightHand',hrR,_da);
       _da.copy(hrL).add(gdir); aimDelta('LeftHand',hrL,_da);
+      /* measure this frame's fist-to-anchor error for the next frame */
+      for(const side of ['Right','Left']){
+        const gl=M.gripLoc&&M.gripLoc[side], hb=M.bones[side+'Hand'];
+        if(!gl||!hb)continue;
+        _da.copy(gl); hb.localToWorld(_da);
+        _db.copy(side==='Right'?J.haR:J.haL).sub(_da);
+        const key=side==='Right'?'_geR':'_geL';
+        M[key]=M[key]||new THREE.Vector3();
+        M[key].addScaledVector(_db,.5).clampLength(0,.12);
+      }
     }
     aimDelta('RightUpLeg',J.hipR,J.knR);
     aimDelta('RightLeg',J.knR,J.ankR);
