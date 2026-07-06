@@ -230,8 +230,8 @@ const stdMat=(hex,opts)=>new THREE.MeshStandardMaterial(Object.assign({color:SRG
 const scene=new THREE.Scene();
 scene.background=SRGB(0x0c0f14);
 /* the kicker: a cool fill from the off side, cinema's second light */
-{ const kick=new THREE.DirectionalLight(0x8fb0e8,.32);
-  kick.position.set(14,9,-10); scene.add(kick); }
+const kickL=new THREE.DirectionalLight(0x8fb0e8,.32);
+kickL.position.set(14,9,-10); scene.add(kickL);
 /* no fog: the night is clear and deep */
 
 /* IBL: prefilter a lighting-only scene (sky, snowfield, moon) into an
@@ -403,7 +403,9 @@ moon.shadow.bias=-.0004;
 { const rim=new THREE.DirectionalLight(SRGB(0x39496a).getHex(),.4);
   rim.position.set(8,4,-9); scene.add(rim); }
 scene.add(moon);
-scene.add(new THREE.HemisphereLight(SRGB(0x2c3a4e).getHex(),SRGB(0x0a0c10).getHex(),.6));
+const hemiL=new THREE.HemisphereLight(SRGB(0x2c3a4e).getHex(),SRGB(0x0a0c10).getHex(),.6);
+scene.add(hemiL);
+const AMB={};   // handles for stage ambience (sky repaint etc.)
 
 const RING_R=5.0;
 
@@ -463,9 +465,10 @@ const groundMark=(()=>{
     ctx=canvas.getContext('2d');
   }catch(e){ ctx=null; }
   if(!ctx)return null;
+  let tones=['#bcc3ca','#c4cbd1','#ccd3d9'];
   function base(){
     const g=ctx.createRadialGradient(S/2,S/2,20,S/2,S/2,S/2);
-    g.addColorStop(0,'#bcc3ca'); g.addColorStop(.75,'#c4cbd1'); g.addColorStop(1,'#ccd3d9');
+    g.addColorStop(0,tones[0]); g.addColorStop(.75,tones[1]); g.addColorStop(1,tones[2]);
     ctx.fillStyle=g; ctx.fillRect(0,0,S,S);
     ctx.strokeStyle='rgba(126,134,144,.25)';
     for(let i=0;i<160;i++){
@@ -505,6 +508,7 @@ const groundMark=(()=>{
       dirty=true;
     },
     flush(){ if(dirty){ tex.needsUpdate=true; dirty=false; } },
+    setTone(t){ tones=t; },
     reset(){ base(); tex.needsUpdate=true; },
   };
 })();
@@ -668,6 +672,7 @@ const mists=[];   // gone — the air is clear
     g.addColorStop(.75,'#0e1626'); g.addColorStop(1,'#18222f');
     ctx.fillStyle=g; ctx.fillRect(0,0,w,h);
   });
+  AMB.skyTex=skyTex;
   if(skyTex){
     const sky=new THREE.Mesh(new THREE.SphereGeometry(90,24,16),
       new THREE.MeshBasicMaterial({map:skyTex,side:THREE.BackSide,
@@ -1119,9 +1124,9 @@ function buildSkinnedBody(kimonoMat,hakamaMat,B){
   for(const g of groups)geo.addGroup(g.start,g.count,g.materialIndex);
 
   const km=kimonoMat.clone(); km.skinning=true;
-  if(kimonoTex)km.map=kimonoTex;
+  if(kimonoTex&&!km.map)km.map=kimonoTex;
   const hm=hakamaMat.clone(); hm.skinning=true;
-  if(hakamaTex)hm.map=hakamaTex;
+  if(hakamaTex&&!hm.map)hm.map=hakamaTex;
   km.roughness=.94; hm.roughness=.96;
   const mesh=new THREE.SkinnedMesh(geo,[km,hm]);
   mesh.castShadow=true; mesh.frustumCulled=false;
@@ -1275,6 +1280,11 @@ class Fighter{
     const hairM=stdMat((palette.hair!==undefined)?palette.hair:0x14110d,{roughness:.9});
     const obiM=stdMat(palette.obi,{roughness:.8});
     const accentM=stdMat(palette.accent,{roughness:.75});
+    if(this.build.tracksuit){
+      /* the yellow suit: side stripes, no weave, no obi, no skirt */
+      kimono.map=trackTex||null; kimono.normalMap=null; kimono.roughness=.7;
+      hakama.map=trackTex||null; hakama.normalMap=null; hakama.roughness=.7;
+    }
     this.kimonoMat=kimono;
     this.baseKimono=SRGB(palette.kimono);
     this.bloodTint=SRGB(0x35090b);
@@ -1312,6 +1322,8 @@ class Fighter{
         stdMat(0x191420,{roughness:.3,metalness:.3}));
       saya.position.set(-.14,-.06,-.06); saya.rotation.z=1.25; saya.rotation.y=.4;
       parts.pelvis.add(hip,obi,knot,skirtF,skirtB,saya);
+      if(this.build.tracksuit){ obi.visible=knot.visible=saya.visible=false;
+        skirtF.visible=skirtB.visible=false; }
       this.skirtF=skirtF; this.skirtB=skirtB;
     }
     /* torso: chest broad at the shoulders, abdomen beneath */
@@ -1382,6 +1394,11 @@ class Fighter{
         const tail=new THREE.Mesh(new THREE.CylinderGeometry(.017,.006,.34,8),hairM);
         tail.position.set(0,-.09,-.115); tail.rotation.x=.28;
         F.push(tie,tail);
+      } else if(HB==='bowl'){
+        /* the Dragon's cut: full low fringe, trimmed at the neck */
+        mage.visible=false;
+        hairC.scale.set(1.0,.92,1.05); hairC.rotation.x=-.22;
+        hairC.position.y=.008;
       } else if(HB==='long'){
         /* a full crown; the length itself is verlet cloth (buildHair) */
         mage.visible=false;
@@ -1470,8 +1487,9 @@ class Fighter{
     parts.upperArmR=limbMesh(D.upperArm,.052,.075,kimono);
     parts.upperArmL=limbMesh(D.upperArm,.052,.075,kimono);
     const LB=this.build.limb;
-    parts.forearmR=limbMesh(D.foreArm,.058*LB,.04*LB,skin);
-    parts.forearmL=limbMesh(D.foreArm,.058*LB,.04*LB,skin);
+    const foreMat=this.build.tracksuit?kimono:skin;   // full sleeves for the suit
+    parts.forearmR=limbMesh(D.foreArm,.058*LB,.04*LB,foreMat);
+    parts.forearmL=limbMesh(D.foreArm,.058*LB,.04*LB,foreMat);
     /* a HAND: palm, four curled fingers, an opposed thumb.
        pose 'grip' wraps a handle along local +Y; 'fist' closes fully. */
     const mkHand=(pose,mirror)=>{
@@ -1550,7 +1568,7 @@ class Fighter{
     /* continuous skinned body over torso, upper arms, legs */
     this.skin=buildSkinnedBody(this.build.bare?skin:kimono,hakama,this.build);
     scene.add(this.skin.mesh);
-    this.buildCloth(rimify(stdMat(this.palette.hakama,{roughness:.96,
+    this.buildCloth(rimify(stdMat(this.palette.skirt||this.palette.hakama,{roughness:.96,
       side:THREE.DoubleSide,map:hakamaTex||null}),.3,.38,.58,3,.22),
       rimify(stdMat(this.palette.kimono,{roughness:.95,
         side:THREE.DoubleSide,map:kimonoTex||null}),.32,.42,.62,3,.18));
@@ -1954,8 +1972,8 @@ const BUILDS={
   onna:{label:'鈴 SUZUME — onna-musha',
     sh:.87, waist:.90, hip:1.05, limb:.9, hair:'long', bare:false,
     bust:.088, skirt:true,
-    palette:{kimono:0xf2c4d2,hakama:0x8a4a62,obi:0x9c2f4a,skin:0xdbb394,
-      accent:0xfdf4f0,face:{feminine:true}}},
+    palette:{kimono:0xf2c4d2,hakama:0x33262f,skirt:0x8a4a62,obi:0x9c2f4a,
+      skin:0xdbb394,accent:0xfdf4f0,face:{feminine:true}}},
   gladiator:{label:'Ω BRUTUS — gladiator',
     sh:1.16, waist:1.06, hip:1.02, limb:1.18, hair:'helmet', bare:true,
     palette:{kimono:0x8a6a48,hakama:0x5a4028,obi:0x3a2a18,skin:0xc09068,
@@ -1965,6 +1983,11 @@ const BUILDS={
     armor:true, mass:1.3,
     palette:{kimono:0x2b3040,hakama:0x14161c,obi:0x6e1f1f,skin:0xc59d7d,
       accent:0x8a2020,face:{mustache:true}}},
+  ryu:{label:'龍 LEE — jeet kune do',
+    sh:.98, waist:.86, hip:.95, limb:.95, hair:'bowl', bare:false,
+    tracksuit:true, cloth:false, preferWeapon:'bare',
+    palette:{kimono:0xf2cf25,hakama:0xf2cf25,obi:0x141414,skin:0xd8b07f,
+      hair:0x0e0b08,accent:0x141414,face:{}}},
   okina:{label:'翁 JUBEI — the old master',
     sh:.92, waist:.88, hip:.94, limb:.86, hair:'elder', bare:false, stoop:.085,
     palette:{kimono:0x4a443a,hakama:0x26221c,obi:0x8a8272,skin:0xc4a183,
@@ -2032,6 +2055,7 @@ const PICKER={
     {label:BUILDS.onna.label,build:'onna'},
     {label:BUILDS.yoroi.label,build:'yoroi'},
     {label:BUILDS.okina.label,build:'okina'},
+    {label:BUILDS.ryu.label,build:'ryu'},
     {label:BUILDS.gladiator.label,build:'gladiator'},
     {label:BUILDS.sumo.label,build:'sumo'}],
   cycle(slot,dir){
@@ -2045,6 +2069,11 @@ const PICKER={
       .forEach(n=>{ n.textContent=e.label; el=n; }); }catch(err){}
     if(e.build){
       SELECT[slot]=e.build;
+      const pw=BUILDS[e.build].preferWeapon;
+      if(pw){ const wi=WLIST.indexOf(pw);
+        if(wi>=0){ this.wIdx[slot]=wi; SELECT[slot==='P'?'WP':'WE']=pw;
+          try{ document.querySelectorAll('[id="selW'+slot+'-name"]')
+            .forEach(n=>n.textContent=WEAPONS[pw].label); }catch(e2){} } }
       try{
         if(typeof MODELPIPE!=='undefined'&&MODELPIPE.current)
           MODELPIPE.current[slot]=null;
@@ -4063,10 +4092,20 @@ function jaggedCap(r){
     const meat=new THREE.Mesh(geo,stdMat(0x5e0f0f,{roughness:.55,side:THREE.DoubleSide}));
     const meat2=new THREE.Mesh(geo,stdMat(0x7e1b16,{roughness:.7,side:THREE.DoubleSide}));
     meat2.scale.setScalar(.72); meat2.position.z=r*.06;
-    const bone=new THREE.Mesh(new THREE.CylinderGeometry(r*.24,r*.28,r*.9,8),
-      stdMat(0xd9d2c0,{roughness:.5}));
-    bone.rotation.x=Math.PI/2; bone.position.z=r*.28;
-    g.add(meat,meat2,bone);
+    /* the BONE: pale, snapped, unmistakably jutting from the meat */
+    const boneM=stdMat(0xece5d2,{roughness:.4});
+    const bone=new THREE.Mesh(new THREE.CylinderGeometry(r*.3,r*.36,r*2.0,10),boneM);
+    bone.rotation.x=Math.PI/2; bone.position.z=r*.7;
+    const tip=new THREE.Mesh(new THREE.ConeGeometry(r*.3,r*.55,9),boneM);
+    tip.rotation.x=Math.PI/2; tip.rotation.z=.25; tip.position.z=r*1.92;
+    const splinter=new THREE.Mesh(new THREE.ConeGeometry(r*.13,r*.9,7),boneM);
+    splinter.rotation.x=Math.PI/2+.28; splinter.rotation.y=.3;
+    splinter.position.set(r*.3,r*.12,r*1.05);
+    const marrow=new THREE.Mesh(new THREE.CylinderGeometry(r*.15,r*.15,r*.05,8),
+      stdMat(0x6e1c1c,{roughness:.85}));
+    marrow.rotation.x=Math.PI/2; marrow.position.z=r*1.71;
+    g.add(meat,meat2,bone,tip,splinter,marrow);
+    g.traverse(o=>{ if(o.isMesh)o.castShadow=true; });
   }catch(e){}
   return g;
 }
@@ -4627,6 +4666,14 @@ const kimonoTex=canTex(512,512,(ctx,w,h)=>{
     ctx.fillRect(Math.random()*w,Math.random()*h,1+Math.random()*3,1); }
 });
 if(kimonoTex){ kimonoTex.wrapS=kimonoTex.wrapT=THREE.RepeatWrapping; kimonoTex.repeat.set(3,3); }
+/* the tracksuit: two black stripes running down the SIDES of the tube
+   (u=0 and u=.5 in the body's wrap), on a white base tinted by color */
+const trackTex=canTex(256,256,(x,w,h)=>{
+  x.fillStyle='#ffffff'; x.fillRect(0,0,w,h);
+  x.fillStyle='#101010';
+  x.fillRect(0,0,w*.045,h); x.fillRect(w*.955,0,w*.045,h);
+  x.fillRect(w*.455,0,w*.09,h);
+});
 const kimonoNrm=mkNormalTex(256,(x,w,h)=>{
   x.fillStyle='#808080'; x.fillRect(0,0,w,h);
   for(let y=0;y<h;y+=2){ x.fillStyle='rgba(0,0,0,.5)'; x.fillRect(0,y,w,1); }
@@ -5329,6 +5376,45 @@ function genDuelist(stage){
       kamae:GEN.kamae[Math.floor(Math.random()*5)]}};
 }
 
+/* THE ROAD CHANGES: each stage of the ladder is a different night.
+   Sky, moonlight, snow tone, lantern warmth — the world keeps score. */
+const AMBIENCES=[
+ {sky:['#04060c','#080d18','#0e1626','#18222f'],           // first snow (blue night)
+  moon:0xbdd0ec,moonI:1.15,kick:0x8fb0e8,hemi:0x2c3a4e,
+  ground:0xffffff,snow:['#bcc3ca','#c4cbd1','#ccd3d9'],lantern:0xffb168},
+ {sky:['#030809','#071412','#0c241e','#16342b'],           // aurora green
+  moon:0xc6e4d6,moonI:1.05,kick:0x7fd8b0,hemi:0x204036,
+  ground:0xf2fff6,snow:['#b6c8c1','#bed0c9','#c6d8d1'],lantern:0xffc078},
+ {sky:['#080614','#130a24','#1f1336','#2e2046'],           // the violet hour
+  moon:0xd2c4f0,moonI:1.1,kick:0xa08fe8,hemi:0x362e50,
+  ground:0xf8f2ff,snow:['#c2bccd','#cac4d5','#d2ccdd'],lantern:0xff9a58},
+ {sky:['#0d0508','#200a10','#3a141a','#5e2c24'],           // blood dawn
+  moon:0xeec8b4,moonI:1.0,kick:0xe89a7f,hemi:0x503430,
+  ground:0xfff4ee,snow:['#cfc0bb','#d7c8c3','#dfd0cb'],lantern:0xffae62},
+ {sky:['#07080a','#101316','#1a1f24','#2c323a'],           // iron gray
+  moon:0xccd6e0,moonI:.92,kick:0x9fb2c2,hemi:0x333c46,
+  ground:0xf4f6f8,snow:['#bfc5ca','#c7cdd2','#cfd5da'],lantern:0xffb872},
+];
+function applyAmbience(stage){
+  const A=AMBIENCES[stage%AMBIENCES.length];
+  try{
+    moon.color.copy(SRGB(A.moon)); moon.intensity=A.moonI;
+    kickL.color.copy(SRGB(A.kick));
+    hemiL.color.copy(SRGB(A.hemi));
+    groundMat.color.copy(SRGB(A.ground));
+    ringGroundMat.color.copy(SRGB(A.ground));
+    if(groundMark&&groundMark.setTone){ groundMark.setTone(A.snow); groundMark.reset(); }
+    for(const L of lanterns)L.light.color.copy(SRGB(A.lantern));
+    if(AMB.skyTex&&AMB.skyTex.image){
+      const c=AMB.skyTex.image, x=c.getContext('2d');
+      const g=x.createLinearGradient(0,0,0,c.height);
+      g.addColorStop(0,A.sky[0]); g.addColorStop(.45,A.sky[1]);
+      g.addColorStop(.75,A.sky[2]); g.addColorStop(1,A.sky[3]);
+      x.fillStyle=g; x.fillRect(0,0,c.width,c.height);
+      AMB.skyTex.needsUpdate=true;
+    }
+  }catch(e){}
+}
 function setup(){
   if(player){ disposeFighter(player); disposeFighter(enemy); }
   for(const p of bloodStains)scene.remove(p.mesh); bloodStains.length=0;
@@ -5353,6 +5439,7 @@ function setup(){
   enemy.yaw=Math.atan2(player.pos.x-enemy.pos.x,player.pos.z-enemy.pos.z);
   buildDiagram(document.getElementById('diagram-player'));
   buildDiagram(document.getElementById('diagram-enemy'));
+  applyAmbience(game.stage);    // a new night for a new opponent
   logEl.innerHTML='';
 }
 function disposeFighter(f){
@@ -5406,6 +5493,7 @@ function spareDuel(){
     +game.duelTime.toFixed(1)+'s. Wounds dealt: '+enemy.wounds.length
     +' · taken: '+player.wounds.length+'.';
   game.advance=true;
+  document.getElementById('btn-again').innerHTML='NEXT DUEL&nbsp;&nbsp;\u00b7&nbsp;&nbsp;R';
   game.legacy={
     legR:player.legDamage.R*.6, legL:player.legDamage.L*.6,
     blood:Math.max(3600,5000-(5000-player.blood)*.4),
@@ -5445,6 +5533,8 @@ function endDuel(){
       :'YOU FALL';
     game.advance=false; game.legacy=null; game.stage=0;
   }
+  document.getElementById('btn-again').innerHTML=
+    won?'NEXT DUEL&nbsp;&nbsp;\u00b7&nbsp;&nbsp;R':'AGAIN&nbsp;&nbsp;\u00b7&nbsp;&nbsp;R';
   const dead=won?enemy:player;
   document.getElementById('cause').textContent=
     (won?enemy.name:'Musashi')+' — cause of death: '+(dead.deathCause||'wounds')+'.'+
