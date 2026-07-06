@@ -1258,6 +1258,9 @@ class Fighter{
       {face:Object.assign({},this.build.palette.face,(palette&&palette.face)||{})});
     this.name=name; this.isPlayer=isPlayer; this.palette=palette;
     this.weapon=WEAPONS[weaponKey||(isPlayer?SELECT.WP:SELECT.WE)]||WEAPONS.katana;
+    /* collision girth: how much snow this body actually occupies */
+    this.bodyR=.31*Math.max(1,
+      ((this.build.waist||1)*.5+(this.build.hip||1)*.5)*.8);
     this.pos=V3(x,0,0); this.vel=V3();
     this.facing=facing;
     this.dead=false; this.downed=false; this.deathCause=null;
@@ -1320,7 +1323,9 @@ class Fighter{
     parts.pelvis=new THREE.Group();
     { /* the hip core plugs the gap between torso tube and leg tubes so a
          wide stance never opens daylight through the crotch */
-      const hip=new THREE.Mesh(new THREE.CylinderGeometry(.148,.155,.3,18),hakama);
+      /* open-ended: a capped band shows its flat lid through the belly
+         of a leaning heavyweight — the tube has no lid to show */
+      const hip=new THREE.Mesh(new THREE.CylinderGeometry(.148,.155,.3,18,1,true),hakama);
       hip.position.y=-.09;
       hip.castShadow=true; hip.userData.cover=true;
       /* the obi hugs the torso's ellipse (depth ~.84) instead of ringing
@@ -1623,6 +1628,11 @@ class Fighter{
       return g;
     };
     parts.footR=buildFootMesh(); parts.footL=buildFootMesh();
+    { /* heavyweight legs need heavyweight feet — a rikishi's tree-trunk
+         shin ends in a foot that can carry it */
+      const FS=Math.max(1,(this.build.legR||1)*.82);
+      if(FS>1){ parts.footR.scale.setScalar(FS); parts.footL.scale.setScalar(FS); }
+    }
     for(const k in parts)this.root.add(parts[k]);
 
     this.katana=weaponMesh(this.weapon); scene.add(this.katana);
@@ -3219,9 +3229,20 @@ Fighter.prototype.updateAlive=function(dt,opponent){
     if(!this._slipped){ this._slipped=true; log(this.name+' slips on the ice!',false); }
   }
   this.snowDepth=depth; this.iced=iced;
-  const sep=this.pos.distanceTo(opponent.pos);
-  if(sep<.62){ TMP1.subVectors(this.pos,opponent.pos).setY(0).normalize();
-    this.pos.addScaledVector(TMP1,(.62-sep)*.5); }
+  /* two bodies cannot share the snow: the bubble follows each build's
+     girth (a sumo occupies what a sumo occupies), and the approach
+     velocity dies at contact so you can't wade through on momentum.
+     Corpses don't push — the victor must reach the fallen. */
+  if(opponent.alive){
+    const minSep=(this.bodyR||.31)+(opponent.bodyR||.31);
+    const sep=this.pos.distanceTo(opponent.pos);
+    if(sep<minSep&&sep>1e-4){
+      TMP1.subVectors(this.pos,opponent.pos).setY(0).normalize();
+      this.pos.addScaledVector(TMP1,(minSep-sep)*.6);
+      const vn=this.vel.dot(TMP1);
+      if(vn<0)this.vel.addScaledVector(TMP1,-vn*.9);
+    }
+  }
   { const rr=Math.hypot(this.pos.x,this.pos.z);
     if(rr>RING_R-.28){ const s=(RING_R-.28)/rr; this.pos.x*=s; this.pos.z*=s;
       TMP1.set(this.pos.x,0,this.pos.z).normalize();
@@ -3833,7 +3854,8 @@ addEventListener('keydown',e=>{ input.keys[e.code]=true;
   if(e.code==='ShiftLeft'||e.code==='ShiftRight')input.shift=true;
   if(e.code==='KeyG'&&game.state==='fight'&&typeof enemy!=='undefined'&&
      enemy&&enemy.begging&&!enemy.dead)spareDuel();
-  if(e.code==='KeyR'&&game.state!=='menu')restart(); });
+  if(e.code==='KeyR'&&game.state!=='menu')restart();
+  if(e.code==='KeyE'&&game.state==='over'&&game.advance)rematch(); });
 addEventListener('keyup',e=>{ input.keys[e.code]=false;
   if(e.code==='ShiftLeft'||e.code==='ShiftRight')input.shift=false; });
 /* pointer lock: the sword hand cannot leave the ring.
@@ -5940,6 +5962,8 @@ function spareDuel(){
     +' · taken: '+player.wounds.length+'.';
   game.advance=true;
   document.getElementById('btn-again').innerHTML='NEXT DUEL&nbsp;&nbsp;\u00b7&nbsp;&nbsp;R';
+  { const br=document.getElementById('btn-rematch');
+    if(br)br.style.display=''; }
   game.legacy={
     legR:player.legDamage.R*.6, legL:player.legDamage.L*.6,
     blood:Math.max(3600,5000-(5000-player.blood)*.4),
@@ -5981,6 +6005,9 @@ function endDuel(){
   }
   document.getElementById('btn-again').innerHTML=
     won?'NEXT DUEL&nbsp;&nbsp;\u00b7&nbsp;&nbsp;R':'AGAIN&nbsp;&nbsp;\u00b7&nbsp;&nbsp;R';
+  { /* the rematch is a victor's privilege: a loss already replays */
+    const br=document.getElementById('btn-rematch');
+    if(br)br.style.display=won?'':'none'; }
   const dead=won?enemy:player;
   document.getElementById('cause').textContent=
     (won?enemy.name:'Musashi')+' — cause of death: '+(dead.deathCause||'wounds')+'.'+
@@ -6000,6 +6027,15 @@ document.getElementById('btn-begin').addEventListener('click',()=>{
   restart();
 });
 document.getElementById('btn-again').addEventListener('click',restart);
+/* rematch: face the SAME opponent again — the win is banked but the
+   ladder does not advance */
+function rematch(){
+  if(game.state!=='over')return;
+  game.advance=false;
+  restart();
+}
+{ const br=document.getElementById('btn-rematch');
+  if(br)br.addEventListener('click',rematch); }
 /* back to the select screen: a clean slate — new fighter, new weapon */
 function toMenu(){
   game.state='menu'; killCam=null;
