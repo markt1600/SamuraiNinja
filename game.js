@@ -2281,14 +2281,18 @@ const MODELPIPE=(()=>{
     root.traverse(o=>{ if(o.isMesh){ o.castShadow=true; o.frustumCulled=false;
       if(o.material){
         const own=m=>{ const c=m.clone();
+          /* some FBX materials arrive flagged transparent — a fighter
+             must be SOLID, not a ghost the ropes show through */
+          c.transparent=false; c.opacity=1; c.depthWrite=true;
           /* models that arrive without textures often read pitch black
              under the moon — lift them to a dark steel that keeps shape */
           if(!c.map&&c.color){ const hsl={h:0,s:0,l:0}; c.color.getHSL(hsl);
             if(hsl.l<.06)c.color.setHSL(hsl.h,Math.min(hsl.s,.4),.16); }
-          /* and every model gets a faint self-light: the moonlit night
-             is authored for our pale procedural cloth, not dark leather */
-          if(c.emissive!==undefined&&c.color)
-            c.emissive.copy(c.color).multiplyScalar(.045);
+          /* faint self-light for DARK surfaces only: pale skin under the
+             moon needs no help, dark leather does */
+          if(c.emissive!==undefined&&c.color){ const hsl={h:0,s:0,l:0};
+            c.color.getHSL(hsl);
+            c.emissive.copy(c.color).multiplyScalar(hsl.l<.35?.045:0); }
           c._base=c.color?c.color.clone():null; return c; };
         o.material=Array.isArray(o.material)?o.material.map(own):own(o.material);
       } } });
@@ -2354,11 +2358,14 @@ const MODELPIPE=(()=>{
       if(!w||!fa||!b1||!tip)continue;
       root.updateMatrixWorld(true);
       fa.getWorldPosition(_db);
-      const d0=tip.getWorldPosition(_da).distanceTo(_db);
-      b1.rotation.z+=.7; b1.updateMatrixWorld(true);
-      const d1=tip.getWorldPosition(_da).distanceTo(_db);
-      b1.rotation.z-=.7; b1.updateMatrixWorld(true);
-      const sign=d1<d0?1:-1;
+      /* test BOTH directions symmetrically: flexion is whichever brings
+         the fingertip closer to the forearm — robust on short chains */
+      b1.rotation.z+=.9; b1.updateMatrixWorld(true);
+      const dP=tip.getWorldPosition(_da).distanceTo(_db);
+      b1.rotation.z-=1.8; b1.updateMatrixWorld(true);
+      const dM=tip.getWorldPosition(_da).distanceTo(_db);
+      b1.rotation.z+=.9; b1.updateMatrixWorld(true);
+      const sign=dP<dM?1:-1;
       for(const fn of ['Thumb','Index','Middle','Ring','Pinky'])
         for(let seg=1;seg<=3;seg++){
           const b=findBone(root,side+'Hand'+fn+seg);
