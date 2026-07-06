@@ -1080,7 +1080,8 @@ function buildSkinnedBody(kimonoMat,hakamaMat,B){
     for(let i=0;i<=12;i++){
       const t=i/12, y=lerp(top,bot,t);
       const deltoid=.021*minJerkBell(clamp(t/.5,0,1));  // shoulder muscle
-      const r=lerp(.058,.084,Math.pow(t,1.35))+deltoid;
+      /* slimmer rigid flare: the CLOTH sleeve carries the silhouette */
+      const r=lerp(.056,.07,Math.pow(t,1.35))+deltoid;
       const skin=t<.18?blend(t,0,.3,Ch,UA):(t<.3?blend(t,0,.3,Ch,UA):[UA,1,Ch,0]);
       rings.push({c:[x,y,0],r,sz:1,skin});
     }
@@ -1546,7 +1547,9 @@ class Fighter{
     this.skin=buildSkinnedBody(this.build.bare?skin:kimono,hakama,this.build);
     scene.add(this.skin.mesh);
     this.buildCloth(rimify(stdMat(this.palette.hakama,{roughness:.96,
-      side:THREE.DoubleSide,map:hakamaTex||null}),.3,.38,.58,3,.22));
+      side:THREE.DoubleSide,map:hakamaTex||null}),.3,.38,.58,3,.22),
+      rimify(stdMat(this.palette.kimono,{roughness:.95,
+        side:THREE.DoubleSide,map:kimonoTex||null}),.32,.42,.62,3,.18));
     this.buildSleeves(rimify(stdMat(this.palette.kimono,{roughness:.95,
       side:THREE.DoubleSide,map:kimonoTex||null}),.32,.42,.62,3,.2));
     if(this.build.armor)this.buildArmor();
@@ -1561,8 +1564,9 @@ class Fighter{
     hideIn(parts.thighR); hideIn(parts.thighL);
     hideIn(parts.shinR); hideIn(parts.shinL);
     /* the hip core stays visible: the skinned tubes don't close the sides */
-    /* the silhouette: outline everything the eye reads as the fighter */
-    addOutline(this.skin.mesh,.009);
+    /* the silhouette: outline the RIGID parts only. A hull on the big
+       skinned tube renders over the body itself and repaints the whole
+       kimono near-black — the garment colors must stay honest. */
     for(const g of [parts.head,parts.forearmR,parts.forearmL,
         parts.handR,parts.handL,parts.footR,parts.footL,parts.pelvis])
       g.traverse(o=>{ if(o.isMesh&&o.visible&&!o.userData.outline)addOutline(o,.006); });
@@ -1943,9 +1947,9 @@ const BUILDS={
       accent:0xf2eee2,face:{}}},
   onna:{label:'鈴 SUZUME — onna-musha',
     sh:.87, waist:.90, hip:1.05, limb:.9, hair:'long', bare:false,
-    bust:.062, skirt:true,
-    palette:{kimono:0x5e2440,hakama:0x47203a,obi:0xd8c890,skin:0xdbb394,
-      accent:0xf0e6da,face:{feminine:true}}},
+    bust:.088, skirt:true,
+    palette:{kimono:0xf2c4d2,hakama:0x8a4a62,obi:0x9c2f4a,skin:0xdbb394,
+      accent:0xfdf4f0,face:{feminine:true}}},
   gladiator:{label:'Ω BRUTUS — gladiator',
     sh:1.16, waist:1.06, hip:1.02, limb:1.18, hair:'helmet', bare:true,
     palette:{kimono:0x8a6a48,hakama:0x5a4028,obi:0x3a2a18,skin:0xc09068,
@@ -1963,6 +1967,11 @@ const BUILDS={
     sh:1.3, waist:2.05, hip:1.85, limb:1.52, hair:'topknot', bare:true, mass:1.9, cloth:false,
     palette:{kimono:0xd8a880,hakama:0xd8a880,obi:0x1a2a4a,skin:0xd8a880,
       accent:0x1a2a4a,face:{stubble:true}}}};
+/* the honest lines of the sword, in the chest frame [right, up, fwd]:
+   vertical kiri-oroshi, the two kesa diagonals, two horizontal do cuts,
+   two rising kiri-age. The thrust line is computed live at the target. */
+const CUTLINES=[[0,-.98,.2],[.62,-.7,.24],[-.62,-.7,.24],
+  [.95,-.1,.26],[-.95,-.1,.26],[.55,.74,.22],[-.55,.74,.22]];
 const WEAPONS={
   katana:    {label:'刀 KATANA',    len:.93, cutFrom:.12, speed:1.0,  maxSpd:1.0,
               effMass:1.0, dmg:1.0, parryWin:1.0, blunt:false, curl:1.28},
@@ -2552,6 +2561,10 @@ Fighter.prototype.renderJoints=function(_dj){
   aimLimb(P.neck,_dj.neckT,_dj.chestT);
   if(!this.severed.head){
     P.head.position.copy(_dj.neckT); P.head.position.y+=this.dims.headR*.7; }
+  /* the elbow balls follow the corpse too — orphaned, they hang in the
+     air exactly where the man's elbows were when he died */
+  if(P.elbowR)P.elbowR.position.copy(_dj.elR);
+  if(P.elbowL)P.elbowL.position.copy(_dj.elL);
   aimLimb(P.upperArmR,_dj.shR,_dj.elR); aimLimb(P.forearmR,_dj.elR,_dj.haR);
   aimLimb(P.upperArmL,_dj.shL,_dj.elL); aimLimb(P.forearmL,_dj.elL,_dj.haL);
   P.handR.position.copy(_dj.haR); P.handL.position.copy(_dj.haL);
@@ -2766,12 +2779,14 @@ Fighter.prototype.setPelvisBone=function(p,yaw){
    step again. Heel strikes first, sole settles, toe pushes off. */
 Fighter.prototype.stepFoot=function(f,target,dt,otherPlanted,disabled,speed2d,urgent){
   const dmg=f===this.feet.R?this.legDamage.R:this.legDamage.L;
-  const thresh=(disabled?.34:clamp(.125-speed2d*.012,.085,.125))+dmg*.06;
+  /* moving faster means LONGER strides, not machine-gun shuffles: the
+     trigger distance grows with speed so each step carries further */
+  const thresh=(disabled?.34:clamp(.11+speed2d*.022,.11,.2))+dmg*.06;
   if(f.swing>0){
     f.swing=Math.min(1,f.swing+dt/f.dur);
     const t=f.swing, ss=minJerk(t);
     f.p.lerpVectors(f.from,f.to,ss);
-    f.lift=disabled?0:minJerkBell(t)*(clamp(.05+speed2d*.02,.05,.09)+(this.snowDepth||0)*.6)*(1-dmg*.55);
+    f.lift=disabled?0:minJerkBell(t)*(clamp(.05+speed2d*.028,.05,.115)+(this.snowDepth||0)*.6)*(1-dmg*.55);
     f.yaw=lerpAngle(f.yawFrom,this.bodyYaw,ss);   // foot re-aims only in flight
     /* toe-off then heel-first: rotation profile over the swing */
     f.roll= t<.25 ? .38*minJerk(t/.25)
@@ -2792,7 +2807,7 @@ Fighter.prototype.stepFoot=function(f,target,dt,otherPlanted,disabled,speed2d,ur
       f.swing=1e-4; f.from=f.p.clone(); f.yawFrom=f.yaw;
       f.to=target.clone(); f.to.y=0;
       const hurt=1+dmg*.8+(disabled?1.2:0)+(this.snowDepth||0)*1.6;
-      f.dur=clamp((urgent?.12:.2)-speed2d*.02,.1,.2)*hurt/Math.max(this.mobility,.35);
+      f.dur=clamp((urgent?.17:.3)-speed2d*.028,.15,.3)*hurt/Math.max(this.mobility,.35);
     }
   }
 };
@@ -2883,7 +2898,7 @@ Fighter.prototype.updateAlive=function(dt,opponent){
   this.leanV.lerp(TMP3,clamp(dt*5,0,1)); this.leanV.y=0;
   /* inverted-pendulum catch point ~0.26s ahead */
   const catchPt=TMP4.copy(this.pos).addScaledVector(this.vel,.26);
-  const stride=clamp(speed2d*.15,0,.26);
+  const stride=clamp(speed2d*.21,0,.36);
   const vdir=speed2d>.3?TMP3.copy(this.vel).setY(0).normalize():fwd;
   const tgtR=catchPt.clone().addScaledVector(right,.17).addScaledVector(fwd,.16)
     .addScaledVector(vdir,stride*(1-this.legDamage.R*.5));
@@ -3025,6 +3040,34 @@ Fighter.prototype.updateAlive=function(dt,opponent){
     this.tipVel.addScaledVector(TMP1,K*dt*Math.max(ctrl,.15));
     this.tipVel.multiplyScalar(Math.pow(1/(1+DAMP),dt*3));
     if(this.tipVel.length()>maxSpd)this.tipVel.setLength(maxSpd);
+    /* KATANA TECHNIQUE — the mouse supplies intent: which line, how much
+       power, when to commit. The blade answers with a swordsman's stroke:
+       once a swing commits, it is steered onto the nearest classical cut
+       line (kiri-oroshi, kesa, do, kiri-age) with speed preserved; a
+       thrust runs straight and true at the target's chest. Slow blade
+       work and the guard stay entirely under the hand. */
+    if(this.isPlayer&&!this.guarding){
+      const sp=this.tipVel.length();
+      if(sp>4.2){
+        const k2=clamp((sp-4.2)/4,0,1)*.55*(1-Math.exp(-9*dt));
+        if(this.thrust){
+          TMP3.copy(opponent.pos).setY(1.3).sub(this.tip);
+          if(TMP3.lengthSq()>.01){ TMP3.normalize();
+            this.tipVel.lerp(_pv.copy(TMP3).multiplyScalar(sp),k2).setLength(sp); }
+        } else {
+          TMP3.copy(this.tipVel).divideScalar(sp);
+          let bd=-2;
+          for(const L of CUTLINES){
+            _pv.copy(rightC).multiplyScalar(L[0]).addScaledVector(fwdC,L[2]);
+            _pv.y=L[1]; _pv.normalize();
+            const d2=_pv.dot(TMP3);
+            if(d2>bd){ bd=d2; _pv2.copy(_pv); }
+          }
+          /* only steer a swing that plausibly means one of the lines */
+          if(bd>.35)this.tipVel.lerp(_pv2.multiplyScalar(sp),k2).setLength(sp);
+        }
+      }
+    }
     this.tip.addScaledVector(this.tipVel,dt);
     if(this.tip.y<.06){ this.tip.y=.06; if(this.tipVel.y<0)this.tipVel.y*=-.2; }
     const reachMax=D.upperArm+D.foreArm+.87;
@@ -3170,6 +3213,14 @@ Fighter.prototype.updateAlive=function(dt,opponent){
   const knR=V3(),knL=V3();
   const ankR=ft.R.p.clone(); ankR.y=.045+ft.R.lift;
   const ankL=ft.L.p.clone(); ankL.y=.045+ft.L.lift;
+  /* a planted foot beyond the leg's honest reach is dragged in — the
+     shin must always MEET the foot, even in a deep kneel or lunge */
+  { const legMax=(D.thigh+D.shin)*.985;
+    for(const [hip,ank] of [[hipR,ankR],[hipL,ankL]]){
+      TMP4.subVectors(ank,hip);
+      const dl=TMP4.length();
+      if(dl>legMax)ank.copy(hip).addScaledVector(TMP4.divideScalar(dl),legMax);
+    } }
   solveIK(hipR,ankR,D.thigh,D.shin,kneeHint,knR);
   solveIK(hipL,ankL,D.thigh,D.shin,kneeHint,knL);
   this.soften('knR',knR,42,dt); this.soften('knL',knL,42,dt);
@@ -3197,10 +3248,11 @@ Fighter.prototype.updateAlive=function(dt,opponent){
   aimLimb(P.thighL,hipL,knL); aimLimb(P.shinL,knL,ankL);
   this.setBone('thR',hipR,knR); this.setBone('shR',knR,ankR);
   this.setBone('thL',hipL,knL); this.setBone('shL',knL,ankL);
-  P.footR.position.set(ft.R.p.x,.028+ft.R.lift,ft.R.p.z);
+  /* the foot mesh follows the CLAMPED ankle — never left behind */
+  P.footR.position.set(ankR.x,Math.max(.028+ft.R.lift,ankR.y-.02),ankR.z);
   P.footR.quaternion.setFromAxisAngle(UPY,ft.R.yaw+.07);
   if(ft.R.roll)P.footR.rotateX(ft.R.roll);
-  P.footL.position.set(ft.L.p.x,.028+ft.L.lift,ft.L.p.z);
+  P.footL.position.set(ankL.x,Math.max(.028+ft.L.lift,ankL.y-.02),ankL.z);
   P.footL.quaternion.setFromAxisAngle(UPY,ft.L.yaw-.07);
   if(ft.L.roll)P.footL.rotateX(ft.L.roll);
 
@@ -3238,6 +3290,8 @@ Fighter.prototype.hangArm=function(side,sh,right,P){
   (side==='R'?this._K.elR:this._K.elL).copy(el);
   (side==='R'?this._K.haR:this._K.haL).copy(ha);
   const ua=side==='R'?P.upperArmR:P.upperArmL, fa=side==='R'?P.forearmR:P.forearmL;
+  const eb=side==='R'?P.elbowR:P.elbowL;
+  if(eb)eb.position.copy(el);
   aimLimb(ua,sh,el);
   this.setBone(side==='R'?'uaR':'uaL',sh,el);
   if(!(this.severed['arm'+side])){ aimLimb(fa,el,ha);
@@ -4834,26 +4888,32 @@ Fighter.prototype.buildArmor=function(){
     }
   }
 };
-Fighter.prototype.buildCloth=function(hakamaMat){
+Fighter.prototype.buildCloth=function(hakamaMat,kimonoClothMat){
   if(this.build.cloth===false)return;
   this.cloth=[];
-  /* ONE continuous wrap: a cloth cylinder pinned around the waist and
-     seam-stitched closed — the hakama flows as a garment, not two flags */
-  /* skirt builds get length and flare: ankle-grazing, fuller at the hem */
+  /* a closed cloth ring pinned around the waist, seam-stitched, with
+     skip-one links for ring stiffness */
+  const mkWrap=(mat,cols,rows,w0,w1,rl,pin)=>{
+    const P=mkClothPanel(cols+1,rows,mat,w0,w1,rl);
+    P.wrap=cols; P.pin=pin;
+    for(let r2=1;r2<rows;r2++)
+      P.cons.push([r2*(cols+1),r2*(cols+1)+cols,0]);
+    for(let r2=1;r2<rows;r2++)for(let c2=0;c2<cols;c2++)
+      P.cons.push([r2*(cols+1)+c2,r2*(cols+1)+((c2+2)%cols),
+        lerp(w0,w1,r2/(rows-1))*1.94]);
+    scene.add(P.mesh);
+    for(const q of P.pts){ q.p.set(this.pos.x,.8,this.pos.z); q.pp.copy(q.p); }
+    this.cloth.push(P);
+    return P;
+  };
+  /* the hakama/skirt: skirt builds get length and hem flare */
   const SK=!!this.build.skirt;
-  const COLS=14, ROWS=SK?8:7, W1=SK?.124:.108, RL=SK?.098:.094;
-  const P=mkClothPanel(COLS+1,ROWS,hakamaMat,.072,W1,RL);
-  P.wrap=COLS;
-  for(let r2=1;r2<ROWS;r2++)               // stitch the seam column shut
-    P.cons.push([r2*(COLS+1),r2*(COLS+1)+COLS,0]);
-  /* ring stiffness: skip-one links stop the wrap folding into two
-     stretched lobes when the legs spread mid-lunge */
-  for(let r2=1;r2<ROWS;r2++)for(let c2=0;c2<COLS;c2++)
-    P.cons.push([r2*(COLS+1)+c2,r2*(COLS+1)+((c2+2)%COLS),
-      lerp(.072,W1,r2/(ROWS-1))*1.94]);
-  scene.add(P.mesh);
-  for(const q of P.pts){ q.p.set(this.pos.x,.8,this.pos.z); q.pp.copy(q.p); }
-  this.cloth.push(P);
+  mkWrap(hakamaMat,14,SK?8:7,.072,SK?.124:.108,SK?.098:.094,
+    {rx:.152,rz:.132,y:-.045});
+  /* the SUSO — the kimono jacket's hanging hem, flowing over the skirt
+     waist: the jacket reads as cloth, not a painted tube */
+  if(kimonoClothMat)
+    mkWrap(kimonoClothMat,12,3,.086,.102,.075,{rx:.162,rz:.142,y:.05});
   /* obi tails: two ribbons off the back knot, never quite still —
      dimmed and small so they read as sash ends, not paper streamers */
   const tailM=new THREE.MeshStandardMaterial({
@@ -4874,10 +4934,10 @@ Fighter.prototype.buildCloth=function(hakamaMat){
    with every step and cut, drapes over a corpse, and flies with a
    severed head (the pins ride parts.head wherever it goes). */
 Fighter.prototype.buildHair=function(mat){
-  const P=mkClothPanel(4,7,mat,.044,.054,.072);
+  const P=mkClothPanel(4,6,mat,.04,.048,.07);
   P.hairPins=[];
   for(let c=0;c<4;c++){
-    const a=Math.PI+(c/3-.5)*1.6;          // an arc across the back of the skull
+    const a=Math.PI+(c/3-.5)*1.3;          // an arc across the back of the skull
     P.hairPins.push(V3(Math.sin(a)*.084,.035,Math.cos(a)*.084));
   }
   scene.add(P.mesh);
@@ -4910,12 +4970,21 @@ Fighter.prototype.tickHair=function(dt){
       if(!A.pin)A.p.addScaledVector(TMP2,diff*(B.pin?2:1));
       if(!B.pin)B.p.addScaledVector(TMP2,-diff*(A.pin?2:1));
     }
+    const fw=DIRY(this.bodyYaw||0);
     for(let i=P.cols;i<P.pts.length;i++){
       const q=P.pts[i];
       TMP2.subVectors(q.p,H.position);          // stays outside the skull
       const d=TMP2.length();
       if(d<.105&&d>1e-6)q.p.copy(H.position).addScaledVector(TMP2.divideScalar(d),.105);
-      if(this._K)segPush(q.p,this._K.neckT,this._K.chestB,.1);
+      if(this._K){
+        segPush(q.p,this._K.neckT,this._K.chestB,.11);
+        /* fighting hair stays swept BEHIND the shoulder line — it must
+           never curtain the chest of a standing fighter */
+        if(this.alive){
+          const df=(q.p.x-this._K.chestT.x)*fw.x+(q.p.z-this._K.chestT.z)*fw.z;
+          if(df>.01){ q.p.x-=fw.x*(df-.01); q.p.z-=fw.z*(df-.01); }
+        }
+      }
       if(q.p.y<.02)q.p.y=.02;
     }
   }
@@ -4929,7 +4998,7 @@ Fighter.prototype.buildSleeves=function(mat){
   if(this.build.cloth===false||this.build.bare)return;
   this.sleeves=[];
   for(const side of ['R','L']){
-    const P=mkClothPanel(4,3,mat,.065,.078,.07);
+    const P=mkClothPanel(5,4,mat,.056,.075,.062);
     P.arm=side; scene.add(P.mesh);
     for(const q of P.pts){ q.p.set(this.pos.x,1.2,this.pos.z); q.pp.copy(q.p); }
     this.sleeves.push(P);
@@ -4947,7 +5016,7 @@ Fighter.prototype.tickSleeves=function(dt,J){
     if(_slO.lengthSq()<1e-6)_slO.set(1,0,0); _slO.normalize();
     for(let c=0;c<P.cols;c++){
       const q=P.pts[c], t=c/(P.cols-1);
-      q.p.lerpVectors(sh,el,t*.78).addScaledVector(_slO,.045);
+      q.p.lerpVectors(sh,el,t*.85).addScaledVector(_slO,.034);
       q.p.y+=.015;
       q.pp.copy(q.p);
     }
@@ -4987,25 +5056,30 @@ Fighter.prototype.tickCloth=function(dt,J){
   dt=Math.min(dt,.033);
   const yaw=this.bodyYaw||0, fwd=DIRY(yaw), right=V3(fwd.z,0,-fwd.x);
   const now=performance.now()*.001;
+  /* the waistband TILTS with the trunk — a horizontal pin ring under a
+     leaning body cuts a triangular notch across the obi */
+  _pq.setFromUnitVectors(UPY,TMP3.subVectors(J.chestB,J.pelvis).normalize());
   for(const P of this.cloth){
     if(P.wrap){
-      /* pin the waistband around the torso's ellipse */
-      const N=P.wrap;
+      const N=P.wrap, pin=P.pin||{rx:.152,rz:.132,y:-.045};
       for(let c=0;c<=N;c++){
         const q=P.pts[c], th=(c%N)/N*Math.PI*2;
-        q.p.copy(J.pelvis)
-          .addScaledVector(right,Math.cos(th)*.152)
-          .addScaledVector(fwd,Math.sin(th)*.132);
-        q.p.y=J.pelvis.y-.045;
+        TMP2.copy(right).multiplyScalar(Math.cos(th)*pin.rx)
+          .addScaledVector(fwd,Math.sin(th)*pin.rz);
+        TMP2.y=pin.y;
+        TMP2.applyQuaternion(_pq);
+        q.p.copy(J.pelvis).add(TMP2);
         q.pp.copy(q.p);
       }
     } else if(P.tail){
-      /* the ribbons hang from the back knot */
+      /* the ribbons hang from the back knot, riding the same tilt */
       for(let c=0;c<P.cols;c++){
         const q=P.pts[c];
-        q.p.copy(J.pelvis).addScaledVector(fwd,-.155)
+        TMP2.copy(fwd).multiplyScalar(-.155)
           .addScaledVector(right,P.tail*.03+(c-.5)*.048);
-        q.p.y=J.pelvis.y+.02;
+        TMP2.y=.02;
+        TMP2.applyQuaternion(_pq);
+        q.p.copy(J.pelvis).add(TMP2);
         q.pp.copy(q.p);
       }
     }
