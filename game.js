@@ -919,11 +919,13 @@ const DEAD_AT=.48;
 /* tapered limb: joint sphere at the pivot, shaft, condyle at the far end */
 function limbMesh(len,rTop,rBot,mat){
   const g=new THREE.Group();
-  const cyl=new THREE.Mesh(new THREE.CylinderGeometry(rTop,rBot,len,12),mat);
+  const cyl=new THREE.Mesh(new THREE.CylinderGeometry(rTop,rBot,len,20),mat);
   cyl.position.y=-len/2; cyl.castShadow=true; cyl.userData.shaft=true;
-  const j=new THREE.Mesh(new THREE.SphereGeometry(rTop*1.06,10,8),mat); j.castShadow=true;
+  /* generous joint spheres: bent limbs stay CONNECTED, no daylight at
+     the elbow or knee */
+  const j=new THREE.Mesh(new THREE.SphereGeometry(rTop*1.14,16,12),mat); j.castShadow=true;
   j.userData.joint=true;
-  const e=new THREE.Mesh(new THREE.SphereGeometry(rBot,10,8),mat); e.position.y=-len; e.castShadow=true;
+  const e=new THREE.Mesh(new THREE.SphereGeometry(rBot*1.04,16,12),mat); e.position.y=-len; e.castShadow=true;
   e.userData.end=true;
   g.add(cyl,j,e); g.userData.len=len; g.userData.r=Math.max(rTop,rBot);
   return g;
@@ -948,7 +950,7 @@ function buildSkinnedBody(kimonoMat,hakamaMat,B){
     b.position.fromArray(bindPos[k]); root.add(b); bones.push(b); }
 
   const pos=[],nrm=[],sIdx=[],sWgt=[],uvs=[],idx=[],groups=[];
-  const SEG=18;
+  const SEG=28;
   let ringStart=0, vBase=0;
   /* a vertical tube in bind pose; rings: {c:[x,y,z],r,sz,skin:[b0,w0,b1,w1]} */
   function tube(rings,matIndex){
@@ -957,10 +959,17 @@ function buildSkinnedBody(kimonoMat,hakamaMat,B){
     const y0=rings[0].c[1], y1=rings[rings.length-1].c[1];
     for(let ri=0;ri<rings.length;ri++){
       const R=rings[ri];
+      /* normals follow the profile slope (dr/dy), not just the ring —
+         the silhouette shades like a body instead of a stack of pipes */
+      const Rp=rings[Math.max(0,ri-1)], Rn=rings[Math.min(rings.length-1,ri+1)];
+      const dy=(Rn.c[1]-Rp.c[1])||1e-6;
+      const slope=(Rn.r-Rp.r)/dy;
+      const inv=1/Math.sqrt(1+slope*slope);
       for(let s=0;s<=SEG;s++){
         const a=s/SEG*Math.PI*2, cx=Math.cos(a), sz=Math.sin(a);
         pos.push(R.c[0]+cx*R.r, R.c[1], R.c[2]+sz*R.r*(R.sz||1));
-        nrm.push(cx,0,sz*(R.sz||1));
+        const nx=cx, nz=sz*(R.sz||1), nh=Math.hypot(nx,nz)||1;
+        nrm.push(nx/nh*inv, -slope*inv, nz/nh*inv);
         uvs.push(s/SEG,(R.c[1]-y0)/((y1-y0)||1));
         sIdx.push(R.skin[0],R.skin[2],0,0);
         sWgt.push(R.skin[1],R.skin[3],0,0);
@@ -1009,8 +1018,8 @@ function buildSkinnedBody(kimonoMat,hakamaMat,B){
     const UA=side>0?BONES.uaR:BONES.uaL, Ch=BONES.chest;
     const x=.185*side, top=1.335, bot=1.045;
     const rings=[];
-    for(let i=0;i<=8;i++){
-      const t=i/8, y=lerp(top,bot,t);
+    for(let i=0;i<=12;i++){
+      const t=i/12, y=lerp(top,bot,t);
       const deltoid=.021*minJerkBell(clamp(t/.5,0,1));  // shoulder muscle
       const r=lerp(.058,.084,Math.pow(t,1.35))+deltoid;
       const skin=t<.18?blend(t,0,.3,Ch,UA):(t<.3?blend(t,0,.3,Ch,UA):[UA,1,Ch,0]);
@@ -1023,8 +1032,9 @@ function buildSkinnedBody(kimonoMat,hakamaMat,B){
     const TH=side>0?BONES.thR:BONES.thL, SH=side>0?BONES.shR:BONES.shL;
     const x=.10*side;
     const prof=[ // y, r
-      [.88,.115],[.77,.126],[.66,.135],[.55,.140],[.44,.142],
-      [.33,.128],[.22,.104],[.13,.078],[.05,.058]];
+      [.88,.115],[.825,.121],[.77,.126],[.715,.131],[.66,.135],[.605,.138],
+      [.55,.140],[.495,.141],[.44,.142],[.385,.136],[.33,.128],[.275,.116],
+      [.22,.104],[.165,.090],[.13,.078],[.09,.068],[.05,.058]];
     const rings=prof.map(([y,r])=>{
       let skin;
       if(y>.52)skin=[TH,1,SH,0];
@@ -1217,19 +1227,24 @@ class Fighter{
 
     /* pelvis group: hips, obi knot, hakama skirt panels, saya */
     parts.pelvis=new THREE.Group();
-    { const hip=new THREE.Mesh(new THREE.CylinderGeometry(.14,.15,.15,12),kimono);
+    { /* the hip core plugs the gap between torso tube and leg tubes so a
+         wide stance never opens daylight through the crotch */
+      const hip=new THREE.Mesh(new THREE.CylinderGeometry(.148,.155,.3,18),hakama);
+      hip.position.y=-.09;
       hip.castShadow=true; hip.userData.cover=true;
-      const obi=new THREE.Mesh(new THREE.TorusGeometry(.15,.032,8,18),obiM);
-      obi.rotation.x=Math.PI/2; obi.position.y=.09;
+      /* the obi hugs the torso's ellipse (depth ~.84) instead of ringing
+         it like a hula hoop */
+      const obi=new THREE.Mesh(new THREE.TorusGeometry(.148,.026,10,28),obiM);
+      obi.rotation.x=Math.PI/2; obi.scale.set(1,.84,1); obi.position.y=.09;
       const knot=new THREE.Mesh(new THREE.BoxGeometry(.1,.05,.06),obiM);
-      knot.position.set(0,.09,-.15);
+      knot.position.set(0,.09,-.14);
       const skirtF=new THREE.Mesh(
-        new THREE.CylinderGeometry(.165,.28,.36,12,1,true,-Math.PI*.42,Math.PI*.84),hakama);
+        new THREE.CylinderGeometry(.165,.28,.36,20,1,true,-Math.PI*.42,Math.PI*.84),hakama);
       skirtF.position.y=-.2; skirtF.castShadow=true; hakama.side=THREE.DoubleSide;
       const skirtB=new THREE.Mesh(
-        new THREE.CylinderGeometry(.165,.28,.36,12,1,true,Math.PI*.58,Math.PI*.84),hakama);
+        new THREE.CylinderGeometry(.165,.28,.36,20,1,true,Math.PI*.58,Math.PI*.84),hakama);
       skirtB.position.y=-.2; skirtB.castShadow=true;
-      const saya=new THREE.Mesh(new THREE.CylinderGeometry(.02,.024,.76,8),
+      const saya=new THREE.Mesh(new THREE.CylinderGeometry(.02,.024,.76,12),
         stdMat(0x191420,{roughness:.3,metalness:.3}));
       saya.position.set(-.14,-.06,-.06); saya.rotation.z=1.25; saya.rotation.y=.4;
       parts.pelvis.add(hip,obi,knot,skirtF,skirtB,saya);
@@ -1237,10 +1252,10 @@ class Fighter{
     }
     /* torso: chest broad at the shoulders, abdomen beneath */
     parts.chest=limbMesh(D.torso*.62,.155,.13,kimono);
-    { const yokeR=new THREE.Mesh(new THREE.SphereGeometry(.075,10,8),kimono);
+    { const yokeR=new THREE.Mesh(new THREE.SphereGeometry(.075,14,10),kimono);
       yokeR.position.set(.155,-.02,0); yokeR.castShadow=true;
       const yokeL=yokeR.clone(); yokeL.position.x=-.155;
-      const collar=new THREE.Mesh(new THREE.TorusGeometry(.075,.02,6,14),accentM);
+      const collar=new THREE.Mesh(new THREE.TorusGeometry(.075,.02,10,24),accentM);
       collar.rotation.x=Math.PI/2-.35; collar.position.set(0,-.02,.02);
       collar.userData.keep=true;
       parts.chest.add(yokeR,yokeL,collar); }
@@ -1257,8 +1272,8 @@ class Fighter{
     }
     /* elbow joints: the arm bends AROUND something */
     const elbM=this.build.bare?skin:kimono;
-    parts.elbowR=new THREE.Mesh(new THREE.SphereGeometry(.036,8,7),elbM);
-    parts.elbowL=new THREE.Mesh(new THREE.SphereGeometry(.036,8,7),elbM);
+    parts.elbowR=new THREE.Mesh(new THREE.SphereGeometry(.048,14,10),elbM);
+    parts.elbowL=new THREE.Mesh(new THREE.SphereGeometry(.048,14,10),elbM);
     parts.elbowR.castShadow=parts.elbowL.castShadow=true;
     /* head: skull, jaw, hair, topknot; player wears a hachimaki */
     parts.head=new THREE.Group();
@@ -1272,7 +1287,7 @@ class Fighter{
       skull.castShadow=true; skull.scale.set(.92,1.08,.98);
       skull.userData.skull=true;
       const hairC=new THREE.Mesh(
-        new THREE.SphereGeometry(D.headR*1.04,14,12,0,Math.PI*2,0,1.6),hairM);
+        new THREE.SphereGeometry(D.headR*1.04,22,16,0,Math.PI*2,0,1.6),hairM);
       hairC.scale.set(.94,1.06,1); hairC.rotation.x=-.5;
       const mage=new THREE.Mesh(new THREE.CylinderGeometry(.015,.02,.09,8),hairM);
       mage.position.set(0,.095,-.02); mage.rotation.x=1.1;
@@ -1281,16 +1296,16 @@ class Fighter{
       const F=[];
       const bridge=new THREE.Mesh(new THREE.BoxGeometry(.012,.042,.013),skin);
       bridge.position.set(0,.006,D.headR*.9); bridge.rotation.x=.16;
-      const noseTip=new THREE.Mesh(new THREE.SphereGeometry(.0125,8,6),skin);
+      const noseTip=new THREE.Mesh(new THREE.SphereGeometry(.0125,12,9),skin);
       noseTip.position.set(0,-.017,D.headR*.95); noseTip.scale.set(1.1,.82,.78);
-      const mkEar=(sx)=>{ const e=new THREE.Mesh(new THREE.SphereGeometry(.019,8,6),skin);
+      const mkEar=(sx)=>{ const e=new THREE.Mesh(new THREE.SphereGeometry(.019,12,9),skin);
         e.position.set(sx*D.headR*.9,-.005,0); e.scale.set(.4,1,.7); F.push(e); };
       mkEar(1); mkEar(-1);
       F.push(bridge,noseTip);
       const fh=(palette.face)||{};
       if(fh.mustache){ const mu=new THREE.Mesh(new THREE.BoxGeometry(.04,.008,.011),hairM);
         mu.position.set(0,-.046,D.headR*.88); F.push(mu); }
-      if(fh.beard){ const bd=new THREE.Mesh(new THREE.SphereGeometry(D.headR*.6,10,8),hairM);
+      if(fh.beard){ const bd=new THREE.Mesh(new THREE.SphereGeometry(D.headR*.6,14,10),hairM);
         bd.position.set(0,-.078,.024); bd.scale.set(.85,.72,.86); F.push(bd); }
       const HB=this.build.hair;
       if(HB==='pony'){
@@ -1303,7 +1318,7 @@ class Fighter{
       } else if(HB==='helmet'){
         hairC.visible=false; mage.visible=false;
         const helm=new THREE.Mesh(
-          new THREE.SphereGeometry(D.headR*1.12,16,12,0,Math.PI*2,0,1.9),
+          new THREE.SphereGeometry(D.headR*1.12,22,16,0,Math.PI*2,0,1.9),
           stdMat(0x8a7a58,{roughness:.35,metalness:.6}));
         helm.scale.set(.95,1.05,1.02); helm.position.y=.012;
         const crest=new THREE.Mesh(new THREE.BoxGeometry(.014,.075,.14),
@@ -1329,7 +1344,7 @@ class Fighter{
       }
       parts.head.add(skull,hairC,mage,...F);
       if(isPlayer){
-        const hachi=new THREE.Mesh(new THREE.TorusGeometry(D.headR*.94,.014,6,16),accentM);
+        const hachi=new THREE.Mesh(new THREE.TorusGeometry(D.headR*.94,.014,8,24),accentM);
         hachi.rotation.x=Math.PI/2+.12; hachi.position.y=.028;
         parts.head.add(hachi);
       }
@@ -1355,15 +1370,16 @@ class Fighter{
       palm.position.z=-.024; gAdd(palm);
       const curl=pose==='fist'?1.9:1.25;      // radians of finger wrap
       g.userData.joints=[];
+      /* capsule fingers: rounded flesh, not matchsticks */
       for(let i=0;i<4;i++){
         const fx=(i-1.5)*.014*s;
-        const seg1=new THREE.Mesh(new THREE.BoxGeometry(.0115,.036,.013),skin);
+        const seg1=new THREE.Mesh(new THREE.CapsuleGeometry(.0062,.026,3,10),skin);
         const j1=new THREE.Group();
         j1.position.set(fx,.038,.006); j1.rotation.x=curl*.55;
         seg1.position.y=.018; j1.add(seg1);
         const j2=new THREE.Group();
         j2.position.y=.036; j2.rotation.x=curl*.7;
-        const seg2=new THREE.Mesh(new THREE.BoxGeometry(.0105,.03,.012),skin);
+        const seg2=new THREE.Mesh(new THREE.CapsuleGeometry(.0056,.02,3,10),skin);
         seg2.position.y=.015; j2.add(seg2); j1.add(j2);
         g.add(j1);
         g.userData.joints.push({j1,j2,ph:i*.7});
@@ -1371,9 +1387,9 @@ class Fighter{
       const tj=new THREE.Group();
       tj.position.set(.028*s,-.006,.012);
       tj.rotation.set(pose==='fist'?1.1:.7,0,-.9*s);
-      const th1=new THREE.Mesh(new THREE.BoxGeometry(.013,.034,.014),skin);
+      const th1=new THREE.Mesh(new THREE.CapsuleGeometry(.0072,.022,3,10),skin);
       th1.position.y=.017; tj.add(th1);
-      const th2=new THREE.Mesh(new THREE.BoxGeometry(.012,.026,.013),skin);
+      const th2=new THREE.Mesh(new THREE.CapsuleGeometry(.0064,.016,3,10),skin);
       th2.position.y=.045; th2.rotation.x=pose==='fist'?.9:.6; tj.add(th2);
       gAdd(tj);
       g.traverse(o=>{ if(o.isMesh)o.castShadow=true; });
@@ -1392,17 +1408,18 @@ class Fighter{
     const strawM=stdMat(0x8a7448,{roughness:.95});
     const buildFootMesh=()=>{
       const g=new THREE.Group();
-      /* the foot: instep + rounded heel + toe block, on a sandal sole */
-      const instep=new THREE.Mesh(new THREE.BoxGeometry(.088,.055,.16),tabiM);
-      instep.position.set(0,.012,.035);
-      const heel=new THREE.Mesh(new THREE.SphereGeometry(.045,8,7),tabiM);
+      /* the foot: a rounded instep + heel + toe, on a sandal sole —
+         curved tabi cloth, not carpentry */
+      const instep=new THREE.Mesh(new THREE.SphereGeometry(.05,16,12),tabiM);
+      instep.scale.set(.92,.62,1.75); instep.position.set(0,.016,.03);
+      const heel=new THREE.Mesh(new THREE.SphereGeometry(.045,12,9),tabiM);
       heel.scale.set(.95,.8,1); heel.position.set(0,.012,-.05);
-      const toe=new THREE.Mesh(new THREE.BoxGeometry(.082,.042,.06),tabiM);
-      toe.position.set(0,.002,.125);
+      const toe=new THREE.Mesh(new THREE.SphereGeometry(.043,14,10),tabiM);
+      toe.scale.set(.95,.6,.95); toe.position.set(0,.006,.12);
       const sole=new THREE.Mesh(new THREE.BoxGeometry(.095,.016,.24),strawM);
       sole.position.set(0,-.022,.04);
       /* the cuff: rises to tuck under the hakama — no gap, ever */
-      const cuff=new THREE.Mesh(new THREE.CylinderGeometry(.052,.058,.13,10),tabiM);
+      const cuff=new THREE.Mesh(new THREE.CylinderGeometry(.052,.058,.13,14),tabiM);
       cuff.position.set(0,.09,-.02);
       g.add(instep,heel,toe,sole,cuff);
       g.traverse(o=>{ if(o.isMesh)o.castShadow=true; });
@@ -1418,8 +1435,8 @@ class Fighter{
     scene.add(this.skin.mesh);
     this.buildCloth(rimify(stdMat(this.palette.hakama,{roughness:.94,
       side:THREE.DoubleSide,map:hakamaTex||null}),.3,.38,.58,3,.4));
-    this.buildSleeves(rimify(stdMat(this.palette.kimono,{roughness:.9,
-      side:THREE.DoubleSide,map:kimonoTex||null}),.32,.42,.62,3,.5));
+    this.buildSleeves(rimify(stdMat(this.palette.kimono,{roughness:.95,
+      side:THREE.DoubleSide,map:kimonoTex||null}),.32,.42,.62,3,.2));
     this.skinKimono=this.skin.kimono;
     const hideIn=(g,keep)=>g.traverse(o=>{
       if(o.isMesh&&!(keep&&keep(o)))o.visible=false; });
@@ -1429,7 +1446,7 @@ class Fighter{
     hideIn(parts.upperArmL,o=>o.userData.end);
     hideIn(parts.thighR); hideIn(parts.thighL);
     hideIn(parts.shinR); hideIn(parts.shinL);
-    parts.pelvis.traverse(o=>{ if(o.isMesh&&o.userData.cover)o.visible=false; });
+    /* the hip core stays visible: the skinned tubes don't close the sides */
     /* the silhouette: outline everything the eye reads as the fighter */
     addOutline(this.skin.mesh,.009);
     for(const g of [parts.head,parts.forearmR,parts.forearmL,
@@ -2819,6 +2836,10 @@ Fighter.prototype.updateAlive=function(dt,opponent){
 
   P.pelvis.position.copy(pelvis);
   P.pelvis.quaternion.setFromAxisAngle(UPY,pelvisYawA);
+  { /* the obi and saya ride the trunk's lean, not a flat turntable */
+    TMP3.subVectors(chestB,pelvis).normalize();
+    _pq.setFromUnitVectors(UPY,TMP3);
+    P.pelvis.quaternion.premultiply(_pq); }
   /* hakama panels trail the motion */
   { const swayF=clamp(this.vel.dot(fwdP)*.22,-.3,.3), swayS=clamp(this.vel.dot(rightP)*.22,-.3,.3);
     const k=clamp(dt*6,0,1);
@@ -4522,7 +4543,7 @@ Fighter.prototype.buildSleeves=function(mat){
   if(this.build.cloth===false||this.build.bare)return;
   this.sleeves=[];
   for(const side of ['R','L']){
-    const P=mkClothPanel(4,3,mat,.075,.09,.085);
+    const P=mkClothPanel(4,3,mat,.065,.078,.07);
     P.arm=side; scene.add(P.mesh);
     for(const q of P.pts){ q.p.set(this.pos.x,1.2,this.pos.z); q.pp.copy(q.p); }
     this.sleeves.push(P);
@@ -4540,17 +4561,18 @@ Fighter.prototype.tickSleeves=function(dt,J){
     if(_slO.lengthSq()<1e-6)_slO.set(1,0,0); _slO.normalize();
     for(let c=0;c<P.cols;c++){
       const q=P.pts[c], t=c/(P.cols-1);
-      q.p.lerpVectors(sh,el,t*.9).addScaledVector(_slO,.055);
-      q.p.y+=.02;
+      q.p.lerpVectors(sh,el,t*.78).addScaledVector(_slO,.045);
+      q.p.y+=.015;
       q.pp.copy(q.p);
     }
     for(let i=P.cols;i<P.pts.length;i++){
       const q=P.pts[i];
-      TMP2.subVectors(q.p,q.pp).multiplyScalar(.94);
+      /* heavy damping: cloth, not a flag in a gale */
+      TMP2.subVectors(q.p,q.pp).multiplyScalar(.86);
       q.pp.copy(q.p);
       q.p.add(TMP2);
-      q.p.y-=6.5*dt*dt;
-      q.p.addScaledVector(this.vel,-dt*.2);
+      q.p.y-=9.5*dt*dt;
+      q.p.addScaledVector(this.vel,-dt*.12);
     }
     for(let it=0;it<3;it++){
       for(const [a,b,rest] of P.cons){
@@ -5102,17 +5124,31 @@ function updateCamera(dt){
     camera.lookAt(camTarget);
     return;
   }
-  /* kill cam: drop low, push in, hold the stillness */
-  if(killCam&&killCam.t<6){
+  if(killCam&&(killCam.released?killCam.ritual>killCam.thrownAt+3.2
+             :killCam.ritual>=12)){
+    killCam=null; document.body.classList.remove('cine'); }
+  /* kill cam: drop low, push in, hold the stillness — then, when the
+     victor moves in for THE TAKING, open the frame: target the space
+     between the two and pull back so the raise and the throw play in
+     full shot instead of a close-up of the corpse's ribs */
+  if(killCam){
     killCam.t+=dt;
     const kc=killCam, k=clamp(kc.t/2.6,0,1), e=k*k*(3-2*k);
-    const v=kc.victim;
+    const v=kc.victim, w=kc.victor;
     if(v.physDead&&v.physJoint('chestB',TMP1)){}
     else TMP1.copy(v.J?v.J.chestB.p:v.pos);
     const tgt=TMP1; tgt.y=Math.max(tgt.y,.35);
+    /* wide factor eases in once the ritual approach starts */
+    kc.wide=lerp(kc.wide||0,(kc.chopT||kc.beheadDone||kc.t>4)?1:0,clamp(dt*1.4,0,1));
+    if(w&&w.parts&&kc.wide>0){
+      TMP3.copy(w.parts.pelvis.position); TMP3.y=1.05;
+      tgt.lerp(TMP3,kc.wide*.5);                 // between the fallen and the victor
+      tgt.y+=kc.wide*.5;                          // lift to hold the raised head
+    }
     camTarget.lerp(tgt,clamp(dt*2.5,0,1));
-    kc.orbit+=dt*.12;
-    const d=lerp(4.2,2.7,e), h=lerp(1.9,.85,e);
+    kc.orbit+=dt*(.12-kc.wide*.05);
+    const d=lerp(lerp(4.2,2.7,e),5.4,kc.wide),    // pull OUT for the taking
+          h=lerp(lerp(1.9,.85,e),2.0,kc.wide);
     TMP2.set(Math.cos(kc.orbit)*d,0,Math.sin(kc.orbit)*d);
     const desired=TMP4.copy(camTarget).add(TMP2).setY(h);
     camera.position.lerp(desired,clamp(dt*1.8,0,1));
@@ -5122,9 +5158,6 @@ function updateCamera(dt){
     camera.lookAt(camTarget);
     return;
   }
-  if(killCam&&(killCam.released?killCam.ritual>killCam.thrownAt+3.2
-             :killCam.ritual>=12)){
-    killCam=null; document.body.classList.remove('cine'); }
   const mid=TMP1.addVectors(player.pos,enemy.pos).multiplyScalar(.5); mid.y=1.15;
   /* maai: when both wait, the camera settles into a long wide */
   const calm=player.bladeSpeed<4&&enemy.bladeSpeed<4&&player.pos.distanceTo(enemy.pos)>3;
