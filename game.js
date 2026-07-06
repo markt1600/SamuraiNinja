@@ -1351,9 +1351,15 @@ class Fighter{
       parts.pelvis.add(hip,obi,knot,skirtF,skirtB,saya);
       if(this.build.tracksuit){ obi.visible=knot.visible=saya.visible=false;
         skirtF.visible=skirtB.visible=false; }
-      if(this.build.trunks){ /* boxing trunks: the skirt IS the shorts,
-        the obi the waistband — no steel on a boxer's hip */
-        saya.visible=false; knot.visible=false; }
+      if(this.build.trunks){ /* boxing trunks: one CLOSED drum of cloth —
+        the two hakama skirt arcs tear open at the sides. No steel. */
+        saya.visible=false; knot.visible=false;
+        skirtF.visible=false; skirtB.visible=false;
+        const shorts=new THREE.Mesh(
+          new THREE.CylinderGeometry(.168,.205,.33,18,1,true),hakama);
+        shorts.position.y=-.185; shorts.castShadow=true;
+        parts.pelvis.add(shorts);
+      }
       /* wide builds: the band and obi must ring the actual body, not
          drown inside it */
       const hS=this.build.hip||1, wS=this.build.waist||1;
@@ -1486,6 +1492,16 @@ class Fighter{
         hairM.side=THREE.DoubleSide;
         hairC.scale.set(.99,1.14,1.04); hairC.rotation.x=-.32;
         hairC.position.y=.012;
+      } else if(HB==='buzz'){
+        /* the trademark boxy buzz: a flat-top block, tight at the sides */
+        mage.visible=false; hairC.visible=false;
+        const top=new THREE.Mesh(
+          new THREE.BoxGeometry(D.headR*1.66,.042,D.headR*1.56),hairM);
+        top.position.y=D.headR*.8;
+        const base=new THREE.Mesh(
+          new THREE.BoxGeometry(D.headR*1.82,.05,D.headR*1.66),hairM);
+        base.position.y=D.headR*.63;
+        F.push(top,base);
       } else if(HB==='crop'){
         /* the legionary crop: close, matte, no ornament */
         mage.visible=false;
@@ -1563,7 +1579,7 @@ class Fighter{
           pauld.position.set(0,-.03,0); }catch(e){} },0);
       }
       parts.head.add(skull,hairC,mage,...F);
-      if(isPlayer){
+      if(isPlayer&&!this.build.trunks){   // no hachimaki on a boxer
         const hachi=new THREE.Mesh(new THREE.TorusGeometry(D.headR*.92,.014,8,24),accentM);
         hachi.rotation.x=Math.PI/2+.06; hachi.position.y=.048;
         parts.head.add(hachi);
@@ -2102,7 +2118,7 @@ const BUILDS={
   tyson:{label:'鉄 IRON MIKE — the baddest',
     /* the heavyweight in the snow: shorts only, as in the ring —
        compact, massively muscled, bare fists, boxing boots */
-    sh:1.35, waist:1.15, hip:1.05, limb:1.45, hair:'crop', bare:true,
+    sh:1.35, waist:1.15, hip:1.05, limb:1.45, hair:'buzz', bare:true,
     chest:1.55, legsSkin:true, legR:1.3, armR:1.55, armsSkin:true,
     cloth:false, trunks:true, mass:1.7, preferWeapon:'bare',
     palette:{kimono:0x6b4630,hakama:0x161616,obi:0xe8e6e0,skin:0x6b4630,
