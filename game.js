@@ -319,6 +319,45 @@ const POST=(()=>{
       'uniform sampler2D tex; varying vec2 vUv;'+
       'void main(){ gl_FragColor=vec4(texture2D(tex,vUv).rgb,1.); }',
       {tex:{value:rtA.texture}});
+    /* SSAO: depth-only, half res. View position is rebuilt from the depth
+       buffer, the normal from its derivatives; a golden spiral of taps
+       measures how much of the hemisphere the neighbourhood swallows. */
+    let aoOK=false, rtAO=null, rtAOt=null, aoMat=null;
+    try{
+      rtScene.depthTexture=new THREE.DepthTexture(
+        Math.round(W*SS),Math.round(H*SS));
+      rtScene.depthTexture.type=THREE.UnsignedIntType;
+      rtAO=mkRT(W>>1,H>>1); rtAOt=mkRT(W>>1,H>>1);
+      const TAPS=IS_TOUCH?8:12;
+      aoMat=mat(
+        'uniform sampler2D tDepth; varying vec2 vUv;'+
+        'uniform vec2 uP; uniform vec2 uNF;'+
+        'float vz(float d){ float n=uNF.x,f=uNF.y; float z=2.*d-1.;'+
+        ' return 2.*n*f/(z*(f-n)-(f+n)); }'+
+        'vec3 vpos(vec2 uv){ float d=texture2D(tDepth,uv).x; float z=vz(d);'+
+        ' vec2 nd=uv*2.-1.; return vec3(-z*nd.x/uP.x,-z*nd.y/uP.y,z); }'+
+        'void main(){'+
+        ' vec3 p=vpos(vUv);'+
+        ' if(p.z<-120.){ gl_FragColor=vec4(1.); return; }'+
+        ' vec3 n=normalize(cross(dFdx(p),dFdy(p)));'+
+        ' float rnd=fract(sin(dot(gl_FragCoord.xy,vec2(12.9898,78.233)))*43758.5453)*6.2831;'+
+        ' float occ=0.;'+
+        ' for(int i=0;i<'+TAPS+';i++){'+
+        '  float fi=float(i)+.5;'+
+        '  float ang=fi*2.399963+rnd;'+
+        '  float rad=.42*sqrt(fi/'+TAPS+'.);'+
+        '  vec2 off=vec2(cos(ang),sin(ang))*rad*vec2(uP.x,uP.y)*.5/max(-p.z,.6);'+
+        '  vec3 sp=vpos(vUv+off);'+
+        '  vec3 dv=sp-p; float dl=length(dv);'+
+        '  occ+=max(0.,dot(n,dv/max(dl,1e-4))-.08)*smoothstep(.9,.15,dl);'+
+        ' }'+
+        ' float aoV=clamp(1.-occ*'+(2.0/(IS_TOUCH?8:12)).toFixed(4)+',0.,1.);'+
+        ' gl_FragColor=vec4(vec3(aoV),1.);}',
+        {tDepth:{value:rtScene.depthTexture},
+         uP:{value:new THREE.Vector2(1,1)},
+         uNF:{value:new THREE.Vector2(camera.near,camera.far)}});
+      aoOK=true;
+    }catch(e){}
     const blurFS=
       'uniform sampler2D tex; uniform vec2 dir; varying vec2 vUv;'+
       'void main(){ vec3 s=texture2D(tex,vUv).rgb*.227;'+
@@ -330,7 +369,8 @@ const POST=(()=>{
     const blurH=mat(blurFS,{tex:{value:rtA.texture},dir:{value:new THREE.Vector2(1/(W>>1),0)}});
     const blurV=mat(blurFS,{tex:{value:rtB.texture},dir:{value:new THREE.Vector2(0,1/(H>>1))}});
     const comp=mat(
-      'uniform sampler2D scene; uniform sampler2D bloom; uniform sampler2D bloom2; varying vec2 vUv;'+
+      'uniform sampler2D scene; uniform sampler2D bloom; uniform sampler2D bloom2; uniform sampler2D tAO; varying vec2 vUv;'+
+      'uniform float uAOs;'+
       'uniform float uDesat; uniform float uVig; uniform float uAdren; uniform float uTime;'+
       'uniform float uExposure;'+
       'void main(){'+
@@ -339,6 +379,8 @@ const POST=(()=>{
       ' vec3 c; c.r=texture2D(scene,vUv+ca).r;'+
       ' c.g=texture2D(scene,vUv).g;'+
       ' c.b=texture2D(scene,vUv-ca).b;'+
+      ' float aoS=texture2D(tAO,vUv).r;'+
+      ' c*=mix(1.,aoS,uAOs);'+                                // contact shadow, pre-bloom
       ' c+=texture2D(bloom,vUv).rgb*.85;'+                    // tight halo
       ' c+=texture2D(bloom2,vUv).rgb*1.2;'+                   // wide atmospheric glow
       ' c*=uExposure;'+
@@ -356,6 +398,7 @@ const POST=(()=>{
       ' c=pow(clamp(c,0.,1.),vec3(1./2.2));'+
       ' gl_FragColor=vec4(c,1.);}',
       {scene:{value:rtScene.texture},bloom:{value:rtA.texture},bloom2:{value:rtC.texture},
+       tAO:{value:(aoOK?rtAO:rtScene).texture},uAOs:{value:aoOK?.72:0},
        uDesat:{value:0},uVig:{value:0},uAdren:{value:0},uTime:{value:0},
        uExposure:{value:1.12}});
     const quadScene=new THREE.Scene();
@@ -374,6 +417,14 @@ const POST=(()=>{
       comp,
       render(){
         renderer.setRenderTarget(rtScene); renderer.render(scene,camera);
+        if(aoOK){
+          aoMat.uniforms.uP.value.set(
+            camera.projectionMatrix.elements[0],
+            camera.projectionMatrix.elements[5]);
+          pass(aoMat,rtAO);
+          blurPair(rtAO,rtAOt,W>>1,H>>1,1);
+          comp.uniforms.tAO.value=rtAO.texture;
+        }
         pass(bright,rtA);
         blurPair(rtA,rtB,W>>1,H>>1,2);
         copy.uniforms.tex.value=rtA.texture; pass(copy,rtC);   // downsample the halo
@@ -384,7 +435,8 @@ const POST=(()=>{
       },
       resize(w,h){ W=w;H=h; rtScene.setSize(Math.round(w*SS),Math.round(h*SS));
         rtA.setSize(w>>1,h>>1); rtB.setSize(w>>1,h>>1);
-        rtC.setSize(w>>2,h>>2); rtD.setSize(w>>2,h>>2); },
+        rtC.setSize(w>>2,h>>2); rtD.setSize(w>>2,h>>2);
+        if(aoOK){ rtAO.setSize(w>>1,h>>1); rtAOt.setSize(w>>1,h>>1); } },
     };
   }catch(e){ return null; }
 })();
@@ -7455,7 +7507,16 @@ const REPLAY=(()=>{
         L.push(f.model.root);
         f.model.root.traverse(o=>{ if(o.isBone)L.push(o); });
       }
-      K.push({f,keys:f._K?Object.keys(f._K):[]});
+      /* the garments are recorded VERBATIM — cloth is never simulated
+         during a replay. Simulating it against recalled joints failed
+         whenever a fighter was dead or ragdolled (their joint map goes
+         stale at death; the mawashi spiralled off the corpse). */
+      const gs=[];
+      if(f.cloth)for(const P of f.cloth)gs.push(P);
+      if(f.sleeves)for(const P of f.sleeves)gs.push(P);
+      if(f.hairCloth)gs.push(f.hairCloth);
+      let np=0; for(const g of gs)np+=g.pts.length;
+      K.push({f,keys:f._K?Object.keys(f._K):[],gs,np});
     }
     return {L,K};
   }
@@ -7464,10 +7525,10 @@ const REPLAY=(()=>{
     if(play||used)return;
     t+=dt;
     const C=collect();
-    const sig=C.L.length+'/'+C.K.map(e=>e.keys.length).join(',');
+    const sig=C.L.length+'/'+C.K.map(e=>e.keys.length+':'+e.np).join(',');
     if(!objs||objs._sig!==sig){ objs=C.L; objs._sig=sig; kmap=C.K; buf.length=0; }
     let n=objs.length*10;
-    for(const e of kmap)n+=4+e.keys.length*3;
+    for(const e of kmap)n+=4+e.keys.length*3+e.np*3;
     const F=new Float32Array(n); let j=0;
     for(const o of objs){
       F[j++]=o.position.x; F[j++]=o.position.y; F[j++]=o.position.z;
@@ -7477,46 +7538,11 @@ const REPLAY=(()=>{
     for(const e of kmap){
       F[j++]=e.f.bodyYaw||0; F[j++]=e.f.vel.x; F[j++]=e.f.vel.y; F[j++]=e.f.vel.z;
       for(const k of e.keys){ const v=e.f._K[k]; F[j++]=v.x; F[j++]=v.y; F[j++]=v.z; }
+      for(const g of e.gs)for(const q of g.pts){
+        F[j++]=q.p.x; F[j++]=q.p.y; F[j++]=q.p.z; }
     }
     buf.push({t,F});
     while(buf.length&&buf[0].t<t-4.6)buf.shift();
-  }
-  function clothPts(f,cb){
-    if(f.cloth)for(const P of f.cloth)for(const q of P.pts)cb(q);
-    if(f.sleeves)for(const P of f.sleeves)for(const q of P.pts)cb(q);
-    if(f.hairCloth&&f.hairCloth.pts)for(const q of f.hairCloth.pts)cb(q);
-  }
-  function snapPelvis(){
-    const m=new Map();
-    for(const e of kmap)if(e.f._K&&e.f._K.pelvis)
-      m.set(e.f,{p:e.f._K.pelvis.clone(),yaw:e.f.bodyYaw||0});
-    return m;
-  }
-  const _cq=new THREE.Quaternion();
-  function carryCloth(pre){
-    /* time jumped: carry each fighter's cloth through the SAME rigid
-       motion the body made — translate by the pelvis displacement AND
-       rotate by the yaw change about the pelvis — then settle ticks
-       drape it on the recalled pose. A translation-only carry left the
-       skirt flaring off a fighter who had turned between the two
-       moments. */
-    for(const e of kmap){
-      const f=e.f, o=pre.get(f);
-      if(!f._K||!f._K.pelvis||!o)continue;
-      _cq.setFromAxisAngle(UPY,(f.bodyYaw||0)-o.yaw);
-      const P0=o.p, P1=f._K.pelvis;
-      clothPts(f,q=>{
-        q.p.sub(P0).applyQuaternion(_cq).add(P1);
-        q.pp.sub(P0).applyQuaternion(_cq).add(P1);
-      });
-      try{
-        for(let i=0;i<8;i++){
-          f.tickCloth&&f.tickCloth(.018,f._K);
-          f.tickSleeves&&f.tickSleeves(.018,f._K);
-          f.tickHair&&f.tickHair(.018);
-        }
-      }catch(err){}
-    }
   }
   function apply(F0,F1,a){
     let j=0;
@@ -7534,7 +7560,24 @@ const REPLAY=(()=>{
       for(const k of e.keys){ const v=e.f._K[k];
         if(v)v.set(lerp(F0[j],F1[j],a),lerp(F0[j+1],F1[j+1],a),lerp(F0[j+2],F1[j+2],a));
         j+=3; }
+      for(const g of e.gs){
+        for(const q of g.pts){
+          q.p.set(lerp(F0[j],F1[j],a),lerp(F0[j+1],F1[j+1],a),lerp(F0[j+2],F1[j+2],a));
+          q.pp.copy(q.p);
+          j+=3;
+        }
+        flushGarment(g);
+      }
     }
+  }
+  function flushGarment(g){
+    try{
+      const pos=g.mesh.geometry.attributes.position;
+      for(let i=0;i<g.pts.length;i++)
+        pos.setXYZ(i,g.pts[i].p.x,g.pts[i].p.y,g.pts[i].p.z);
+      pos.needsUpdate=true;
+      g.mesh.geometry.computeVertexNormals();
+    }catch(e){}
   }
   function arm(victor,victim){
     if(used||buf.length<10)return false;
@@ -7553,11 +7596,9 @@ const REPLAY=(()=>{
     game.state='replay'; game.timeScale=1;
     document.body.classList.add('cine');
     for(const f of roster())if(f.trailMesh)f.trailMesh.visible=false;
-    /* land on the start of the tape NOW, carrying the cloth along */
-    { const pre=snapPelvis();
-      let i0=0; while(i0<buf.length-1&&buf[i0].t<play.t0)i0++;
-      apply(buf[i0].F,buf[i0].F,0);
-      carryCloth(pre); }
+    /* land on the start of the tape NOW — cloth included, verbatim */
+    { let i0=0; while(i0<buf.length-1&&buf[i0].t<play.t0)i0++;
+      apply(buf[i0].F,buf[i0].F,0); }
     log('— the moment, again —',false);
     return true;
   }
@@ -7569,15 +7610,10 @@ const REPLAY=(()=>{
     const A=buf[Math.min(play.i,buf.length-1)], B=buf[Math.min(play.i+1,buf.length-1)];
     const a=(B.t>A.t)?clamp((rt-A.t)/(B.t-A.t),0,1):1;
     apply(A.F,B.F,a);
-    /* cloth, sleeves, hair and loose pieces keep living on scripted bones */
+    /* severed pieces keep tumbling; the cloth itself is scripted */
     const sdt=Math.min(dt,.033);
     for(const f of roster()){
-      try{
-        if(f._K){ f.tickCloth&&f.tickCloth(sdt,f._K);
-          f.tickSleeves&&f.tickSleeves(sdt,f._K);
-          f.tickHair&&f.tickHair(sdt); }
-        updateLoose(f,sdt);
-      }catch(e){}
+      try{ updateLoose(f,sdt); }catch(e){}
     }
     /* the lens: a slow arc around the exchange */
     const th=play.ph*.34;
@@ -7587,9 +7623,7 @@ const REPLAY=(()=>{
       1.45+Math.sin(play.ph*.8)*.15, play.mid.z+TMP1.z*play.r);
     camera.lookAt(play.mid);
     if(rt>=play.t1){
-      const pre=snapPelvis();
-      const E=buf[buf.length-1]; apply(E.F,E.F,0);  // land on the present
-      carryCloth(pre);
+      const E=buf[buf.length-1]; apply(E.F,E.F,0);  // land on the present, cloth and all
       for(const f of roster())if(f.trailMesh)f.trailMesh.visible=true;
       play=null; buf.length=0;
       endDuel();

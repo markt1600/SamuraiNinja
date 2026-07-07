@@ -269,7 +269,7 @@
     </div>
   </div>
   <button class="begin" id="btn-begin">BEGIN</button>
-  <div class="buildtag" style="margin-top:12px;font-size:10px;color:var(--dim);letter-spacing:.25em">BUILD V45</div>
+  <div class="buildtag" style="margin-top:12px;font-size:10px;color:var(--dim);letter-spacing:.25em">BUILD V46</div>
   <div id="pickdbg" style="margin-top:4px;font-size:10px;color:var(--dim);letter-spacing:.1em"></div>
   <div class="warn">no health bar · anatomy is the health bar · a severed artery ends the duel</div>
 </div>
@@ -291,7 +291,7 @@
 </div>
 
 <script type="importmap">
-{ "imports": { "three": "./vendor/three.module.js?v=v45",
+{ "imports": { "three": "./vendor/three.module.js?v=v46",
                "three/addons/": "./vendor/addons/" } }
 </script>
 <script type="module">
@@ -306,7 +306,7 @@ import * as SkeletonUtils from 'three/addons/utils/SkeletonUtils.js';
    composite); keep r128-era color semantics */
 THREE.ColorManagement.enabled = false;
 window.THREE = Object.assign({}, THREE, { GLTFLoader, FBXLoader, SkeletonUtils });
-for (const src of ['physics.js?v=v45', 'game.js?v=v45'])
+for (const src of ['physics.js?v=v46', 'game.js?v=v46'])
   await new Promise((ok, fail) => {
     const s = document.createElement('script');
     s.src = src; s.onload = ok; s.onerror = fail;
