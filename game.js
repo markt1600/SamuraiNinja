@@ -7619,7 +7619,7 @@ function updateCamera(dt){
    the side, before the ritual claims the body. */
 const REPLAY=(()=>{
   const buf=[]; let objs=null,kmap=null,t=0,play=null,used=false,resets=0;
-  const q0=new THREE.Quaternion(), q1=new THREE.Quaternion();
+  const q0=new THREE.Quaternion(), q1=new THREE.Quaternion(), q0v=new THREE.Vector3();
   function roster(){ const r=[player,enemy]; if(enemy2)r.push(enemy2);
     return r.filter(Boolean); }
   function collect(){
@@ -7744,6 +7744,46 @@ const REPLAY=(()=>{
     const A=buf[Math.min(play.i,buf.length-1)], B=buf[Math.min(play.i+1,buf.length-1)];
     const a=(B.t>A.t)?clamp((rt-A.t)/(B.t-A.t),0,1):1;
     apply(A.F,B.F,a);
+    /* SELF-HEALING: a garment that strays impossibly far from its owner's
+       RENDERED body has gone wrong in a way we could not reproduce —
+       glue it back onto the body for the rest of the replay rather than
+       show a floating shell, and log it so field reports can name it. */
+    play.fixG=play.fixG||new Set();
+    if(((play.chk=(play.chk||0)+1)%10)===1){
+      for(const e of kmap){
+        const f=e.f, body=f.parts&&(f.parts.abdomen||f.parts.chest||f.parts.pelvis);
+        if(!body)continue;
+        body.getWorldPosition(q0v);
+        for(const g of e.gs){
+          if(!g.mesh||g===f.hairCloth||play.fixG.has(g))continue;
+          let cx=0,cz=0;
+          for(const q of g.pts){ cx+=q.p.x; cz+=q.p.z; }
+          cx/=g.pts.length; cz/=g.pts.length;
+          const dx=cx-q0v.x, dz=cz-q0v.z;
+          if(dx*dx+dz*dz>4){
+            play.fixG.add(g);
+            try{ console.warn('[replay] detached garment re-glued — fighter:',
+              f.name,'pts:',g.pts.length,'d:',Math.sqrt(dx*dx+dz*dz).toFixed(2)); }catch(err){}
+          }
+        }
+      }
+    }
+    if(play.fixG.size){
+      for(const e of kmap){
+        const f=e.f, body=f.parts&&(f.parts.abdomen||f.parts.chest||f.parts.pelvis);
+        if(!body)continue;
+        body.getWorldPosition(q0v);
+        for(const g of e.gs){
+          if(!play.fixG.has(g))continue;
+          let cx=0,cz=0;
+          for(const q of g.pts){ cx+=q.p.x; cz+=q.p.z; }
+          cx/=g.pts.length; cz/=g.pts.length;
+          const dx=q0v.x-cx, dz=q0v.z-cz;
+          for(const q of g.pts){ q.p.x+=dx; q.p.z+=dz; q.pp.copy(q.p); }
+          flushGarment(g);
+        }
+      }
+    }
     /* recorded parts carry the severed limbs; everything else is hidden —
        nothing is simulated during a replay */
     /* the lens: a slow arc around the exchange */
@@ -7756,6 +7796,7 @@ const REPLAY=(()=>{
     if(rt>=play.t1){
       const E=buf[buf.length-1]; apply(E.F,E.F,0);  // land on the present, cloth and all
       if(play.hidden)for(const m of play.hidden)m.visible=true;
+      if(play.hiddenG)for(const m of play.hiddenG)m.visible=true;
       for(const f of roster())if(f.trailMesh)f.trailMesh.visible=true;
       play=null; buf.length=0;
       endDuel();
