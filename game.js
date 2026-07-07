@@ -7635,6 +7635,15 @@ const REPLAY=(()=>{
     for(const f of roster()){
       if(f.root)L.push(f.root);
       for(const k in f.parts)if(f.parts[k])L.push(f.parts[k]);
+      /* THE BODY ITSELF: the procedural fighter's visible flesh is a
+         SkinnedMesh posed by its OWN nine bones in world space — they are
+         not parts, and leaving them off the tape froze the body at the
+         death pose while the costume replayed around it */
+      if(f.skin&&f.skin.bones){
+        const rt=f.skin.bones[0]&&f.skin.bones[0].parent;
+        if(rt)L.push(rt);
+        for(const b of f.skin.bones)L.push(b);
+      }
       if(f.katana)L.push(f.katana);
       if(f.model&&f.model.root){
         L.push(f.model.root);
