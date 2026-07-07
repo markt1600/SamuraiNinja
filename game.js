@@ -7301,13 +7301,26 @@ function updateFatality(dt){
       p.tipTarget.copy(p.pos).addScaledVector(DIRY(p.bodyYaw+1.0),.6).setY(2.05);
       p.telegraph=true;
     }
-    if(F.t>T){ F.phase='blow'; F.t=0; }
+    if(F.t>T){ F.phase='blow'; F.t=0;
+      F.from=bare?null:p.tipTarget.clone(); }   // the swing starts overhead
     return;
   }
   if(F.phase==='blow'){
     p.telegraph=false;
     const dir=TMP1.set(dx/d,-.25,dz/d).normalize().clone();
-    if(!bare)p.tipTarget.copy(pt).addScaledVector(DIRY(p.bodyYaw+2.4),.7);
+    if(!bare){
+      /* the blade SWEEPS from overhead down THROUGH the limb — steel
+         must be seen to arrive; the piece leaves only on contact */
+      const SW=.24, e=minJerk?minJerk(clamp(F.t/SW,0,1)):clamp(F.t/SW,0,1);
+      TMP2.copy(pt).addScaledVector(DIRY(p.bodyYaw+2.4),.35);
+      if(F.from)p.tipTarget.lerpVectors(F.from,TMP2,e);
+      else p.tipTarget.copy(TMP2);
+      const near=p.bladeA&&p.bladeB&&
+        (segSegClosest?segSegClosest(p.bladeA,p.bladeB,pt,pt,hitTmpA,hitTmpB)
+          :p.bladeB.distanceTo(pt))<.42;
+      if(!near&&F.t<SW*2.6)return;              // still swinging — wait for steel
+      p.tipTarget.copy(pt).addScaledVector(DIRY(p.bodyYaw+2.4),.7);
+    }
     if(F.limb==='head'){
       v.decapitate(pt.clone(),dir);
       if(!v.dead){ v.collapse(log); }
