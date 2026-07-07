@@ -209,7 +209,30 @@ const Sound=(()=>{
     const g=ctx.createGain(); g.gain.setValueAtTime(.5,t); g.gain.exponentialRampToValueAtTime(.001,t+.3);
     o.connect(g).connect(ctx.destination); o.start(t); o.stop(t+.35);
   }
-  return {ac,whoosh,clang,cut,thump,parry,startWind,tickWind,tickHeart,taiko,killMoment,step,setMuffle,scrape};
+  function grunt(sev,pitch){ // a hurt voice: pitch-dropping buzz through a formant
+    try{
+      const c=ac(), t=c.currentTime, p=pitch||1;
+      const o=c.createOscillator(); o.type='sawtooth';
+      const f0=(110+sev*70)*p;
+      o.frequency.setValueAtTime(f0,t);
+      o.frequency.exponentialRampToValueAtTime(f0*.55,t+.16+sev*.12);
+      const fm=c.createBiquadFilter(); fm.type='bandpass';
+      fm.frequency.value=560*p; fm.Q.value=1.2;
+      const g=c.createGain();
+      g.gain.setValueAtTime(.0001,t);
+      g.gain.exponentialRampToValueAtTime(.12+sev*.2,t+.02);
+      g.gain.exponentialRampToValueAtTime(.0001,t+.2+sev*.22);
+      o.connect(fm); fm.connect(g); g.connect(bus());
+      o.start(t); o.stop(t+.6);
+      const s=c.createBufferSource(); s.buffer=noiseBuf(.15);
+      const bf=c.createBiquadFilter(); bf.type='bandpass';
+      bf.frequency.value=1400*p; bf.Q.value=.8;
+      const g2=c.createGain(); g2.gain.setValueAtTime(.04+sev*.07,t);
+      g2.gain.exponentialRampToValueAtTime(.0001,t+.12);
+      s.connect(bf); bf.connect(g2); g2.connect(bus()); s.start(t);
+    }catch(e){}
+  }
+  return {ac,whoosh,clang,cut,thump,parry,startWind,tickWind,tickHeart,taiko,killMoment,step,setMuffle,scrape,grunt};
 })();
 
 
@@ -636,20 +659,32 @@ function mkContactShadow(){
   g.position.set(0,0,-11.5); scene.add(g);
 })();
 
-/* treeline silhouettes */
+/* treeline silhouettes — trunked, tiered pines, three draw calls total */
 (function trees(){
-  const g=new THREE.Group();
+  const N=96;
   const mat=new THREE.MeshBasicMaterial({color:SRGB(0x0a0c10)});
-  const snowM=stdMat(0xc7cdd3,{roughness:1});
-  for(let i=0;i<80;i++){
-    const a=rand(0,Math.PI*2), r=rand(20,44), h=rand(4,10);
-    const t=new THREE.Mesh(new THREE.ConeGeometry(rand(.9,2),h,6),mat);
-    t.position.set(Math.cos(a)*r,h/2,Math.sin(a)*r);
-    const cap=new THREE.Mesh(new THREE.ConeGeometry(rand(.4,.8),h*.2,6),snowM);
-    cap.position.set(t.position.x,h*.92,t.position.z);
-    g.add(t,cap);
+  const trunkM=new THREE.MeshBasicMaterial({color:SRGB(0x060709)});
+  const snowM=new THREE.MeshBasicMaterial({color:SRGB(0x525c68)});
+  const tiers=new THREE.InstancedMesh(new THREE.ConeGeometry(1,1,7),mat,N*3);
+  const trunks=new THREE.InstancedMesh(new THREE.CylinderGeometry(.09,.14,1,5),trunkM,N);
+  const caps=new THREE.InstancedMesh(new THREE.ConeGeometry(1,1,6),snowM,N);
+  const M=new THREE.Matrix4(), Q=new THREE.Quaternion(),
+        UP=new THREE.Vector3(0,1,0), P=new THREE.Vector3(), S=new THREE.Vector3();
+  let ti=0;
+  for(let i=0;i<N;i++){
+    const a=rand(0,Math.PI*2), r=rand(19,46), h=rand(4,11), base=rand(1,2.1);
+    const x=Math.cos(a)*r, z=Math.sin(a)*r;
+    Q.setFromAxisAngle(UP,rand(0,6.28));
+    trunks.setMatrixAt(i,M.compose(P.set(x,h*.15,z),Q,S.set(base,h*.3,base)));
+    /* three stacked, shrinking canopy tiers — a pine, not a traffic cone */
+    for(let k=0;k<3;k++){
+      const rr=base*(1-k*.28), hh=h*.45;
+      tiers.setMatrixAt(ti++,M.compose(P.set(x,h*(.18+.21*k)+hh*.5,z),Q,S.set(rr,hh,rr)));
+    }
+    caps.setMatrixAt(i,M.compose(P.set(x,h*.78,z),Q,S.set(base*.34,h*.3,base*.34)));
   }
-  scene.add(g);
+  tiers.instanceMatrix.needsUpdate=trunks.instanceMatrix.needsUpdate=caps.instanceMatrix.needsUpdate=true;
+  scene.add(tiers,trunks,caps);
 })();
 
 /* moon with halo */
@@ -668,7 +703,29 @@ function mkContactShadow(){
 })();
 
 /* ---------------- a clear winter night: sky, stars, mountains ---------- */
-const mists=[];   // gone — the air is clear
+const mists=[];   // faint drifting fog banks beyond the ring
+(function groundFog(){
+  const tex=canTex(256,128,(ctx,w,h)=>{
+    const g=ctx.createRadialGradient(w/2,h/2,8,w/2,h/2,w/2);
+    g.addColorStop(0,'rgba(190,205,225,.55)');
+    g.addColorStop(.6,'rgba(180,195,220,.22)');
+    g.addColorStop(1,'rgba(170,190,215,0)');
+    ctx.fillStyle=g; ctx.fillRect(0,0,w,h);
+  });
+  if(!tex)return;
+  for(let i=0;i<6;i++){
+    const o=rand(.05,.10);
+    const m=new THREE.Mesh(new THREE.PlaneGeometry(rand(10,16),rand(3,5)),
+      new THREE.MeshBasicMaterial({map:tex,transparent:true,opacity:o,
+        side:THREE.DoubleSide,depthWrite:false,fog:false}));
+    const a=rand(0,Math.PI*2), r=rand(10,22);
+    m.position.set(Math.cos(a)*r,rand(.6,1.4),Math.sin(a)*r);
+    m.lookAt(0,m.position.y,0);
+    m.renderOrder=6;
+    scene.add(m);
+    mists.push({m,o,a,r,seed:rand(0,6.28)});
+  }
+})();
 (function buildNight(){
   /* sky: vertical gradient dome with a faint glow near the moon's quarter */
   const skyTex=canTex(64,512,(ctx,w,h)=>{
@@ -731,6 +788,7 @@ const mists=[];   // gone — the air is clear
     }
   };
   ridge(70,26,'#070b13',1.7);
+  ridge(61,21,'#090e18',7.9);
   ridge(52,17,'#0b111c',4.2);
 })();
 
@@ -1905,6 +1963,7 @@ class Fighter{
     if(depth<A.layers[0].at){
       if(energy>26){
         this.pain+=10; this.stun=Math.max(this.stun,.15);
+        if(!this.dead)Sound.grunt(.2,this._vp||(this._vp=rand(.8,1.25)));
         log('a flat blow glances off '+this.name+"'s "+A.label,false);
         return 'blunt';
       }
@@ -1929,6 +1988,7 @@ class Fighter{
       Sound.cut(depth);
       emitBlood(hitPoint,hitDir,clamp(energy/40,1,4),Math.floor(clamp(depth*4,4,26)));
       this.pain+=depth*4;
+      if(!this.dead)Sound.grunt(clamp(depth/9,.3,1),this._vp||(this._vp=rand(.8,1.25)));
       if(!this.pool && this.bleedRate>10)this.pool=addPool(this.pos.x,this.pos.z);
     }
     return deepest;
@@ -3809,7 +3869,8 @@ Fighter.prototype.updateAlive=function(dt,opponent){
   if(this.alive&&!this.begging&&game.state==='fight'){
     const armROut=this.disabled.armR||this.severed.armR;
     const armLOut=this.disabled.armL||this.severed.armL;
-    if((!this.hasSword&&!(this.weapon&&this.weapon.blunt))||(armROut&&armLOut)){
+    if(((!this.hasSword&&!(this.weapon&&this.weapon.blunt))||(armROut&&armLOut))
+       &&!this._noBeg){
       this.begging=true; this.parryEnabled=false;
       log(this.isPlayer?'you cannot fight on — you sink to your knees'
         :this.name+' drops his guard — on his knees, begging for mercy',false);
@@ -4960,6 +5021,15 @@ function log(msg,mortal){
 /* ============================ GAME STATE =============================== */
 const game={state:'menu',timeScale:1,slowT:0,shake:0};
 let player,enemy,enemyAI;
+/* THE FINAL RUNG comes as TWO: duel 5 is a 2-versus-1 */
+let enemy2=null,enemyAI2=null;
+const CHAMP_AT=5;                       // the ladder ends at five duels
+function livingFoe(){                   // the player fights the nearest breath
+  if(enemy2&&enemy2.alive&&(!enemy.alive||
+    player.pos.distanceToSquared(enemy2.pos)<player.pos.distanceToSquared(enemy.pos)))
+    return enemy2;
+  return enemy;
+}
 function shake(v){ game.shake=Math.max(game.shake,v); }
 function slowmo(){ game.timeScale=.22; game.slowT=1.5; }
 
@@ -6500,6 +6570,7 @@ function applyAmbience(stage){
 }
 function setup(){
   if(player){ disposeFighter(player); disposeFighter(enemy); }
+  if(enemy2){ disposeFighter(enemy2); enemy2=null; enemyAI2=null; }
   for(const p of bloodStains)scene.remove(p.mesh); bloodStains.length=0;
   for(const m of allStains)scene.remove(m); allStains.length=0; stainCount=0;
   /* thin snowfall between duels: yesterday's blood survives as an old
@@ -6539,9 +6610,11 @@ function setup(){
     :(pw||D.weapon||'katana');
   enemy=new Fighter(D.name,eBuild==='musashi'?D.palette:null,1.9,-1,false,eBuild,eWpn);
   enemy.speedMul=D.ai.speedMul;
-  const lbl=document.getElementById('name-enemy');
-  if(lbl)lbl.innerHTML='<span style="color:var(--dim)">'+D.kanji+' </span>'+D.name
-    +' <span style="color:var(--dim);font-size:11px">幕'+(game.stage+1)+'</span>';
+  const lbl=document.querySelector('#panel-enemy .fp-name');
+  if(lbl)lbl.innerHTML='<span style="color:var(--dim)">'+(D.kanji||'')+' </span>'+D.name
+    +(game.stage===CHAMP_AT-1?' <span style="color:#c22323">×2</span>':'');
+  const sub=document.querySelector('#panel-enemy .fp-sub');
+  if(sub)sub.textContent=(D.epithet||'the opponent')+' · duel '+(game.stage+1)+' of '+CHAMP_AT;
   if(game.legacy){
     player.legDamage.R=game.legacy.legR; player.legDamage.L=game.legacy.legL;
     player.blood=game.legacy.blood;
@@ -6549,6 +6622,24 @@ function setup(){
       log('the old wounds ache in the cold — they never fully leave',false);
   }
   enemyAI=new AI(enemy,DUELISTS[game.stage].ai);
+  /* THE FINAL RUNG: two come down the mountain together */
+  if(game.stage===CHAMP_AT-1){
+    let pool=Object.keys(BUILDS).filter(k=>!game.fought.includes(k));
+    if(!pool.length)pool=Object.keys(BUILDS);
+    const b2=pool[Math.floor(Math.random()*pool.length)];
+    if(!game.fought.includes(b2))game.fought.push(b2);
+    const pw2=BUILDS[b2]&&BUILDS[b2].preferWeapon;
+    enemy2=new Fighter('KAGEMUSHA',null,1.4,-1,false,b2,pw2||'katana');
+    enemy2.pos.set(1.4,0,1.7);
+    enemy2.yaw=enemy2.bodyYaw=Math.atan2(-enemy2.pos.x,-enemy2.pos.z);
+    const ai2=Object.assign({},D.ai);
+    ai2.skill=Math.min(.9,(D.ai.skill||.8)*.92);
+    ai2.speedMul=(D.ai.speedMul||1)*.95;
+    enemyAI2=new AI(enemy2,ai2);
+    enemy2.speedMul=ai2.speedMul;
+    enemy._noBeg=true; enemy2._noBeg=true;   // the finale is to the death
+    log('TWO step into the ring — the mountain sends its last pair',false);
+  }
   player.yaw=Math.atan2(enemy.pos.x-player.pos.x,enemy.pos.z-player.pos.z);
   enemy.yaw=Math.atan2(player.pos.x-enemy.pos.x,player.pos.z-enemy.pos.z);
   buildDiagram(document.getElementById('diagram-player'));
@@ -6586,7 +6677,10 @@ function showLadder(){
       +'<div class="r-sub">'+sub+'</div>'+(x?'<div class="r-x">敗</div>':'')+'</div>';
   };
   let html='';
-  html+=rung(DUELISTS[game.stage+1],'r-next',false);      // waiting above
+  if(game.stage+1>=CHAMP_AT)
+    html+='<div class="rung r-next"><div class="r-name">覇 CHAMPION</div>'
+      +'<div class="r-sub">the last rung</div></div>';
+  else html+=rung(DUELISTS[game.stage+1],'r-next',false); // waiting above
   html+=rung(DUELISTS[game.stage],'r-now',false);         // you are HERE
   for(let s=game.stage-1;s>=Math.max(0,game.stage-3);s--) // the fallen below
     html+=rung(DUELISTS[s],'r-beaten'+(s===game.stage-1?' r-fresh':''),true);
@@ -6604,7 +6698,7 @@ function restart(){
   game.introT=0;
   if(MODELPIPE.enabled)setTimeout(()=>{
     let hold=0;
-    for(const f of [player,enemy]){ if(!f)continue;
+    for(const f of (enemy2?[player,enemy,enemy2]:[player,enemy])){ if(!f)continue;
       /* a model holds the sim's guard from frame one: a draw clip would
          own the skeleton while the sim owns the sword — they'd disagree
          until the first step */
@@ -6638,6 +6732,17 @@ function spareDuel(){
   game.state='over';
   const v=document.getElementById('verdict');
   const K=document.getElementById('verdict-kanji');
+  if(game.stage+1>=CHAMP_AT){   // mercy at the summit still crowns you
+    K.textContent='覇'; K.className='kanji';
+    document.getElementById('verdict-sub').textContent=
+      'MERCY AT THE SUMMIT — CHAMPION, AND KINDER THAN THE MOUNTAIN';
+    game.advance=false;
+    game.stage=0; game.legacy=null; resetLadder();
+    document.getElementById('btn-again').innerHTML='RUN IT BACK&nbsp;&nbsp;\u00b7&nbsp;&nbsp;R';
+    setTimeout(()=>v.classList.remove('hidden'),900);
+    try{ document.exitPointerLock&&document.exitPointerLock(); }catch(e){}
+    return;
+  }
   if(game.stage+1>=DUELISTS.length)DUELISTS.push(genDuelist(game.stage+1));
   K.textContent='恕'; K.className='kanji';
   document.getElementById('verdict-sub').textContent=
@@ -6663,15 +6768,33 @@ function spareDuel(){
 function endDuel(){
   game.state='over';
   Sound.killMoment();
-  const won=enemy.dead;
+  const won=!player.dead;
+  const lastFoe=(game._lastKilled&&game._lastKilled.dead)?game._lastKilled
+    :((enemy2&&enemy2.dead)?enemy2:enemy);
+  const champion=won&&game.stage>=CHAMP_AT-1;
   const v=document.getElementById('verdict');
   const K=document.getElementById('verdict-kanji');
-  if(won){
-    if(game.stage+1>=DUELISTS.length)DUELISTS.push(genDuelist(game.stage+1));
+  if(champion){
+    /* FIVE RUNGS, FIVE STONES: the ladder ends here */
+    K.textContent='覇'; K.className='kanji';
+    let best5=0; try{ best5=+localStorage.getItem('zan_champ')||0;
+      localStorage.setItem('zan_champ',best5+1); }catch(e){}
+    document.getElementById('verdict-sub').textContent=
+      'CHAMPION — FIVE DUELS, AND THE MOUNTAIN KNEELS'+(best5>0?' · TITLES: '+(best5+1):'');
+    game.advance=false;
+    game.stage=0; game.legacy=null; resetLadder();  // RUN IT BACK = a new climb
+    Sound.taiko&&Sound.taiko();
+    setTimeout(()=>Sound.taiko&&Sound.taiko(),450);
+    setTimeout(()=>Sound.taiko&&Sound.taiko(),900);
+  } else if(won){
+    if(game.stage+1>=DUELISTS.length&&game.stage+1<CHAMP_AT)
+      DUELISTS.push(genDuelist(game.stage+1));
     K.textContent=game.stage===2?'三':'勝'; K.className='kanji';
     document.getElementById('verdict-sub').textContent=
       (game.stage===2?'三人斬り — AND STILL THEY COME · ':'YOU PREVAIL — ')+
-      'NEXT: '+DUELISTS[game.stage+1].name+', '+DUELISTS[game.stage+1].epithet;
+      (game.stage+1===CHAMP_AT-1
+        ?'THE LAST RUNG: '+DUELISTS[game.stage+1].name+' — AND HE DOES NOT COME ALONE'
+        :'NEXT: '+DUELISTS[game.stage+1].name+', '+DUELISTS[game.stage+1].epithet);
     game.advance=true;
     /* the body remembers: wounds follow you to the next duel, half-healed */
     game.legacy={
@@ -6692,19 +6815,21 @@ function endDuel(){
     resetLadder();               // a new life climbs a new ladder
   }
   document.getElementById('btn-again').innerHTML=
-    won?'NEXT DUEL&nbsp;&nbsp;\u00b7&nbsp;&nbsp;R':'AGAIN&nbsp;&nbsp;\u00b7&nbsp;&nbsp;R';
+    champion?'RUN IT BACK&nbsp;&nbsp;\u00b7&nbsp;&nbsp;R'
+    :won?'NEXT DUEL&nbsp;&nbsp;\u00b7&nbsp;&nbsp;R':'AGAIN&nbsp;&nbsp;\u00b7&nbsp;&nbsp;R';
   { /* the rematch is a victor's privilege: a loss already replays */
     const br=document.getElementById('btn-rematch');
     if(br)br.style.display=won?'':'none'; }
-  const dead=won?enemy:player;
+  const dead=won?lastFoe:player;
   document.getElementById('cause').textContent=
-    (won?enemy.name:'Musashi')+' — cause of death: '+(dead.deathCause||'wounds')+'.'+
+    (won?lastFoe.name:'Musashi')+' — cause of death: '+(dead.deathCause||'wounds')+'.'+
     ' Duel lasted '+game.duelTime.toFixed(1)+'s. Wounds dealt: '+enemy.wounds.length+' · taken: '+player.wounds.length+
     (player.parries?'. Parries: '+player.parries:'')+'.'
   ;
   setTimeout(()=>v.classList.remove('hidden'),1400);
   try{ document.exitPointerLock&&document.exitPointerLock(); }catch(e){}
-  beginKillCam(won?enemy:player, won?player:enemy);
+  beginKillCam(won?lastFoe:player, won?player:livingFoe());
+  game._lastKilled=null;
 }
 
 document.getElementById('btn-begin').addEventListener('click',()=>{
@@ -6896,7 +7021,7 @@ function updateKillRitual(dt){
   if(!vt.alive)return;
   /* THE TAKING: the victor walks to the fallen, takes the head,
      and hurls it across the ring. Then, and only then, the sheathing. */
-  const loser=vt.isPlayer?enemy:player;
+  const loser=kc.victim||(vt.isPlayer?enemy:player);
   const headless=!loser||!loser.parts||loser.severed.head;
   const bare=!!(vt.weapon&&vt.weapon.blunt);
   kc.sheathAt=(headless||kc.beheadDone)&&!bare
@@ -7154,6 +7279,12 @@ function frame(now){
   for(const L of lanterns)
     L.light.intensity=L.base*(0.82+0.22*Math.sin(now*.011+L.seed)+0.1*Math.sin(now*.037+L.seed*2.7));
   for(const s of GLINTMATS)s.uniforms.uGlintT.value=now*.001;
+  { const mt=now*.00015;
+    for(const F of mists){
+      F.m.position.x=Math.cos(F.a)*F.r+Math.sin(mt+F.seed)*2.4;
+      F.m.position.z=Math.sin(F.a)*F.r+Math.cos(mt*.7+F.seed*1.7)*2.0;
+      F.m.material.opacity=F.o*(.7+.3*Math.sin(mt*1.6+F.seed*3));
+    } }
 
   if(game.state==='menu'&&typeof process==='undefined'&&typeof player!=='undefined'&&player&&enemy){
     /* RESPONSIVE TABLEAU: marks derive from the camera frustum, and the
@@ -7212,16 +7343,28 @@ function frame(now){
     const introHold=game.introT>0;
     const ritualHold=(killCam&&killCam.victor===player&&
       killCam.ritual<(killCam.beheadDone?killCam.thrownAt+2.6:5.2))||introHold;
-    if(player.alive&&game.state==='fight'&&!introHold)playerIntent(player,enemy);
-    else if(player.alive&&!ritualHold)playerIntent(player,enemy);
+    const foe=livingFoe();
+    if(player.alive&&game.state==='fight'&&!introHold)playerIntent(player,foe);
+    else if(player.alive&&!ritualHold)playerIntent(player,foe);
     updateKillRitual(dt);
     enemyAI.update(dt,player);
+    if(enemy2&&enemyAI2)enemyAI2.update(dt,player);
+    /* the pair must not stand inside each other */
+    if(enemy2&&enemy.alive&&enemy2.alive){
+      const sep2=enemy.pos.distanceTo(enemy2.pos);
+      const min2=(enemy.bodyR||.31)+(enemy2.bodyR||.31);
+      if(sep2<min2&&sep2>1e-4){
+        TMP1.subVectors(enemy.pos,enemy2.pos).setY(0).normalize();
+        enemy.pos.addScaledVector(TMP1,(min2-sep2)*.5);
+        enemy2.pos.addScaledVector(TMP1,-(min2-sep2)*.5);
+      }
+    }
     updateBind(dt);
 
-    for(const f of [player,enemy]){
+    for(const f of (enemy2?[player,enemy,enemy2]:[player,enemy])){
       if(f.physDead)f.updateDeadPhys(dt);
       else if(f.ragdoll)f.updateRagdoll(dt);
-      else{ f.updateAlive(dt,f===player?enemy:player); f.updatePhysiology(dt,log); }
+      else{ f.updateAlive(dt,f===player?livingFoe():player); f.updatePhysiology(dt,log); }
       updateLoose(f,dt);
       if(!f.dead&&(f.arterialWound||f.bleedRate>20)){
         if(f.pulseT>60/(100+(1-f.bloodFrac)*80)){ f.pulseT=0;
@@ -7250,11 +7393,17 @@ function frame(now){
     }
 
     if(game.state==='fight'){
-      bladeVsBlade(player,enemy);
-      limbContacts(player,enemy,dt);   // arms cannot share the same air
-      bladeVsBody(player,enemy,log);
-      bladeVsBody(enemy,player,log);
-      if(player.dead||enemy.dead)endDuel();
+      for(const e of (enemy2?[enemy,enemy2]:[enemy])){
+        bladeVsBlade(player,e);
+        limbContacts(player,e,dt);     // arms cannot share the same air
+        bladeVsBody(player,e,log);
+        bladeVsBody(e,player,log);
+        if(e.dead&&game._lastKilled!==e&&!(enemy2&&(e===enemy?enemy2.alive:enemy.alive)))
+          game._lastKilled=e;
+        else if(e.dead&&!game._lastKilled)game._lastKilled=e;
+      }
+      const allDead=enemy.dead&&(!enemy2||enemy2.dead);
+      if(player.dead||allDead)endDuel();
     }
   }
 
