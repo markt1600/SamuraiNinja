@@ -7259,6 +7259,7 @@ function beginFatality(){
     :(enemy2&&enemy2.alive&&enemy2.begging&&!enemy2.dead)?enemy2:null;
   if(!foe)return;
   game.fatality={t:0,phase:'walk',victim:foe,limb:null};
+  player.stuck=null;                  // the blade comes free for the work
   log('no mercy — the ring holds its breath',true);
 }
 function updateFatality(dt){
@@ -7342,7 +7343,12 @@ function updateFatality(dt){
     return;
   }
   if(F.phase==='pause'){
-    if(F.t>(bare?.85:.6)){
+    if(!bare){
+      /* the blade comes back UP between pieces — chambered for the next */
+      p.stuck=null;
+      p.tipTarget.copy(p.pos).addScaledVector(DIRY(p.bodyYaw+1.0),.6).setY(2.0);
+    }
+    if(F.t>(bare?.85:.75)){
       F.limb=!v.severed.armR?'armR':!v.severed.armL?'armL':'head';
       F.phase='windup'; F.t=0;
       if(bare){ p._ritualGrabL=null; p._ritualGrabR=null; }
@@ -7612,7 +7618,7 @@ function updateCamera(dt){
    blow lands, time walks back and the kill plays again, slow and from
    the side, before the ritual claims the body. */
 const REPLAY=(()=>{
-  const buf=[]; let objs=null,kmap=null,t=0,play=null,used=false;
+  const buf=[]; let objs=null,kmap=null,t=0,play=null,used=false,resets=0;
   const q0=new THREE.Quaternion(), q1=new THREE.Quaternion();
   function roster(){ const r=[player,enemy]; if(enemy2)r.push(enemy2);
     return r.filter(Boolean); }
@@ -7645,7 +7651,7 @@ const REPLAY=(()=>{
     t+=dt;
     const C=collect();
     const sig=C.L.length+'/'+C.K.map(e=>e.keys.length+':'+e.np).join(',');
-    if(!objs||objs._sig!==sig){ objs=C.L; objs._sig=sig; kmap=C.K; buf.length=0; }
+    if(!objs||objs._sig!==sig){ resets++; objs=C.L; objs._sig=sig; kmap=C.K; buf.length=0; }
     let n=objs.length*10;
     for(const e of kmap)n+=4+e.keys.length*3+e.np*3;
     const F=new Float32Array(n); let j=0;
@@ -7755,7 +7761,14 @@ const REPLAY=(()=>{
       endDuel();
     }
   }
-  return {record,arm,tick,reset};
+  return {record,arm,tick,reset,
+    dbg(){ const C=collect();
+      return { buf:buf.length, playing:!!play, resets,
+      curSig:C.L.length+'/'+C.K.map(e=>e.keys.length+':'+e.np).join(','),
+      oldSig:objs?objs._sig:null,
+      objs:objs?objs.length:0,
+      hasPart:objs?objs.includes(enemy&&enemy.parts&&enemy.parts.chest):null,
+      kmap:kmap?kmap.map(e=>({n:e.f.name,k:e.keys.length,np:e.np,g:e.gs.length})):null }; }};
 })();
 
 /* =============================== LOOP ================================== */
@@ -7919,10 +7932,12 @@ function frame(now){
 
     if(game.state==='fight'){
       for(const e of (enemy2?[enemy,enemy2]:[enemy])){
-        bladeVsBlade(player,e);
-        limbContacts(player,e,dt);     // arms cannot share the same air
-        bladeVsBody(player,e,log);
-        bladeVsBody(e,player,log);
+        if(!game.fatality){   // the execution is scripted — free steel stays out of it
+          bladeVsBlade(player,e);
+          limbContacts(player,e,dt);   // arms cannot share the same air
+          bladeVsBody(player,e,log);
+          bladeVsBody(e,player,log);
+        }
         if(e.dead&&game._lastKilled!==e&&!(enemy2&&(e===enemy?enemy2.alive:enemy.alive)))
           game._lastKilled=e;
         else if(e.dead&&!game._lastKilled)game._lastKilled=e;
