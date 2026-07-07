@@ -6905,6 +6905,17 @@ function endDuel(){
 }
 
 document.getElementById('btn-begin').addEventListener('click',()=>{
+  if(IS_TOUCH){ /* the tap is our one gesture: go fullscreen, pin landscape */
+    try{
+      const el=document.documentElement;
+      const fs=el.requestFullscreen?el.requestFullscreen({navigationUI:'hide'})
+        :Promise.reject();
+      fs.then(()=>{ try{ screen.orientation&&screen.orientation.lock&&
+        screen.orientation.lock('landscape').catch(()=>{}); }catch(e){} })
+        .catch(()=>{ try{ screen.orientation&&screen.orientation.lock&&
+          screen.orientation.lock('landscape').catch(()=>{}); }catch(e){} });
+    }catch(e){}
+  }
   Sound.ac().resume&&Sound.ac().resume();
   Sound.startWind();
   document.getElementById('menu').classList.add('hidden');
@@ -7477,24 +7488,32 @@ const REPLAY=(()=>{
   }
   function snapPelvis(){
     const m=new Map();
-    for(const e of kmap)if(e.f._K&&e.f._K.pelvis)m.set(e.f,e.f._K.pelvis.clone());
+    for(const e of kmap)if(e.f._K&&e.f._K.pelvis)
+      m.set(e.f,{p:e.f._K.pelvis.clone(),yaw:e.f.bodyYaw||0});
     return m;
   }
-  const _cd=new THREE.Vector3();
+  const _cq=new THREE.Quaternion();
   function carryCloth(pre){
-    /* time jumped: rigidly carry each fighter's cloth by its pelvis
-       displacement, then settle a few ticks so it drapes the new pose —
-       otherwise the hakama hangs where the body USED to be */
+    /* time jumped: carry each fighter's cloth through the SAME rigid
+       motion the body made — translate by the pelvis displacement AND
+       rotate by the yaw change about the pelvis — then settle ticks
+       drape it on the recalled pose. A translation-only carry left the
+       skirt flaring off a fighter who had turned between the two
+       moments. */
     for(const e of kmap){
-      const f=e.f;
-      if(!f._K||!f._K.pelvis||!pre.has(f))continue;
-      _cd.subVectors(f._K.pelvis,pre.get(f));
-      clothPts(f,q=>{ q.p.add(_cd); q.pp.add(_cd); });
+      const f=e.f, o=pre.get(f);
+      if(!f._K||!f._K.pelvis||!o)continue;
+      _cq.setFromAxisAngle(UPY,(f.bodyYaw||0)-o.yaw);
+      const P0=o.p, P1=f._K.pelvis;
+      clothPts(f,q=>{
+        q.p.sub(P0).applyQuaternion(_cq).add(P1);
+        q.pp.sub(P0).applyQuaternion(_cq).add(P1);
+      });
       try{
-        for(let i=0;i<3;i++){
-          f.tickCloth&&f.tickCloth(.02,f._K);
-          f.tickSleeves&&f.tickSleeves(.02,f._K);
-          f.tickHair&&f.tickHair(.02);
+        for(let i=0;i<8;i++){
+          f.tickCloth&&f.tickCloth(.018,f._K);
+          f.tickSleeves&&f.tickSleeves(.018,f._K);
+          f.tickHair&&f.tickHair(.018);
         }
       }catch(err){}
     }

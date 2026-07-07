@@ -108,6 +108,48 @@
   .selbtn{background:none;border:1px solid var(--dim);color:var(--fg);
     cursor:pointer;padding:3px 12px;font-size:14px;font-family:inherit}
   .selbtn:hover{border-color:var(--fg);background:rgba(255,255,255,.06)}
+  /* menu must never clip: scroll if squeezed, compact on short screens */
+  #menu{overflow-y:auto;justify-content:safe center;padding:14px 0}
+  @media (max-height:560px){
+    #menu .kanji{font-size:60px}
+    #menu .title-sub{font-size:13px;margin-top:5px;letter-spacing:.42em}
+    #menu .title-tag{font-size:8.5px;margin-top:5px}
+    #menu .rule{margin:10px 0 8px}
+    #menu .controls{font-size:10px;gap:3px 12px}
+    #menu .ctl{font-size:10px}
+    .selrow{margin:4px 0}
+    .selname{min-width:190px;font-size:12px}
+    .sellabel{width:84px;font-size:9.5px}
+    .selbtn{padding:2px 9px;font-size:12px}
+    #menu .begin{margin-top:12px;padding:8px 28px;font-size:12.5px}
+    #menu .warn{margin-top:8px;font-size:8.5px}
+  }
+  @media (max-height:420px){
+    #menu .kanji{font-size:40px}
+    #menu .title-sub{font-size:10.5px;margin-top:3px}
+    #menu .title-tag{display:none}
+    #menu .rule{margin:6px 0 5px}
+    #menu .controls{font-size:9px;gap:2px 10px}
+    #select{margin:6px 0 2px}
+    .selrow{margin:2px 0}
+    .selname{min-width:165px;font-size:11px}
+    .selbtn{padding:1px 8px;font-size:11px}
+    #menu .begin{margin-top:8px;padding:6px 22px;font-size:12px}
+    #menu .warn,#menu .buildtag{display:none}
+  }
+  /* the duel is fought in landscape: portrait phones see the turn card */
+  #rotate{display:none;position:fixed;inset:0;z-index:99;background:#0a0d12;
+    flex-direction:column;align-items:center;justify-content:center;gap:16px;text-align:center}
+  #rotate .rk{font-family:'Shippori Mincho',serif;font-size:64px;color:var(--paper);
+    animation:rotwig 1.8s ease-in-out infinite}
+  @keyframes rotwig{0%,42%,100%{transform:rotate(0)}58%,88%{transform:rotate(-90deg)}}
+  #rotate .rt{font-size:11px;letter-spacing:.3em;color:var(--dim);
+    text-transform:uppercase;padding:0 34px;line-height:2}
+  @media (orientation:portrait){ body.touch #rotate{display:flex} }
+  /* each mode reads its own instructions */
+  #howto-touch{display:none}
+  body.touch #howto-desktop{display:none}
+  body.touch #howto-touch{display:grid}
   /* ---- touch controls ---- */
   #touchui{display:none;position:fixed;inset:0;z-index:14;pointer-events:none;
     -webkit-user-select:none;user-select:none}
@@ -139,6 +181,8 @@
 </style>
 </head>
 <body>
+<div id="rotate"><div class="rk">斬</div>
+  <div class="rt">rotate your phone —<br>the duel is fought in landscape</div></div>
 <div class="cine-bar" id="cine-top"></div>
 <div class="cine-bar" id="cine-bot"></div>
 <div id="vignette"></div>
@@ -180,13 +224,23 @@
   <div class="title-sub">Z A N</div>
   <div class="title-tag">the road provides duelists without end · your wounds follow you · one cut decides</div>
   <div class="rule"></div>
-  <div class="controls">
-    <b>mouse</b><span>your blade has mass — swing hard to cut, slow taps glance off</span>
-    <b>edge</b><span>a turning blade lands flat; commit through the line of the cut</span>
-    <b>RMB</b><span>guard — raised at the last instant, it becomes a parry</span></div>
-    <div class="ctl"><b>BIND</b><span>when blades lock: walk INTO him to press through — or clinch; pull away to break</span></div>
-    <div class="ctl"><b>shift</b><span>thrust posture — the point beats armor and ribs</span></div>
-    <div class="ctl"><b>W A S D</b><span>footwork in SCREEN directions — up, left, down, right; distance is life</span></div>
+  <div id="howto-desktop">
+    <div class="controls">
+      <b>mouse</b><span>your blade has mass — swing hard to cut, slow taps glance off</span>
+      <b>edge</b><span>a turning blade lands flat; commit through the line of the cut</span>
+      <b>RMB</b><span>guard — raised at the last instant, it becomes a parry</span>
+      <b>BIND</b><span>when blades lock: walk INTO him to press through — or clinch; pull away to break</span>
+      <b>shift</b><span>thrust posture — the point beats armor and ribs</span>
+      <b>W A S D</b><span>footwork in SCREEN directions — up, left, down, right</span>
+    </div>
+  </div>
+  <div id="howto-touch" class="controls">
+    <b>刀 right stick</b><span>your blade — push where the edge should go; fast pushes cut</span>
+    <b>移動 left stick</b><span>footwork in screen directions — distance is life</span>
+    <b>守 GUARD</b><span>hold to guard — raised at the last instant, it parries</span>
+    <b>突 THRUST</b><span>hold for thrust posture — the point beats armor</span>
+    <b>BIND</b><span>blades locked: walk INTO him to press or clinch; pull away to break</span>
+  </div>
   <div class="rule"></div>
   <div id="select">
     <div class="selrow">
@@ -215,7 +269,7 @@
     </div>
   </div>
   <button class="begin" id="btn-begin">BEGIN</button>
-  <div style="margin-top:12px;font-size:10px;color:var(--dim);letter-spacing:.25em">BUILD V44</div>
+  <div class="buildtag" style="margin-top:12px;font-size:10px;color:var(--dim);letter-spacing:.25em">BUILD V45</div>
   <div id="pickdbg" style="margin-top:4px;font-size:10px;color:var(--dim);letter-spacing:.1em"></div>
   <div class="warn">no health bar · anatomy is the health bar · a severed artery ends the duel</div>
 </div>
@@ -237,7 +291,7 @@
 </div>
 
 <script type="importmap">
-{ "imports": { "three": "./vendor/three.module.js?v=v44",
+{ "imports": { "three": "./vendor/three.module.js?v=v45",
                "three/addons/": "./vendor/addons/" } }
 </script>
 <script type="module">
@@ -252,7 +306,7 @@ import * as SkeletonUtils from 'three/addons/utils/SkeletonUtils.js';
    composite); keep r128-era color semantics */
 THREE.ColorManagement.enabled = false;
 window.THREE = Object.assign({}, THREE, { GLTFLoader, FBXLoader, SkeletonUtils });
-for (const src of ['physics.js?v=v44', 'game.js?v=v44'])
+for (const src of ['physics.js?v=v45', 'game.js?v=v45'])
   await new Promise((ok, fail) => {
     const s = document.createElement('script');
     s.src = src; s.onload = ok; s.onerror = fail;
