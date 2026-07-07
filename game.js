@@ -4515,7 +4515,9 @@ class AI{
     this.model={h:[0,0,0],n:0,retreats:0,retreatAtk:0};
     this._foeFast=false; this._foeBack=0;
     /* a heart: fear and boldness move the numbers */
-    this.mood={fear:0,aggr:0,saidFear:false,saidBold:false}; }                          // <1: human, not machine
+    this.mood={fear:0,aggr:0,saidFear:false,saidBold:false};
+    /* the school: a signature that shows itself in the fight */
+    this.sig=P.sig||null; this._sigT=rand(2.5,5); }                          // <1: human, not machine
   update(dt,foe){
     const f=this.f; if(!f.alive)return;
     if(game.state!=='fight'){ f.telegraph=false; return; }
@@ -4542,6 +4544,7 @@ class AI{
       this.model.h[b]++; this.model.n++;
       if(this._foeBack>.3)this.model.retreatAtk++;   // the retreat-then-cut habit
     }
+    const foeSwingEnd=this._foeFast&&!foeFast;
     this._foeFast=foeFast;
     TMP2.subVectors(f.pos,foe.pos).setY(0).normalize();
     this._foeBack=foe.vel.dot(TMP2)>.6?this._foeBack+dt:0;
@@ -4574,12 +4577,36 @@ class AI{
     if(md.execute&&!md.saidKill){ md.saidKill=true;
       log(f.name+' sees the opening — he moves in to finish it',false); }
 
+    /* ---- the signature: every school betrays itself ---- */
+    this._sigT-=dt;
+    if(this.sig&&!desperate&&game.state==='fight'){
+      if(this.sig==='charge'&&this.state==='circle'&&this._sigT<=0&&dist>2.4){
+        this.state='charge'; this.t=1.2; this._sigT=rand(4,7);
+        if(!this._sigSaid){ this._sigSaid=true;
+          log(f.name+' drops his shoulder — he CHARGES',false); }
+      } else if(this.sig==='iai'&&this.state==='circle'&&this._sigT<=0
+                &&dist>2.4&&dist<4.6){
+        this.state='dash'; this.t=1.0; this._sigT=rand(4.5,8);
+        if(!this._sigSaid){ this._sigSaid=true;
+          log(f.name+' goes utterly still — then the draw',false); }
+      } else if(this.sig==='counter'&&foeSwingEnd&&this.state==='circle'
+                &&dist<3.0&&Math.random()<.65){
+        this.beginAttack(foe);
+        if(this.plan)this.plan.windupT*=.65;
+        if(!this._sigSaid){ this._sigSaid=true;
+          log(f.name+' mirrors the cut straight back',false); }
+      }
+    }
     switch(this.state){
       case 'circle':{
         const maai=md.execute?1.7:(desperate?3.4:this.P.maai);
         if(dist>maai+.25)move.add(fwd);
         else if(dist<maai-.25)move.sub(fwd);
         move.addScaledVector(right,this.strafe*.6);
+        if(this.sig==='weave'){
+          move.addScaledVector(right,Math.sin(performance.now()*.0042+(f.ph||0))*1.2);
+          if(!this._sigSaid&&dist<2.6){ this._sigSaid=true;
+            log(f.name+' bobs and weaves — never where he was',false); } }
         /* never let the rope pin you */
         { const rr=Math.hypot(f.pos.x,f.pos.z);
           if(rr>RING_R-1.1){ TMP3.set(-f.pos.x,0,-f.pos.z).normalize();
@@ -4637,11 +4664,31 @@ class AI{
         move.sub(fwd); move.addScaledVector(right,this.strafe*.4);
         KAMAE.chudan(f.tipTarget,f.pos,fwd,right);
         if(threat&&Math.random()<.5){ this.state='block'; this.t=rand(.25,.5); }
-        else if(this.t<=0){ this.state='circle'; this.t=rand(.4,1.2); }
+        else if(this.t<=0){
+          /* the weaver doesn't rest — combos come in bursts */
+          if(this.sig==='weave'&&dist<2.3&&Math.random()<.55){
+            this.beginAttack(foe); if(this.plan)this.plan.windupT*=.55;
+          } else { this.state='circle'; this.t=rand(.4,1.2); }
+        }
+        break; }
+      case 'charge':{
+        move.add(fwd).multiplyScalar(1.7);
+        f.tipTarget.copy(chest).addScaledVector(fwd,.9).setY(1.5);
+        f.telegraph=true;
+        if(dist<2.0){ f.telegraph=false; this.beginAttack(foe);
+          if(this.plan)this.plan.windupT*=.6; }
+        else if(this.t<=0){ this.state='circle'; this.t=rand(.5,1); f.telegraph=false; }
+        break; }
+      case 'dash':{
+        KAMAE.waki(f.tipTarget,f.pos,fwd,right);
+        move.add(fwd).multiplyScalar(1.8);
+        if(dist<2.3){ this.beginAttack(foe);
+          if(this.plan)this.plan.windupT=Math.max(.13,this.plan.windupT*.45); }
+        else if(this.t<=0){ this.state='circle'; this.t=rand(.6,1.2); }
         break; }
     }
     if(move.lengthSq()>0){ move.normalize(); f.vel.addScaledVector(move,acc*dt);
-      const vmax=2.3*m, v2=Math.hypot(f.vel.x,f.vel.z);
+      const vmax=2.3*m*((this.state==='charge'||this.state==='dash')?1.55:1), v2=Math.hypot(f.vel.x,f.vel.z);
       if(v2>vmax){ f.vel.x*=vmax/v2; f.vel.z*=vmax/v2; } }
   }
   beginAttack(foe){
@@ -4769,6 +4816,7 @@ function bladeVsBlade(a,b){
     /* slow sustained steel-on-steel: the blades are BOUND */
     if(rel<2.4&&a.hasSword&&b.hasSword&&a.alive&&b.alive&&!game.bind){
       game._bindTouch=true; game._bindPt=(game._bindPt||V3()).copy(hitTmpA);
+      game._bindFoe=(a===player)?b:a;
     }
 
     /* PARRY: a fresh guard against a committed cut turns it aside hard
@@ -6480,18 +6528,18 @@ const DUELISTS=[
      face:{beard:true}},
    ai:{skill:.72,reaction:.24,engage:[1.2,2.0],atkCircle:.62,atkBlock:.3,
        windupT:[.36,.5],strikeT:[.3,.44],speedMul:.8,parry:.12,maai:1.95,tempo:[.5,1.2],
-       kamae:'jodan'}},
+       kamae:'jodan',sig:'charge'}},
   {name:'GENNOSUKE', kanji:'鏡', epithet:'the Mirror',
    palette:{kimono:0x2c3e52,hakama:0x18222e,obi:0xd8d0b8,skin:0xc9a184,accent:0x0e0e0e},
    ai:{skill:.86,reaction:.14,engage:[2.2,3.4],atkCircle:.16,atkBlock:.66,
        windupT:[.3,.42],strikeT:[.28,.4],speedMul:.9,parry:.5,maai:2.3,tempo:[.9,1.9],
-       kamae:'seigan'}},
+       kamae:'seigan',sig:'counter'}},
   {name:'SHIZUKA', kanji:'静', epithet:'First Draw', build:'onna',
    palette:{kimono:0x46302a,hakama:0x241a14,obi:0xa82424,skin:0xbf9276,accent:0x101010,
      face:{mustache:true}},
    ai:{skill:.95,reaction:.11,engage:[2.6,4.2],atkCircle:.32,atkBlock:.28,
        windupT:[.2,.3],strikeT:[.26,.36],speedMul:1.02,parry:.35,maai:2.5,tempo:[1.2,2.4],
-       kamae:'waki'}},
+       kamae:'waki',sig:'iai'}},
 ];
 game.stage=0; game.advance=false;
 game.legacy=null;
@@ -6526,7 +6574,9 @@ function genDuelist(stage){
       windupT:[lerp(.34,.2,s),lerp(.5,.3,s)],strikeT:[.26,.4],
       speedMul:Math.min(1.1,.82+stage*.02+Math.random()*.06),
       parry:lerp(.15,.55,arch),maai:1.9+arch*.7,tempo:[.5+arch*.7,1.2+arch*1.2],
-      kamae:GEN.kamae[Math.floor(Math.random()*5)]}};
+      kamae:GEN.kamae[Math.floor(Math.random()*5)],
+      sig:build==='ryu'?'weave':build==='sumo'?'charge'
+        :arch<.28?'charge':arch>.74?'counter':(Math.random()<.4?'iai':null)}};
 }
 
 /* THE ROAD CHANGES: each stage of the ladder is a different night.
@@ -6635,6 +6685,7 @@ function setup(){
     const ai2=Object.assign({},D.ai);
     ai2.skill=Math.min(.9,(D.ai.skill||.8)*.92);
     ai2.speedMul=(D.ai.speedMul||1)*.95;
+    ai2.sig=(b2==='sumo')?'charge':(b2==='ryu')?'weave':ai2.sig;
     enemyAI2=new AI(enemy2,ai2);
     enemy2.speedMul=ai2.speedMul;
     enemy._noBeg=true; enemy2._noBeg=true;   // the finale is to the death
@@ -6644,6 +6695,9 @@ function setup(){
   enemy.yaw=Math.atan2(player.pos.x-enemy.pos.x,player.pos.z-enemy.pos.z);
   buildDiagram(document.getElementById('diagram-player'));
   buildDiagram(document.getElementById('diagram-enemy'));
+  REPLAY.reset();
+  game._verdictPend=null; game._verdictShown=false; game._lastVictor=null;
+  ritualL.intensity=0; ritualAmb.intensity=0;
   applyAmbience(game.stage);    // a new night for a new opponent
   logEl.innerHTML='';
 }
@@ -6826,7 +6880,10 @@ function endDuel(){
     ' Duel lasted '+game.duelTime.toFixed(1)+'s. Wounds dealt: '+enemy.wounds.length+' · taken: '+player.wounds.length+
     (player.parries?'. Parries: '+player.parries:'')+'.'
   ;
-  setTimeout(()=>v.classList.remove('hidden'),1400);
+  /* the verdict waits: first the lit ritual — the taking, the throw,
+     the dance if it is earned — then the menu on the darkened field */
+  game._verdictPend=performance.now(); game._verdictShown=false;
+  game._lastVictor=won?player:livingFoe();
   try{ document.exitPointerLock&&document.exitPointerLock(); }catch(e){}
   beginKillCam(won?lastFoe:player, won?player:livingFoe());
   game._lastKilled=null;
@@ -6946,45 +7003,128 @@ pickdbg('picker ready \u00b7 click the arrows');
    Real fencing lives in blade contact: pressure, leverage, feeling the
    other man's intent through steel. Win the pressure and his blade flies
    wide; yield too long and yours does. */
+/* ============================ THE CLINCH ===============================
+   Walk into the bind instead of fencing it and the duel turns to
+   bodywork: a kick, a shove, a pommel butt — or, against a stumbling,
+   winded man, the hip throw. Context picks the tool. */
+function clinchAction(att,def,log){
+  const now=performance.now();
+  if(game._clinchAt&&now-game._clinchAt<2000)return false;
+  if(!att.alive||!def.alive||att.stun>.2)return false;
+  game._clinchAt=now;
+  game.bind=null;
+  const dir=TMP1.subVectors(def.pos,att.pos).setY(0).normalize().clone();
+  const mass=(att.build&&att.build.mass)||1;
+  const legs=att.legDamage?(att.legDamage.R+att.legDamage.L):0;
+  const defShaky=(def.stagger||0)>.3||def.stamina<26;
+  const hasPommel=att.weapon&&!att.weapon.blunt&&att.weapon!==WEAPONS.axe;
+  let act;
+  if(defShaky&&Math.random()<.8)act='throw';
+  else if(hasPommel&&Math.random()<.38)act='pommel';
+  else if(legs<.9&&Math.random()<(mass>1.25?.28:.6))act='kick';
+  else act='shove';
+  const vp=k=>k._vp||(k._vp=rand(.8,1.25));
+  if(act==='throw'){
+    def.stun=Math.max(def.stun,1.0); def.stagger=(def.stagger||0)+1.6;
+    def.pain+=14; def.stamina=Math.max(0,def.stamina-20);
+    def.vel.addScaledVector(dir,4.4*Math.sqrt(mass));
+    def.softHit('chestT',dir,2.8); def.softHit('shL',dir,2.0);
+    def.physImpulse&&def.physImpulse('chest',dir,240);
+    def.physImpulse&&def.physImpulse('abdomen',dir,200);
+    att.vel.addScaledVector(dir,1.1);
+    att.stamina=Math.max(0,att.stamina-12);
+    Sound.thump(); Sound.grunt(.85,vp(def));
+    game.timeScale=.4; game.slowT=.4;
+    game.adrenaline=Math.max(game.adrenaline||0,.8);
+    log(att.name+' hooks the hip inside the bind and HURLS '+def.name+' down!',true);
+  } else if(act==='pommel'){
+    def.pain+=16; def.stun=Math.max(def.stun,.5);
+    def.consciousness=Math.max(0,def.consciousness-7);
+    def.softHit('neckT',dir,2.2);
+    def.physImpulse&&def.physImpulse('head',dir,110);
+    const c=def.capsules&&def.capsules.head;
+    if(c&&def.addHitMark){ TMP2.addVectors(c.a,c.b).multiplyScalar(.5);
+      def.addHitMark('head',TMP2.clone(),dir.clone(),'minor',true); }
+    Sound.thump(); Sound.grunt(.6,vp(def));
+    log(att.name+' smashes the pommel into '+def.name+"'s face!",true);
+  } else if(act==='kick'){
+    def.stagger=(def.stagger||0)+.9; def.stun=Math.max(def.stun,.3);
+    def.pain+=9; def.stamina=Math.max(0,def.stamina-15);
+    def.vel.addScaledVector(dir,3.4);
+    def.softHit('chestT',dir,2.2);
+    def.physImpulse&&def.physImpulse('abdomen',dir,160);
+    att.vel.addScaledVector(dir,-.8);
+    Sound.thump(); Sound.grunt(.5,vp(def));
+    log(att.name+' plants a kick in '+def.name+"'s chest — he reels back!",true);
+  } else {
+    def.stagger=(def.stagger||0)+.55; def.stamina=Math.max(0,def.stamina-9);
+    def.vel.addScaledVector(dir,2.7*Math.sqrt(mass));
+    def.softHit('chestT',dir,1.5);
+    def.physImpulse&&def.physImpulse('chest',dir,100);
+    att.vel.addScaledVector(dir,-.6);
+    Sound.thump(); Sound.grunt(.35,vp(def));
+    log(att.name+' shoves '+def.name+' back through the bind',false);
+  }
+  return true;
+}
+
 function updateBind(dt){
   /* detection: sustained quiet contact */
   if(!game.bind){
     game._bindN=game._bindTouch?(game._bindN||0)+1:0;
     game._bindTouch=false;
     if(game._bindN>=8&&game.state==='fight'){
-      if((player.weapon&&player.weapon.blunt)||(enemy.weapon&&enemy.weapon.blunt)){
+      const F0=(game._bindFoe&&game._bindFoe.alive)?game._bindFoe:enemy;
+      if((player.weapon&&player.weapon.blunt)||(F0.weapon&&F0.weapon.blunt)){
         game._bindN=0;   // there is no bind without two blades
-      } else
-      game.bind={t:0,pr:0,pt:game._bindPt.clone(),scr:0,yielding:false};
-      /* the Mirror yields on purpose, to whirl and counter */
-      if(enemyAI.P.kamae==='seigan'&&Math.random()<.6)game.bind.yielding=true;
-      log('the blades bind — press, or be pressed',false);
+      } else {
+        game.bind={t:0,pr:0,pt:game._bindPt.clone(),scr:0,yielding:false,
+          foe:F0,fwdP:0,fwdE:0,eAt:.9+Math.random()*1.5};
+        const FA0=(enemy2&&F0===enemy2)?enemyAI2:enemyAI;
+        /* the Mirror yields on purpose, to whirl and counter */
+        if(FA0&&FA0.P.kamae==='seigan'&&Math.random()<.6)game.bind.yielding=true;
+        log('the blades bind — press, or be pressed',false);
+      }
     }
     return;
   }
   const B=game.bind; B.t+=dt;
-  const pushDir=TMP1.subVectors(enemy.pos,player.pos).setY(0).normalize();
+  const F=(B.foe&&B.foe.alive)?B.foe:enemy;
+  const FA=(enemy2&&F===enemy2)?enemyAI2:enemyAI;
+  if(!F.alive||!player.alive||!FA){ game.bind=null; return; }
+  const pushDir=TMP1.subVectors(F.pos,player.pos).setY(0).normalize();
   /* player pressure: drive the sword (and your feet) into him */
+  const W=input.keys&&input.keys.KeyW;
   const pP=clamp(TMP2.subVectors(player.tipTarget,B.pt).dot(pushDir)*1.6,-1,1.6)
-    +(input.keys&&input.keys.KeyW?.45:0);
+    +(W?.45:0);
   /* his pressure: skill, boldness, and how afraid he is */
-  const md=enemyAI.mood;
-  let pE=enemyAI.skill*.85+md.aggr*.5-md.fear*.5+rand(-.15,.15);
+  const md=FA.mood;
+  let pE=FA.skill*.85+md.aggr*.5-md.fear*.5+rand(-.15,.15);
   if(B.yielding)pE*=.25;
   B.pr+=(pP*(player.swordControl)-pE)*dt*.9;
   /* both blades pinned to the contest */
   player.tipTarget.copy(B.pt).addScaledVector(pushDir,clamp(B.pr,-1,1)*.28);
-  enemy.tipTarget.copy(B.pt).addScaledVector(pushDir,clamp(B.pr,-1,1)*.28);
+  F.tipTarget.copy(B.pt).addScaledVector(pushDir,clamp(B.pr,-1,1)*.28);
   player.stamina=Math.max(0,player.stamina-dt*6);
-  enemy.stamina=Math.max(0,enemy.stamina-dt*6);
+  F.stamina=Math.max(0,F.stamina-dt*6);
   B.scr-=dt;
   if(B.scr<=0){ B.scr=.3+Math.random()*.25;
     Sound.scrape&&Sound.scrape(); sparks(B.pt,3); }
+
+  /* THE CLINCH: keep walking into him and the bind turns to bodywork */
+  const distB=player.pos.distanceTo(F.pos);
+  B.fwdP=W?B.fwdP+dt:Math.max(0,B.fwdP-dt*2);
+  if(B.t>.25&&W&&(distB<1.18||B.fwdP>.6)&&clinchAction(player,F,log))return;
+  /* he has the same idea — mass and boldness press in */
+  B.fwdE+=dt*Math.max(0,.4+md.aggr*.9+(((F.build&&F.build.mass)||1)>1.25?.7:0)
+    +(player.stamina<30?.5:0)-md.fear*.6);
+  if(B.t>.4&&B.fwdE>B.eAt&&distB<1.6&&clinchAction(F,player,log))return;
+
   const disengage=input.keys&&input.keys.KeyS;
   if(B.pr>1){          // you drive through him
-    enemy.stun=Math.max(enemy.stun,.5); enemy.stagger=(enemy.stagger||0)+.6;
-    enemy.tipTarget.addScaledVector(pushDir,-1).setY(.6);
-    enemy.softHit('shR',pushDir,1.8);
+    F.stun=Math.max(F.stun,.5); F.stagger=(F.stagger||0)+.6;
+    F.tipTarget.addScaledVector(pushDir,-1).setY(.6);
+    F.softHit('shR',pushDir,1.8);
     log('you drive his blade aside — an opening!',false);
     game.timeScale=.45; game.slowT=.25; game.bind=null;
   } else if(B.pr<-1){  // he throws yours wide
@@ -6992,23 +7132,28 @@ function updateBind(dt){
     player.softHit('shR',TMP2.copy(pushDir).negate(),1.8);
     log('he throws your blade wide!',false);
     game.bind=null;
-    if(enemyAI.state!=='attack')enemyAI.beginAttack(player);
+    if(FA.state!=='attack')FA.beginAttack(player);
   } else if(B.yielding&&B.t>.9){   // the Mirror whirls away
-    game.bind=null; enemyAI.beginAttack(player);
+    game.bind=null; FA.beginAttack(player);
     log('he yields — and whirls into the cut!',false);
   } else if(disengage&&B.t>.3){
     game.bind=null;
     log('you break the bind and step away',false);
-    if(Math.random()<.4)enemyAI.beginAttack(player);
+    if(Math.random()<.4)FA.beginAttack(player);
   } else if(B.t>2.6){
     game.bind=null;
     player.softHit('chestT',TMP2.copy(pushDir).negate(),1.1);
-    enemy.softHit('chestT',pushDir,1.1);
+    F.softHit('chestT',pushDir,1.1);
     log('the bind breaks — both step back',false);
   }
 }
 
 /* ============================== CAMERA ================================= */
+/* THE LIT MOMENT: the beheading — and the dance, if it is earned — plays
+   under full light; only when it ends does the verdict rise on the dark. */
+const ritualL=new THREE.SpotLight(0xfff2dd,0,22,.85,.55,1.1);
+ritualL.position.set(0,7,0); scene.add(ritualL); scene.add(ritualL.target);
+const ritualAmb=new THREE.AmbientLight(0x93a6c2,0); scene.add(ritualAmb);
 let killCam=null;
 function beginKillCam(victim,victor){
   killCam={victim,victor,t:0,ritual:0,flicked:false,orbit:rand(0,Math.PI*2)};
@@ -7186,6 +7331,7 @@ function updateKillRitual(dt){
 const camTarget=V3(0,1.2,0);
 function updateCamera(dt){
   if(!player)return;
+  if(game.state==='replay')return;   // the replay owns the lens
   /* MENU TABLEAU: fixed shot, no feedback with the fighters */
   if(game.state==='menu'){
     TMP1.set(0,1.05,0);
@@ -7255,6 +7401,125 @@ function updateCamera(dt){
   camera.lookAt(camTarget);
 }
 
+
+/* ============================== THE REPLAY =============================
+   The engine remembers the last seconds of the duel as raw transform
+   streams — every part, every bone, the cloth pins. When the deciding
+   blow lands, time walks back and the kill plays again, slow and from
+   the side, before the ritual claims the body. */
+const REPLAY=(()=>{
+  const buf=[]; let objs=null,kmap=null,t=0,play=null,used=false;
+  const q0=new THREE.Quaternion(), q1=new THREE.Quaternion();
+  function roster(){ const r=[player,enemy]; if(enemy2)r.push(enemy2);
+    return r.filter(Boolean); }
+  function collect(){
+    const L=[],K=[];
+    for(const f of roster()){
+      if(f.root)L.push(f.root);
+      for(const k in f.parts)if(f.parts[k])L.push(f.parts[k]);
+      if(f.katana)L.push(f.katana);
+      if(f.model&&f.model.root){
+        L.push(f.model.root);
+        f.model.root.traverse(o=>{ if(o.isBone)L.push(o); });
+      }
+      K.push({f,keys:f._K?Object.keys(f._K):[]});
+    }
+    return {L,K};
+  }
+  function reset(){ buf.length=0; objs=null; kmap=null; t=0; play=null; used=false; }
+  function record(dt){
+    if(play||used)return;
+    t+=dt;
+    const C=collect();
+    const sig=C.L.length+'/'+C.K.map(e=>e.keys.length).join(',');
+    if(!objs||objs._sig!==sig){ objs=C.L; objs._sig=sig; kmap=C.K; buf.length=0; }
+    let n=objs.length*10;
+    for(const e of kmap)n+=4+e.keys.length*3;
+    const F=new Float32Array(n); let j=0;
+    for(const o of objs){
+      F[j++]=o.position.x; F[j++]=o.position.y; F[j++]=o.position.z;
+      F[j++]=o.quaternion.x; F[j++]=o.quaternion.y; F[j++]=o.quaternion.z; F[j++]=o.quaternion.w;
+      F[j++]=o.scale.x; F[j++]=o.scale.y; F[j++]=o.scale.z;
+    }
+    for(const e of kmap){
+      F[j++]=e.f.bodyYaw||0; F[j++]=e.f.vel.x; F[j++]=e.f.vel.y; F[j++]=e.f.vel.z;
+      for(const k of e.keys){ const v=e.f._K[k]; F[j++]=v.x; F[j++]=v.y; F[j++]=v.z; }
+    }
+    buf.push({t,F});
+    while(buf.length&&buf[0].t<t-4.6)buf.shift();
+  }
+  function apply(F0,F1,a){
+    let j=0;
+    for(const o of objs){
+      o.position.set(lerp(F0[j],F1[j],a),lerp(F0[j+1],F1[j+1],a),lerp(F0[j+2],F1[j+2],a));
+      q0.set(F0[j+3],F0[j+4],F0[j+5],F0[j+6]); q1.set(F1[j+3],F1[j+4],F1[j+5],F1[j+6]);
+      o.quaternion.copy(q0.slerp(q1,a));
+      o.scale.set(lerp(F0[j+7],F1[j+7],a),lerp(F0[j+8],F1[j+8],a),lerp(F0[j+9],F1[j+9],a));
+      j+=10;
+    }
+    for(const e of kmap){
+      e.f.bodyYaw=lerp(F0[j],F1[j],a); e.f.yaw=e.f.bodyYaw;
+      e.f.vel.set(lerp(F0[j+1],F1[j+1],a),lerp(F0[j+2],F1[j+2],a),lerp(F0[j+3],F1[j+3],a));
+      j+=4;
+      for(const k of e.keys){ const v=e.f._K[k];
+        if(v)v.set(lerp(F0[j],F1[j],a),lerp(F0[j+1],F1[j+1],a),lerp(F0[j+2],F1[j+2],a));
+        j+=3; }
+    }
+  }
+  function arm(victor,victim){
+    if(used||buf.length<10)return false;
+    /* one closing frame so the replay ends exactly on the present */
+    record(.0001); used=true;
+    const t1=buf[buf.length-1].t;
+    play={t0:Math.max(buf[0].t,t1-2.9),t1,ph:0,i:0,victor,victim};
+    const a=(victor&&victor.pos)||player.pos, b=(victim&&victim.pos)||enemy.pos;
+    play.mid=a.clone().add(b).multiplyScalar(.5); play.mid.y=1.05;
+    const ax=TMP1.subVectors(b,a).setY(0);
+    if(ax.lengthSq()<1e-4)ax.set(1,0,0);
+    ax.normalize();
+    play.side=V3(ax.z,0,-ax.x); if(Math.random()<.5)play.side.negate();
+    play.perp=V3(play.side.z,0,-play.side.x);
+    play.r=3.1;
+    game.state='replay'; game.timeScale=1;
+    document.body.classList.add('cine');
+    for(const f of roster())if(f.trailMesh)f.trailMesh.visible=false;
+    log('— the moment, again —',false);
+    return true;
+  }
+  function tick(dt){
+    if(!play)return;
+    play.ph+=dt*.42;                              // slow: savour it
+    const rt=play.t0+play.ph;
+    while(play.i<buf.length-1&&buf[play.i+1].t<rt)play.i++;
+    const A=buf[Math.min(play.i,buf.length-1)], B=buf[Math.min(play.i+1,buf.length-1)];
+    const a=(B.t>A.t)?clamp((rt-A.t)/(B.t-A.t),0,1):1;
+    apply(A.F,B.F,a);
+    /* cloth, sleeves, hair and loose pieces keep living on scripted bones */
+    const sdt=Math.min(dt,.033);
+    for(const f of roster()){
+      try{
+        if(f._K){ f.tickCloth&&f.tickCloth(sdt,f._K);
+          f.tickSleeves&&f.tickSleeves(sdt,f._K);
+          f.tickHair&&f.tickHair(sdt); }
+        updateLoose(f,sdt);
+      }catch(e){}
+    }
+    /* the lens: a slow arc around the exchange */
+    const th=play.ph*.34;
+    TMP1.copy(play.side).multiplyScalar(Math.cos(th))
+      .addScaledVector(play.perp,Math.sin(th)).normalize();
+    camera.position.set(play.mid.x+TMP1.x*play.r,
+      1.45+Math.sin(play.ph*.8)*.15, play.mid.z+TMP1.z*play.r);
+    camera.lookAt(play.mid);
+    if(rt>=play.t1){
+      const E=buf[buf.length-1]; apply(E.F,E.F,0);  // land on the present
+      for(const f of roster())if(f.trailMesh)f.trailMesh.visible=true;
+      play=null; buf.length=0;
+      endDuel();
+    }
+  }
+  return {record,arm,tick,reset};
+})();
 
 /* =============================== LOOP ================================== */
 let last=performance.now(), dt_g=0, uiT=0;
@@ -7347,6 +7612,25 @@ function frame(now){
     if(player.alive&&game.state==='fight'&&!introHold)playerIntent(player,foe);
     else if(player.alive&&!ritualHold)playerIntent(player,foe);
     updateKillRitual(dt);
+    { /* the moment stays lit until the ritual (and any dance) is over */
+      const vt=killCam?killCam.victor:game._lastVictor;
+      const busy=!!(killCam||(vt&&vt._pupPlay));
+      const on=game.state==='over'&&busy&&!game._verdictShown;
+      ritualL.intensity=lerp(ritualL.intensity,on?2.6:0,clamp(dt*1.6,0,1));
+      ritualAmb.intensity=lerp(ritualAmb.intensity,on?.65:0,clamp(dt*1.6,0,1));
+      if(on&&vt){
+        const vm=(killCam&&killCam.victim)?killCam.victim.pos:vt.pos;
+        ritualL.position.set((vt.pos.x+vm.x)/2+1.4,6.5,(vt.pos.z+vm.z)/2+1.2);
+        ritualL.target.position.set((vt.pos.x+vm.x)/2,.6,(vt.pos.z+vm.z)/2);
+      }
+      if(game.state==='over'&&game._verdictPend&&!game._verdictShown){
+        const waited=(performance.now()-game._verdictPend)/1000;
+        if((!busy&&waited>2.2)||waited>22){
+          game._verdictShown=true;
+          document.getElementById('verdict').classList.remove('hidden');
+        }
+      }
+    }
     enemyAI.update(dt,player);
     if(enemy2&&enemyAI2)enemyAI2.update(dt,player);
     /* the pair must not stand inside each other */
@@ -7392,6 +7676,8 @@ function frame(now){
         f.pool.mesh.position.set(f.pos.x,.007,f.pos.z); }
     }
 
+    if(game.state==='fight')REPLAY.record(dt);
+
     if(game.state==='fight'){
       for(const e of (enemy2?[enemy,enemy2]:[enemy])){
         bladeVsBlade(player,e);
@@ -7403,11 +7689,16 @@ function frame(now){
         else if(e.dead&&!game._lastKilled)game._lastKilled=e;
       }
       const allDead=enemy.dead&&(!enemy2||enemy2.dead);
-      if(player.dead||allDead)endDuel();
+      if(player.dead||allDead){
+        const victim=player.dead?player:(game._lastKilled||enemy);
+        const victor=player.dead?livingFoe():player;
+        if(!REPLAY.arm(victor,victim))endDuel();
+      }
     }
   }
 
-  if(PHYS.enabled&&player&&player.phys)PHYS.engine.step(Math.min(dt,.033));
+  if(game.state==='replay')REPLAY.tick(dt);
+  if(PHYS.enabled&&game.state!=='replay'&&player&&player.phys)PHYS.engine.step(Math.min(dt,.033));
   for(const f of [player,enemy]){
     if(!f)continue;
     /* the face lives: blinks on its own clock, grimaces with pain,
