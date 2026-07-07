@@ -150,6 +150,13 @@
   #howto-touch{display:none}
   body.touch #howto-desktop{display:none}
   body.touch #howto-touch{display:grid}
+  /* the offer of a fatality: red, pulsing, impossible to miss */
+  #fatality-prompt{position:fixed;bottom:13vh;left:50%;transform:translateX(-50%);
+    font-family:'Shippori Mincho',serif;font-size:17px;letter-spacing:.3em;
+    color:#e04a3a;text-shadow:0 0 26px rgba(200,40,30,.55);z-index:12;
+    white-space:nowrap;pointer-events:none;animation:fatpulse 1s ease-in-out infinite}
+  #fatality-prompt.hidden{display:none}
+  @keyframes fatpulse{0%,100%{opacity:.5}50%{opacity:1}}
   /* ---- touch controls ---- */
   #touchui{display:none;position:fixed;inset:0;z-index:14;pointer-events:none;
     -webkit-user-select:none;user-select:none}
@@ -177,6 +184,10 @@
   .tbtn.on{background:rgba(255,255,255,.25);color:#fff}
   #btn-guard{left:34px;bottom:172px}
   #btn-thrust{left:118px;bottom:210px}
+  #btn-fatality{right:34px;bottom:172px;display:none;
+    border-color:rgba(224,74,58,.65);color:#e04a3a;
+    animation:fatpulse 1s ease-in-out infinite}
+  body.touch #btn-fatality.show{display:flex}
   body.touch #hint{display:none}
 </style>
 </head>
@@ -192,6 +203,7 @@
   <div id="bladestick"><div id="bladenub"></div><div class="stick-tag">刀 BLADE</div></div>
   <button class="tbtn" id="btn-guard">守<br>GUARD</button>
   <button class="tbtn" id="btn-thrust">突<br>THRUST</button>
+  <button class="tbtn" id="btn-fatality">斬<br>FATALITY</button>
 </div>
 <div id="hud">
   <div class="blood-col" id="blood-player"><div class="blood-fill" id="bloodfill-player"></div></div>
@@ -216,6 +228,7 @@
   </div>
 
   <div id="log"></div>
+  <div id="fatality-prompt" class="hidden">押 F — FATALITY&nbsp;&nbsp;·&nbsp;&nbsp;G — MERCY</div>
   
 </div>
 
@@ -269,7 +282,7 @@
     </div>
   </div>
   <button class="begin" id="btn-begin">BEGIN</button>
-  <div class="buildtag" style="margin-top:12px;font-size:10px;color:var(--dim);letter-spacing:.25em">BUILD V46</div>
+  <div class="buildtag" style="margin-top:12px;font-size:10px;color:var(--dim);letter-spacing:.25em">BUILD V47</div>
   <div id="pickdbg" style="margin-top:4px;font-size:10px;color:var(--dim);letter-spacing:.1em"></div>
   <div class="warn">no health bar · anatomy is the health bar · a severed artery ends the duel</div>
 </div>
@@ -291,7 +304,7 @@
 </div>
 
 <script type="importmap">
-{ "imports": { "three": "./vendor/three.module.js?v=v46",
+{ "imports": { "three": "./vendor/three.module.js?v=v47",
                "three/addons/": "./vendor/addons/" } }
 </script>
 <script type="module">
@@ -306,7 +319,7 @@ import * as SkeletonUtils from 'three/addons/utils/SkeletonUtils.js';
    composite); keep r128-era color semantics */
 THREE.ColorManagement.enabled = false;
 window.THREE = Object.assign({}, THREE, { GLTFLoader, FBXLoader, SkeletonUtils });
-for (const src of ['physics.js?v=v46', 'game.js?v=v46'])
+for (const src of ['physics.js?v=v47', 'game.js?v=v47'])
   await new Promise((ok, fail) => {
     const s = document.createElement('script');
     s.src = src; s.onload = ok; s.onerror = fail;

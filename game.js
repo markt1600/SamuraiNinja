@@ -3928,7 +3928,7 @@ Fighter.prototype.updateAlive=function(dt,opponent){
       this.begging=true; this.parryEnabled=false;
       log(this.isPlayer?'you cannot fight on — you sink to your knees'
         :this.name+' drops his guard — on his knees, begging for mercy',false);
-      if(!this.isPlayer)log('[G] grant mercy — or take what is owed',false);
+      if(!this.isPlayer)log('[F] FATALITY — or [G] grant mercy',false);
     }
   }
   if(this.begging){
@@ -4484,8 +4484,9 @@ addEventListener('keydown',e=>{ input.keys[e.code]=true;
       log('balance assist tightened',false); }
   }
   if(e.code==='ShiftLeft'||e.code==='ShiftRight')input.shift=true;
-  if(e.code==='KeyG'&&game.state==='fight'&&typeof enemy!=='undefined'&&
+  if(e.code==='KeyG'&&game.state==='fight'&&!game.fatality&&typeof enemy!=='undefined'&&
      enemy&&enemy.begging&&!enemy.dead)spareDuel();
+  if(e.code==='KeyF'&&typeof beginFatality==='function')beginFatality();
   if(e.code==='KeyR'&&game.state!=='menu')restart();
   if(e.code==='KeyE'&&game.state==='over'&&game.advance)rematch(); });
 addEventListener('keyup',e=>{ input.keys[e.code]=false;
@@ -6763,6 +6764,7 @@ function setup(){
   buildDiagram(document.getElementById('diagram-player'));
   buildDiagram(document.getElementById('diagram-enemy'));
   REPLAY.reset();
+  game.fatality=null;
   game._verdictPend=null; game._verdictShown=false; game._lastVictor=null;
   ritualL.intensity=0; ritualAmb.intensity=0;
   applyAmbience(game.stage);    // a new night for a new opponent
@@ -7068,6 +7070,7 @@ if(IS_TOUCH){
   };
   hold('btn-guard',v=>input.rmb=v);
   hold('btn-thrust',v=>input.shift=v);
+  hold('btn-fatality',v=>{ if(v)beginFatality(); });
   document.addEventListener('contextmenu',e=>e.preventDefault());
 }
 document.addEventListener('click',ev=>{
@@ -7233,6 +7236,91 @@ function updateBind(dt){
   }
 }
 
+/* ============================== FATALITY ===============================
+   A begging man can be spared — or taken apart, piece by piece: one
+   extra-strong blow per arm, then the head. A blade CHOPS; bare hands
+   TEAR. The player may always just fight on instead. */
+game.fatality=null;
+function beginFatality(){
+  if(game.fatality||game.state!=='fight'||!player.alive)return;
+  const foe=(enemy&&enemy.alive&&enemy.begging&&!enemy.dead)?enemy
+    :(enemy2&&enemy2.alive&&enemy2.begging&&!enemy2.dead)?enemy2:null;
+  if(!foe)return;
+  game.fatality={t:0,phase:'walk',victim:foe,limb:null};
+  log('no mercy — the ring holds its breath',true);
+}
+function updateFatality(dt){
+  const F=game.fatality; if(!F)return;
+  const v=F.victim, p=player;
+  if(!v||v.severed.head||!p.alive||game.state!=='fight'){
+    game.fatality=null; p._ritualGrabL=null; p._ritualGrabR=null; return; }
+  F.t+=dt;
+  const bare=!!(p.weapon&&p.weapon.blunt);
+  if(v.alive)v.begging=true;                  // he stays on his knees
+  const dx=v.pos.x-p.pos.x, dz=v.pos.z-p.pos.z;
+  const d=Math.hypot(dx,dz)||1;
+  p.yaw=p.bodyYaw=Math.atan2(dx,dz);
+  if(F.phase==='walk'){
+    if(d>.95){
+      p.vel.x=lerp(p.vel.x,dx/d*1.3,clamp(dt*4,0,1));
+      p.vel.z=lerp(p.vel.z,dz/d*1.3,clamp(dt*4,0,1));
+      if(F.t>6){ game.fatality=null; }        // could not reach — release
+    } else { F.phase='windup'; F.t=0;
+      F.limb=!v.severed.armR?'armR':!v.severed.armL?'armL':'head'; }
+    return;
+  }
+  p.vel.x*=Math.pow(.001,dt); p.vel.z*=Math.pow(.001,dt);
+  const c=v.capsules[F.limb==='head'?'head':(F.limb==='armR'?'forearmR':'forearmL')];
+  const pt=TMP4.addVectors(c.a,c.b).multiplyScalar(.5);
+  if(F.phase==='windup'){
+    const T=bare?.8:.55;
+    if(bare){
+      /* both hands close on the piece and STRAIN */
+      p._ritualGrabL=p._ritualGrabL||pt.clone(); p._ritualGrabL.copy(pt); p._ritualGrabL.x-=.07;
+      p._ritualGrabR=p._ritualGrabR||pt.clone(); p._ritualGrabR.copy(pt); p._ritualGrabR.x+=.07;
+      if(F.t>T*.45){ const j=Math.sin(F.t*38)*.02;
+        p._ritualGrabL.y+=j; p._ritualGrabR.y-=j; }
+    } else {
+      /* the blade climbs high behind the shoulder — everyone sees it coming */
+      p.tipTarget.copy(p.pos).addScaledVector(DIRY(p.bodyYaw+1.0),.6).setY(2.05);
+      p.telegraph=true;
+    }
+    if(F.t>T){ F.phase='blow'; F.t=0; }
+    return;
+  }
+  if(F.phase==='blow'){
+    p.telegraph=false;
+    const dir=TMP1.set(dx/d,-.25,dz/d).normalize().clone();
+    if(!bare)p.tipTarget.copy(pt).addScaledVector(DIRY(p.bodyYaw+2.4),.7);
+    if(F.limb==='head'){
+      v.decapitate(pt.clone(),dir);
+      if(!v.dead){ v.collapse(log); }
+      v.deathCause='fatality — taken apart in the snow';
+      Sound.killMoment();
+      log(bare?'the head is TORN from the shoulders':'one blow — the head leaves the body',true);
+      game.timeScale=.25; game.slowT=.6; game.shake=Math.max(game.shake||0,1);
+      game.adrenaline=Math.max(game.adrenaline||0,1);
+      game.fatality=null; p._ritualGrabL=null; p._ritualGrabR=null;
+      return;
+    }
+    v.severLimb(F.limb,pt.clone(),dir,log);
+    Sound.cut(9); Sound.grunt&&Sound.grunt(1,v._vp||1);
+    game.timeScale=.35; game.slowT=.35; game.shake=Math.max(game.shake||0,.7);
+    log(bare?('the '+(F.limb==='armR'?'right':'left')+' arm is RIPPED from its socket')
+            :'one blow — the arm falls to the snow',true);
+    F.phase='pause'; F.t=0;
+    return;
+  }
+  if(F.phase==='pause'){
+    if(F.t>(bare?.85:.6)){
+      F.limb=!v.severed.armR?'armR':!v.severed.armL?'armL':'head';
+      F.phase='windup'; F.t=0;
+      if(bare){ p._ritualGrabL=null; p._ritualGrabR=null; }
+    }
+    return;
+  }
+}
+
 /* ============================== CAMERA ================================= */
 /* THE LIT MOMENT: the beheading — and the dance, if it is earned — plays
    under full light; only when it ends does the verdict rise on the dark. */
@@ -7349,8 +7437,8 @@ function updateKillRitual(dt){
   }
   /* bare-handed victor: no steel to sheath — a kata over the fallen */
   if(!vt.model&&bare&&MODELPIPE.clips&&MODELPIPE.clips.ff_combo){
-    if(!kc.clipStarted&&kc.beheadDone&&kc.released
-       &&kc.ritual>kc.thrownAt+2.0){
+    if(!kc.clipStarted&&((kc.beheadDone&&kc.released
+       &&kc.ritual>kc.thrownAt+2.0)||(headless&&!kc.beheadDone&&kc.ritual>2.0))){
       kc.clipStarted=true;
       const kata=['ff_combo','ff_a','ff_b'].filter(n=>MODELPIPE.clips[n]);
       MODELPIPE.playPuppet(vt,
@@ -7362,7 +7450,8 @@ function updateKillRitual(dt){
      slot before any weapon's own celebration. */
   if(!vt.model&&MODELPIPE.clips&&MODELPIPE.clips.dance1
      &&vt.blood>BLOOD_TOTAL*.88&&(vt.pain||0)<35
-     &&kc.beheadDone&&kc.released&&kc.ritual>kc.thrownAt+1.6){
+     &&((kc.beheadDone&&kc.released&&kc.ritual>kc.thrownAt+1.6)
+        ||(headless&&!kc.beheadDone&&kc.ritual>1.8))){
     if(!kc.clipStarted){ kc.clipStarted=true;
       const dn=['dance1','dance2','dance3','dance4']
         .filter(n=>MODELPIPE.clips[n]);
@@ -7720,7 +7809,8 @@ function frame(now){
     const ritualHold=(killCam&&killCam.victor===player&&
       killCam.ritual<(killCam.beheadDone?killCam.thrownAt+2.6:5.2))||introHold;
     const foe=livingFoe();
-    if(player.alive&&game.state==='fight'&&!introHold)playerIntent(player,foe);
+    if(game.fatality){ /* the execution owns the body */ }
+    else if(player.alive&&game.state==='fight'&&!introHold)playerIntent(player,foe);
     else if(player.alive&&!ritualHold)playerIntent(player,foe);
     updateKillRitual(dt);
     { /* the moment stays lit until the ritual (and any dance) is over */
@@ -7755,6 +7845,7 @@ function frame(now){
       }
     }
     updateBind(dt);
+    updateFatality(dt);
 
     for(const f of (enemy2?[player,enemy,enemy2]:[player,enemy])){
       if(f.physDead)f.updateDeadPhys(dt);
@@ -7800,7 +7891,7 @@ function frame(now){
         else if(e.dead&&!game._lastKilled)game._lastKilled=e;
       }
       const allDead=enemy.dead&&(!enemy2||enemy2.dead);
-      if(player.dead||allDead){
+      if((player.dead||allDead)&&!game.fatality){
         const victim=player.dead?player:(game._lastKilled||enemy);
         const victor=player.dead?livingFoe():player;
         if(!REPLAY.arm(victor,victim))endDuel();
@@ -7878,6 +7969,13 @@ function frame(now){
 
   uiT+=dt;
   if(uiT>.1&&player){ uiT=0;
+    { const beg=(game.state==='fight'&&!game.fatality&&player.alive)?
+        ((enemy&&enemy.alive&&enemy.begging&&!enemy.dead)?enemy
+        :(enemy2&&enemy2.alive&&enemy2.begging&&!enemy2.dead)?enemy2:null):null;
+      const fp=document.getElementById('fatality-prompt');
+      if(fp)fp.classList.toggle('hidden',!beg||IS_TOUCH);
+      const fb=document.getElementById('btn-fatality');
+      if(fb)fb.classList.toggle('show',!!beg&&IS_TOUCH); }
     document.getElementById('bloodfill-player').style.height=(player.bloodFrac*100)+'%';
     document.getElementById('bloodfill-enemy').style.height=(enemy.bloodFrac*100)+'%';
     document.getElementById('state-player').innerHTML=stateText(player);
