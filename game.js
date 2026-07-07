@@ -4589,6 +4589,9 @@ class AI{
   update(dt,foe){
     const f=this.f; if(!f.alive)return;
     if(game.state!=='fight'){ f.telegraph=false; return; }
+    /* the execution owns this body — the combat brain stands aside */
+    if(game.fatality&&game.fatality.att===f){
+      f.telegraph=false; f.thrust=false; f.guarding=false; return; }
     /* a begging man does not maneuver, guard or strike — he waits */
     if(f.begging){ f.telegraph=false; f.guarding=false; this.plan=null; return; }
     const dist=f.pos.distanceTo(foe.pos);
@@ -7261,18 +7264,22 @@ function updateBind(dt){
    extra-strong blow per arm, then the head. A blade CHOPS; bare hands
    TEAR. The player may always just fight on instead. */
 game.fatality=null;
-function beginFatality(){
-  if(game.fatality||game.state!=='fight'||!player.alive)return;
-  const foe=(enemy&&enemy.alive&&enemy.begging&&!enemy.dead)?enemy
-    :(enemy2&&enemy2.alive&&enemy2.begging&&!enemy2.dead)?enemy2:null;
-  if(!foe)return;
-  game.fatality={t:0,phase:'walk',victim:foe,limb:null};
-  player.stuck=null;                  // the blade comes free for the work
-  log('no mercy — the ring holds its breath',true);
+function beginFatality(att,victim){
+  if(game.fatality||game.state!=='fight')return;
+  att=(att&&att.parts)?att:player;    // guard against stray event args
+  if(!att.alive||att.begging)return;  // a kneeling man executes no one
+  const foe=(victim&&victim.begging&&!victim.dead)?victim
+    :((enemy&&enemy.alive&&enemy.begging&&!enemy.dead)?enemy
+    :(enemy2&&enemy2.alive&&enemy2.begging&&!enemy2.dead)?enemy2:null);
+  if(!foe||foe===att)return;
+  game.fatality={t:0,phase:'walk',victim:foe,att,limb:null};
+  att.stuck=null;                     // the blade comes free for the work
+  log(att.isPlayer?'no mercy — the ring holds its breath'
+    :att.name+' shows NO mercy — the ring holds its breath',true);
 }
 function updateFatality(dt){
   const F=game.fatality; if(!F)return;
-  const v=F.victim, p=player;
+  const v=F.victim, p=F.att||player;
   if(!v||v.severed.head||!p.alive||game.state!=='fight'){
     game.fatality=null; p._ritualGrabL=null; p._ritualGrabR=null; return; }
   /* he died before the first blow landed (bleed-out on his knees):
@@ -7964,6 +7971,16 @@ function frame(now){
     }
     updateBind(dt);
     updateFatality(dt);
+    /* the mountain grants nothing: a begging player is taken apart */
+    if(game.state==='fight'&&!game.fatality&&player.alive&&
+       player.begging&&!player.dead){
+      game._aiFatT=(game._aiFatT||0)+dt;
+      if(game._aiFatT>1.1){
+        const ex=(enemy&&enemy.alive&&!enemy.begging)?enemy
+          :(enemy2&&enemy2.alive&&!enemy2.begging)?enemy2:null;
+        if(ex)beginFatality(ex,player);
+      }
+    } else game._aiFatT=0;
 
     for(const f of (enemy2?[player,enemy,enemy2]:[player,enemy])){
       if(f.physDead)f.updateDeadPhys(dt);
