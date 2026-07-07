@@ -1037,7 +1037,10 @@ function buildSkinnedBody(kimonoMat,hakamaMat,B,skinMat){
         /* belly: one great central swell — the sumo's silhouette */
         if(R.belly)bz+=R.belly*Math.pow(Math.max(sz,0),1.15)
           *(.45+.55*Math.exp(-Math.pow(cx/.62,2)));
-        pos.push(R.c[0]+cx*R.r, R.c[1], R.c[2]+sz*R.r*(R.sz||1)+bz);
+        /* sculpted muscle: the ring's radius breathes with anatomy */
+        let rr=R.r;
+        if(R.mf)rr*=1+R.mf(cx,sz);
+        pos.push(R.c[0]+cx*rr, R.c[1], R.c[2]+sz*rr*(R.sz||1)+bz);
         const nx=cx, nz=sz*(R.sz||1), nh=Math.hypot(nx,nz)||1;
         nrm.push(nx/nh*inv, -slope*inv, nz/nh*inv);
         uvs.push(s/SEG,(R.c[1]-y0)/((y1-y0)||1));
@@ -1058,6 +1061,40 @@ function buildSkinnedBody(kimonoMat,hakamaMat,B,skinMat){
     const t=clamp((y-yA)/(yB-yA),0,1), tt=t*t*(3-2*t);
     return [a,1-tt,b,tt];
   };
+  /* ---- MUSCLE FIELDS: radial displacement as a function of height and
+     azimuth (front sz>0, back sz<0). Amplitudes are fractions of the
+     ring radius; the whole system scales with the build's musc knob and
+     only fires on bare skin — cloth hides anatomy. ---- */
+  const _g=(v,c,w)=>Math.exp(-((v-c)*(v-c))/(w*w));
+  const muscT=(y,cx,sz,M)=>{      // torso
+    const F=Math.max(sz,0), Bk=Math.max(-sz,0), ax=Math.abs(cx);
+    let m=0;
+    m+=.06*_g(y,1.275,.075)*Math.pow(F,1.15)*(.25+.75*_g(ax,.42,.3)); // pecs
+    m-=.03*_g(y,1.27,.08)*Math.pow(F,1.3)*_g(ax,0,.1);                // cleft
+    m+=.032*Math.pow(F,1.2)*_g(ax,.16,.22)                            // rectus
+       *(.55+.45*Math.cos((y-1.06)*46))*_g(y,1.05,.13);
+    m-=.018*Math.pow(F,1.3)*_g(ax,0,.05)*_g(y,1.05,.14);              // linea alba
+    m+=.035*_g(y,1.2,.11)*_g(ax,.85,.25)*(.4+.6*Bk);                  // lats/obliques
+    m-=.02*Math.pow(Bk,1.4)*_g(ax,0,.09);                             // spinal furrow
+    return m*M;
+  };
+  const muscL=(y,cx,sz,M)=>{      // bare leg
+    const F=Math.max(sz,0), Bk=Math.max(-sz,0), ax=Math.abs(cx);
+    let m=0;
+    m+=.07*_g(y,.66,.12)*Math.pow(F,1.2)*(.4+.6*_g(ax,.3,.35));       // quads
+    m+=.05*_g(y,.31,.07)*Math.pow(Bk,1.2);                            // calf heads
+    m+=.04*_g(y,.72,.1)*Math.pow(Bk,1.3);                             // hamstring
+    m-=.02*_g(y,.31,.06)*Math.pow(Bk,1.4)*_g(ax,0,.12);               // calf split
+    return m*M;
+  };
+  const muscA=(t,cx,sz,M)=>{      // bare upper arm (t: shoulder->elbow)
+    const F=Math.max(sz,0), Bk=Math.max(-sz,0);
+    return (.10*_g(t,.5,.18)*Math.pow(F,1.2)
+           +.07*_g(t,.45,.2)*Math.pow(Bk,1.2))*M;
+  };
+  const MT=B.bare?(B.musc!==undefined?B.musc:.9):0;
+  const MA=(B.armsSkin||B.bare)?(B.musc!==undefined?B.musc:.9):0;
+  const ML2=B.legsSkin?(B.musc!==undefined?B.musc*.8:.7):0;
   /* ---- torso (kimono) ---- */
   { const P=BONES.pelvis,S=BONES.spine,Ch=BONES.chest;
     const prof=[ // y, radius, depth-scale — a torso, not a pipe
@@ -1090,7 +1127,8 @@ function buildSkinnedBody(kimonoMat,hakamaMat,B,skinMat){
       /* the bust rides the chest rings, apex ~1.28; the belly lower */
       const bust=(B.bust||0)*Math.exp(-Math.pow((y-1.285)/.075,2));
       const belly=(B.belly||0)*Math.exp(-Math.pow((y-1.02)/.21,2));
-      return {c:[0,y,0],r,sz:szz,skin,bust,belly};
+      const mf=MT>0?((cx,sz2)=>muscT(y,cx,sz2,MT)):null;
+      return {c:[0,y,0],r,sz:szz,skin,bust,belly,mf};
     });
     tube(rings,0); }
   /* ---- upper arms with sleeve flare (kimono) ---- */
@@ -1104,7 +1142,8 @@ function buildSkinnedBody(kimonoMat,hakamaMat,B,skinMat){
       /* slimmer rigid flare: the CLOTH sleeve carries the silhouette */
       const r=(lerp(.056,.07,Math.pow(t,1.35))+deltoid)*(B.armR||1);
       const skin=t<.18?blend(t,0,.3,Ch,UA):(t<.3?blend(t,0,.3,Ch,UA):[UA,1,Ch,0]);
-      rings.push({c:[x,y,0],r,sz:1,skin});
+      const mf=MA>0?((cx,sz2)=>muscA(t,cx,sz2,MA)):null;
+      rings.push({c:[x,y,0],r,sz:1,skin,mf});
     }
     tube(rings,B.armsSkin?2:0);        // sleeveless builds show muscle
   }
@@ -1130,7 +1169,8 @@ function buildSkinnedBody(kimonoMat,hakamaMat,B,skinMat){
       if(y>.52)skin=[TH,1,SH,0];
       else if(y>.36)skin=blend(y,.52,.36,TH,SH);
       else skin=[SH,1,TH,0];
-      return {c:[x,y,0],r:r*(B.legR||1),sz:1,skin};
+      const mf=ML2>0?((cx,sz2)=>muscL(y,cx,sz2,ML2)):null;
+      return {c:[x,y,0],r:r*(B.legR||1),sz:1,skin,mf};
     });
     tube(rings,BARE?2:1);
   }
@@ -1138,11 +1178,24 @@ function buildSkinnedBody(kimonoMat,hakamaMat,B,skinMat){
   const geo=new THREE.BufferGeometry();
   geo.setAttribute('position',new THREE.Float32BufferAttribute(pos,3));
   geo.setAttribute('normal',new THREE.Float32BufferAttribute(nrm,3));
+  geo._weldSeam=true;
   geo.setAttribute('uv',new THREE.Float32BufferAttribute(uvs,2));
   geo.setAttribute('skinIndex',new THREE.Uint16BufferAttribute(sIdx,4));
   geo.setAttribute('skinWeight',new THREE.Float32BufferAttribute(sWgt,4));
   geo.setIndex(idx);
   for(const g of groups)geo.addGroup(g.start,g.count,g.materialIndex);
+  /* sculpted surfaces need TRUE normals; then weld the u-seam so the
+     duplicated wrap column doesn't show a lighting crease */
+  geo.setIndex(idx); geo.computeVertexNormals();
+  { const W2=SEG+1, na=geo.attributes.normal, vc=geo.attributes.position.count;
+    for(let row=0;row*W2<vc;row++){
+      const a2=row*W2, b2=a2+SEG;
+      const nx=(na.getX(a2)+na.getX(b2))/2,
+            ny=(na.getY(a2)+na.getY(b2))/2,
+            nz=(na.getZ(a2)+na.getZ(b2))/2;
+      const l=Math.hypot(nx,ny,nz)||1;
+      na.setXYZ(a2,nx/l,ny/l,nz/l); na.setXYZ(b2,nx/l,ny/l,nz/l);
+    } }
 
   const km=kimonoMat.clone(); km.skinning=true;
   if(kimonoTex&&!km.map)km.map=kimonoTex;
@@ -2105,7 +2158,7 @@ const BUILDS={
     /* the Spaniard: leather cuirass, steel pauldron on the sword arm,
        pteruges at the hips, bare muscled legs, cropped hair, stubble */
     sh:1.18, waist:1.02, hip:.98, limb:1.2, hair:'crop', bare:false,
-    legsSkin:true, legR:1.1, armsSkin:true, maximus:true, cloth:false,
+    legsSkin:true, legR:1.1, armsSkin:true, maximus:true, cloth:false, musc:1.3,
     preferWeapon:'broadsword',
     palette:{kimono:0x6b4f32,hakama:0x4a3826,obi:0x2e2216,skin:0xc9996a,
       hair:0x3a2c1e,tabi:0x5a452e,accent:0x8d7248,face:{stubble:true}}},
@@ -2123,7 +2176,7 @@ const BUILDS={
     /* the heavyweight in the snow: shorts only, as in the ring —
        compact, massively muscled, bare fists, boxing boots */
     sh:1.35, waist:1.15, hip:1.05, limb:1.45, hair:'buzz', bare:true,
-    chest:1.55, legsSkin:true, legR:1.3, armR:1.55, armsSkin:true,
+    chest:1.55, legsSkin:true, legR:1.3, armR:1.55, armsSkin:true, musc:1.6,
     cloth:false, trunks:true, mass:1.7, preferWeapon:'bare',
     palette:{kimono:0x6b4630,hakama:0x161616,obi:0xe8e6e0,skin:0x6b4630,
       hair:0x141210,tabi:0x18181a,accent:0xe8e6e0,face:{stubble:true}}},
@@ -2136,7 +2189,7 @@ const BUILDS={
        barefoot, chonmage — the belt and its sagari are the whole costume */
     sh:1.5, waist:3.1, hip:2.7, limb:2.0, hair:'topknot', bare:true,
     mass:3, cloth:false, belly:.3, chest:2.1, legsSkin:true, legR:1.9, armR:1.8,
-    armsSkin:true, mawashi:true, barefoot:true, preferWeapon:'bare',
+    armsSkin:true, mawashi:true, barefoot:true, musc:.25, preferWeapon:'bare',
     palette:{kimono:0xd8a880,hakama:0x22315c,obi:0x22315c,skin:0xd8a880,
       accent:0xe8e2d0,face:{stubble:true}}}};
 /* the honest lines of the sword, in the chest frame [right, up, fwd]:
