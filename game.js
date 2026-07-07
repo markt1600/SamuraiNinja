@@ -5138,12 +5138,20 @@ function stateText(f){
   return bits.join(' · ');
 }
 const logEl=document.getElementById('log');
+/* on a phone the play-by-play would bury the fight: only the CRITICAL
+   lines survive — binds, mercy/fatality offers, deaths, the replay marker */
+const LOG_CRIT=['bind','fatality','mercy','knees','falls','moment, again',
+  'blade wide','blade aside','champion'];
 function log(msg,mortal){
+  if(IS_TOUCH&&!mortal){
+    const m=msg.toLowerCase();
+    if(!LOG_CRIT.some(k=>m.includes(k)))return;
+  }
   const d=document.createElement('div');
   d.className='log-line'+(mortal?' mortal':''); d.textContent=msg;
   logEl.appendChild(d);
-  while(logEl.children.length>4)logEl.removeChild(logEl.firstChild);
-  setTimeout(()=>d.remove(),5200);
+  while(logEl.children.length>(IS_TOUCH?2:4))logEl.removeChild(logEl.firstChild);
+  setTimeout(()=>d.remove(),IS_TOUCH?4200:5200);
 }
 
 /* ============================ GAME STATE =============================== */
