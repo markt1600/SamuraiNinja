@@ -931,13 +931,13 @@ const DEAD_AT=.48;
 /* tapered limb: joint sphere at the pivot, shaft, condyle at the far end */
 function limbMesh(len,rTop,rBot,mat){
   const g=new THREE.Group();
-  const cyl=new THREE.Mesh(new THREE.CylinderGeometry(rTop,rBot,len,42),mat);
+  const cyl=new THREE.Mesh(new THREE.CylinderGeometry(rTop,rBot,len,56),mat);
   cyl.position.y=-len/2; cyl.castShadow=true; cyl.userData.shaft=true;
   /* generous joint spheres: bent limbs stay CONNECTED, no daylight at
      the elbow or knee */
-  const j=new THREE.Mesh(new THREE.SphereGeometry(rTop*1.14,30,22),mat); j.castShadow=true;
+  const j=new THREE.Mesh(new THREE.SphereGeometry(rTop*1.14,38,28),mat); j.castShadow=true;
   j.userData.joint=true;
-  const e=new THREE.Mesh(new THREE.SphereGeometry(rBot*1.04,30,22),mat); e.position.y=-len; e.castShadow=true;
+  const e=new THREE.Mesh(new THREE.SphereGeometry(rBot*1.04,38,28),mat); e.position.y=-len; e.castShadow=true;
   e.userData.end=true;
   g.add(cyl,j,e); g.userData.len=len; g.userData.r=Math.max(rTop,rBot);
   return g;
@@ -1011,7 +1011,7 @@ function buildSkinnedBody(kimonoMat,hakamaMat,B,skinMat){
     b.position.fromArray(bindPos[k]); root.add(b); bones.push(b); }
 
   const pos=[],nrm=[],sIdx=[],sWgt=[],uvs=[],idx=[],groups=[];
-  const SEG=60;
+  const SEG=88;
   let ringStart=0, vBase=0;
   /* a vertical tube in bind pose; rings: {c:[x,y,z],r,sz,skin:[b0,w0,b1,w1]} */
   function tube(rings,matIndex){
@@ -1098,8 +1098,8 @@ function buildSkinnedBody(kimonoMat,hakamaMat,B,skinMat){
     const UA=side>0?BONES.uaR:BONES.uaL, Ch=BONES.chest;
     const x=.185*side, top=1.335, bot=1.045;
     const rings=[];
-    for(let i=0;i<=26;i++){
-      const t=i/26, y=lerp(top,bot,t);
+    for(let i=0;i<=36;i++){
+      const t=i/36, y=lerp(top,bot,t);
       const deltoid=.021*minJerkBell(clamp(t/.5,0,1));  // shoulder muscle
       /* slimmer rigid flare: the CLOTH sleeve carries the silhouette */
       const r=(lerp(.056,.07,Math.pow(t,1.35))+deltoid)*(B.armR||1);
@@ -1439,8 +1439,8 @@ class Fighter{
     }
     /* elbow joints: the arm bends AROUND something */
     const elbM=this.build.bare?skin:kimono;
-    parts.elbowR=new THREE.Mesh(new THREE.SphereGeometry(.048,22,16),elbM);
-    parts.elbowL=new THREE.Mesh(new THREE.SphereGeometry(.048,22,16),elbM);
+    parts.elbowR=new THREE.Mesh(new THREE.SphereGeometry(.048,28,20),elbM);
+    parts.elbowL=new THREE.Mesh(new THREE.SphereGeometry(.048,28,20),elbM);
     parts.elbowR.castShadow=parts.elbowL.castShadow=true;
     /* head: skull, jaw, hair, topknot; player wears a hachimaki */
     parts.head=new THREE.Group();
@@ -1449,7 +1449,7 @@ class Fighter{
       const faceMat=rimify(stdMat(0xffffff,{map:fTex||null,
         normalMap:skinNrm||null,roughness:.52}),.42,.4,.42,3,.3);
       if(faceMat.normalMap)faceMat.normalScale=new THREE.Vector2(.35,.35);
-      const headGeo=new THREE.SphereGeometry(D.headR,64,46);
+      const headGeo=new THREE.SphereGeometry(D.headR,84,60);
       headGeo.rotateY(-Math.PI/2);            // painted face looks down +Z
       sculptSkull(headGeo,D.headR,
         (palette.face&&palette.face.aged)?1:0); // a skull, not a balloon
@@ -1457,7 +1457,7 @@ class Fighter{
       skull.castShadow=true; skull.scale.set(.94,1.06,1);
       skull.userData.skull=true;
       const hairC=new THREE.Mesh(
-        new THREE.SphereGeometry(D.headR*1.04,34,24,0,Math.PI*2,0,1.6),hairM);
+        new THREE.SphereGeometry(D.headR*1.04,44,30,0,Math.PI*2,0,1.6),hairM);
       hairC.scale.set(.94,1.06,1); hairC.rotation.x=-.5;
       const mage=new THREE.Mesh(new THREE.CylinderGeometry(.015,.02,.09,8),hairM);
       mage.position.set(0,.095,-.02); mage.rotation.x=1.1;
