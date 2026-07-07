@@ -5043,9 +5043,21 @@ function updateLoose(f,dt){
     if(p.bleed>0){ p.bleed-=dt;
       if(Math.random()<dt*22)
         emitBlood(p.mesh.position,V3(rand(-.4,.4),-.6,rand(-.4,.4)),1.2,2); }
-    if(p.mesh.position.y<=.05){ p.mesh.position.y=.05; p.vel=null;
-      addStain(p.mesh.position.x,p.mesh.position.z,.2);
-      addStain(p.mesh.position.x+rand(-.1,.1),p.mesh.position.z+rand(-.1,.1),.1); }
+    if(p.mesh.position.y<=.05){
+      p.mesh.position.y=.05;
+      const hv=Math.hypot(p.vel.x,p.vel.z);
+      if(!p.cloth&&(Math.abs(p.vel.y)>1.1||hv>.7)){
+        /* the piece BOUNCES and ROLLS — a head does not stop dead */
+        p.vel.y=Math.abs(p.vel.y)*.34;
+        p.vel.x*=.74; p.vel.z*=.74;
+        p.ang.multiplyScalar(.82);
+        addStain(p.mesh.position.x,p.mesh.position.z,.14);
+      } else {
+        p.vel=null;
+        addStain(p.mesh.position.x,p.mesh.position.z,.2);
+        addStain(p.mesh.position.x+rand(-.1,.1),p.mesh.position.z+rand(-.1,.1),.1);
+      }
+    }
   }
   if(f._fleshM)for(const m of f._fleshM)
     if(m.color&&f.bloodTint)m.color.lerp(f.bloodTint,dt*.05*(1-(f.bloodFrac||1)));
@@ -7254,6 +7266,10 @@ function updateFatality(dt){
   const v=F.victim, p=player;
   if(!v||v.severed.head||!p.alive||game.state!=='fight'){
     game.fatality=null; p._ritualGrabL=null; p._ritualGrabR=null; return; }
+  /* he died before the first blow landed (bleed-out on his knees):
+     the execution is off — the usual taking of the head applies */
+  if(v.dead&&!F.struck){
+    game.fatality=null; p._ritualGrabL=null; p._ritualGrabR=null; return; }
   F.t+=dt;
   const bare=!!(p.weapon&&p.weapon.blunt);
   if(v.alive)v.begging=true;                  // he stays on his knees
@@ -7304,6 +7320,7 @@ function updateFatality(dt){
       return;
     }
     v.severLimb(F.limb,pt.clone(),dir,log);
+    F.struck=(F.struck||0)+1;
     Sound.cut(9); Sound.grunt&&Sound.grunt(1,v._vp||1);
     game.timeScale=.35; game.slowT=.35; game.shake=Math.max(game.shake||0,.7);
     log(bare?('the '+(F.limb==='armR'?'right':'left')+' arm is RIPPED from its socket')
@@ -7685,6 +7702,15 @@ const REPLAY=(()=>{
     game.state='replay'; game.timeScale=1;
     document.body.classList.add('cine');
     for(const f of roster())if(f.trailMesh)f.trailMesh.visible=false;
+    /* organs, cloth scraps and other pieces spawned mid-fight are NOT on
+       the tape (they are not body parts) — hide them for the replay's
+       duration instead of letting them double-integrate and hang */
+    play.hidden=[];
+    { const rec=new Set(objs);
+      for(const f of roster())if(f.severedPieces)
+        for(const pc of f.severedPieces)
+          if(pc.mesh&&!rec.has(pc.mesh)&&pc.mesh.visible!==false){
+            pc.mesh.visible=false; play.hidden.push(pc.mesh); } }
     /* land on the start of the tape NOW — cloth included, verbatim */
     { let i0=0; while(i0<buf.length-1&&buf[i0].t<play.t0)i0++;
       apply(buf[i0].F,buf[i0].F,0); }
@@ -7699,11 +7725,8 @@ const REPLAY=(()=>{
     const A=buf[Math.min(play.i,buf.length-1)], B=buf[Math.min(play.i+1,buf.length-1)];
     const a=(B.t>A.t)?clamp((rt-A.t)/(B.t-A.t),0,1):1;
     apply(A.F,B.F,a);
-    /* severed pieces keep tumbling; the cloth itself is scripted */
-    const sdt=Math.min(dt,.033);
-    for(const f of roster()){
-      try{ updateLoose(f,sdt); }catch(e){}
-    }
+    /* recorded parts carry the severed limbs; everything else is hidden —
+       nothing is simulated during a replay */
     /* the lens: a slow arc around the exchange */
     const th=play.ph*.34;
     TMP1.copy(play.side).multiplyScalar(Math.cos(th))
@@ -7713,6 +7736,7 @@ const REPLAY=(()=>{
     camera.lookAt(play.mid);
     if(rt>=play.t1){
       const E=buf[buf.length-1]; apply(E.F,E.F,0);  // land on the present, cloth and all
+      if(play.hidden)for(const m of play.hidden)m.visible=true;
       for(const f of roster())if(f.trailMesh)f.trailMesh.visible=true;
       play=null; buf.length=0;
       endDuel();
