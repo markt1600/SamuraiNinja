@@ -2275,7 +2275,9 @@ const WEAPONS={
               effMass:1.7, dmg:1.25, parryWin:1.2, blunt:true, curl:1.9}};
 const SELECT={P:'musashi',E:'musashi',WP:'katana',WE:'katana'};
 function pickdbg(t){
-  try{ const el=document.getElementById('pickdbg'); if(el)el.textContent=t; }catch(e){}
+  /* debug ticker retired from the screen — the picker labels speak for
+     themselves; anything programmatic goes to the console */
+  try{ console.log('[picker] '+t); }catch(e){}
 }
 const WLIST=['katana','broadsword','axe','bare'];
 const PICKER={
@@ -2857,9 +2859,9 @@ const MODELPIPE=(()=>{
       if(obj.animations&&obj.animations.length){
         clips[name]=obj.animations[0];
         clipRigs[name]=obj;                     // its own skeleton = the puppet
-        log('animation ready: '+name+' ('+obj.animations[0].duration.toFixed(1)+'s)',false);
-      } else log('anim file has no animation: '+url,false);
-    },undefined,()=>log('anim missing: '+url,false));
+        console.log('[anim] '+name+' ('+obj.animations[0].duration.toFixed(1)+'s)');
+      } else console.warn('[anim] no animation in '+url);
+    },undefined,()=>console.warn('[anim] missing '+url));
   }
   loadClip('sheath','models/anims/sheath.fbx');
   loadClip('draw','models/anims/draw.fbx');
@@ -4406,7 +4408,8 @@ Fighter.prototype.hangArm=function(side,sh,right,P){
 };
 
 /* ============================== INPUT ================================== */
-const input={keys:{},mx:0,my:0,rmb:false,shift:false};
+const input={keys:{},mx:0,my:0,rmb:false,shift:false,joyX:0,joyY:0,mv:null};
+const CAMF=V3(), CAMR=V3();   // the camera's ground plane: the map you read
 addEventListener('keydown',e=>{ input.keys[e.code]=true;
   if(e.code==='KeyO'){ OUTLINE.on=!OUTLINE.on;
     for(const o of OUTLINE.meshes)o.visible=OUTLINE.on;
@@ -4481,14 +4484,26 @@ function playerIntent(pl,en){
     } else { t.copy(chest).addScaledVector(fwd,.6); t.y=1.3; }
   }
   pl.thrust=input.shift; pl.guarding=input.rmb;
-  /* footwork */
+  /* footwork — SCREEN directions: W is up the screen, A is screen-left.
+     You read the ring, not the hips. */
   const m=pl.mobility, acc=13*m;
   const move=TMP4.set(0,0,0);
-  if(input.keys.KeyW)move.add(fwd); if(input.keys.KeyS)move.sub(fwd);
-  if(input.keys.KeyD)move.add(right); if(input.keys.KeyA)move.sub(right);
-  if(move.lengthSq()>0){ move.normalize(); pl.vel.addScaledVector(move,acc* dt_g); 
+  camera.getWorldDirection(CAMF); CAMF.y=0;
+  if(CAMF.lengthSq()<1e-4)CAMF.copy(fwd); else CAMF.normalize();
+  CAMR.set(-CAMF.z,0,CAMF.x);
+  const ja=Math.hypot(input.joyX||0,input.joyY||0);
+  if(ja>.15){   // analog stick: magnitude carries through
+    move.addScaledVector(CAMF,input.joyY).addScaledVector(CAMR,input.joyX);
+  } else {
+    if(input.keys.KeyW)move.add(CAMF); if(input.keys.KeyS)move.sub(CAMF);
+    if(input.keys.KeyD)move.add(CAMR); if(input.keys.KeyA)move.sub(CAMR);
+  }
+  if(!input.mv)input.mv=V3();
+  if(move.lengthSq()>0){ move.normalize(); input.mv.copy(move);
+    pl.vel.addScaledVector(move,acc* dt_g);
     const vmax=2.6*m; const v2=Math.hypot(pl.vel.x,pl.vel.z);
     if(v2>vmax){ pl.vel.x*=vmax/v2; pl.vel.z*=vmax/v2; } }
+  else input.mv.set(0,0,0);
 }
 
 /* ================================ AI =================================== */
@@ -6935,35 +6950,41 @@ if(IS_TOUCH){
   document.body.classList.add('touch');
   const joy=document.getElementById('joy'),
         nub=document.getElementById('joynub'),
-        zone=document.getElementById('swordzone');
+        bl=document.getElementById('bladestick'),
+        bnub=document.getElementById('bladenub');
   let joyId=null, swId=null;
-  const setKeys=(x,y)=>{           // analog → the same keys combat reads
+  const setKeys=(x,y)=>{           // analog stored; keys kept for anything digital
+    input.joyX=x; input.joyY=y;
     input.keys.KeyW=y>.3;  input.keys.KeyS=y<-.3;
     input.keys.KeyD=x>.3;  input.keys.KeyA=x<-.3;
   };
-  const joyAt=(t)=>{
-    const r=joy.getBoundingClientRect();
+  const stickAt=(el,t)=>{
+    const r=el.getBoundingClientRect();
     let dx=(t.clientX-(r.left+r.width/2))/(r.width/2),
         dy=((r.top+r.height/2)-t.clientY)/(r.height/2);
     const m=Math.hypot(dx,dy); if(m>1){ dx/=m; dy/=m; }
+    return {dx,dy};
+  };
+  const joyAt=(t)=>{
+    const {dx,dy}=stickAt(joy,t);
     nub.style.left=(38+dx*38)+'px'; nub.style.top=(38-dy*38)+'px';
     setKeys(dx,dy);
   };
-  const swordAt=(t)=>{
-    const r=zone.getBoundingClientRect();
-    const nx=((t.clientX-r.left)/r.width)*2-1;          // -1..1 across zone
-    const ny=1-((t.clientY-r.top)/r.height);            // 0 bottom..1 top
-    input.mx=clamp(nx*1.5,-1.3,1.3);
-    input.my=clamp(ny*1.45-.15,-.1,1.25);
+  /* the BLADE stick: the circle IS your sword — push where the edge goes */
+  const bladeAt=(t)=>{
+    const {dx,dy}=stickAt(bl,t);
+    bnub.style.left=(38+dx*38)+'px'; bnub.style.top=(38-dy*38)+'px';
+    input.mx=clamp(dx*1.35,-1.3,1.3);
+    input.my=clamp(dy*1.2,-1.1,1.25);
   };
   joy.addEventListener('touchstart',e=>{ e.preventDefault();
     const t=e.changedTouches[0]; joyId=t.identifier; joyAt(t); },{passive:false});
-  zone.addEventListener('touchstart',e=>{ e.preventDefault();
-    const t=e.changedTouches[0]; swId=t.identifier; swordAt(t); },{passive:false});
+  bl.addEventListener('touchstart',e=>{ e.preventDefault();
+    const t=e.changedTouches[0]; swId=t.identifier; bladeAt(t); },{passive:false});
   addEventListener('touchmove',e=>{
     for(const t of e.changedTouches){
       if(t.identifier===joyId)joyAt(t);
-      else if(t.identifier===swId)swordAt(t);
+      else if(t.identifier===swId)bladeAt(t);
     }
     if(joyId!==null||swId!==null)e.preventDefault();
   },{passive:false});
@@ -6971,7 +6992,8 @@ if(IS_TOUCH){
     for(const t of e.changedTouches){
       if(t.identifier===joyId){ joyId=null;
         nub.style.left='38px'; nub.style.top='38px'; setKeys(0,0); }
-      if(t.identifier===swId)swId=null;   // blade rests where you left it
+      if(t.identifier===swId){ swId=null;   // blade rests where you left it
+        bnub.style.left='38px'; bnub.style.top='38px'; }
     }
   });
   const hold=(id,fn)=>{
@@ -7094,7 +7116,7 @@ function updateBind(dt){
   if(!F.alive||!player.alive||!FA){ game.bind=null; return; }
   const pushDir=TMP1.subVectors(F.pos,player.pos).setY(0).normalize();
   /* player pressure: drive the sword (and your feet) into him */
-  const W=input.keys&&input.keys.KeyW;
+  const W=!!(input.mv&&input.mv.dot(pushDir)>.5);   // walking INTO him
   const pP=clamp(TMP2.subVectors(player.tipTarget,B.pt).dot(pushDir)*1.6,-1,1.6)
     +(W?.45:0);
   /* his pressure: skill, boldness, and how afraid he is */
@@ -7120,7 +7142,7 @@ function updateBind(dt){
     +(player.stamina<30?.5:0)-md.fear*.6);
   if(B.t>.4&&B.fwdE>B.eAt&&distB<1.6&&clinchAction(F,player,log))return;
 
-  const disengage=input.keys&&input.keys.KeyS;
+  const disengage=!!(input.mv&&input.mv.dot(pushDir)<-.5);   // stepping away
   if(B.pr>1){          // you drive through him
     F.stun=Math.max(F.stun,.5); F.stagger=(F.stagger||0)+.6;
     F.tipTarget.addScaledVector(pushDir,-1).setY(.6);
@@ -7448,6 +7470,35 @@ const REPLAY=(()=>{
     buf.push({t,F});
     while(buf.length&&buf[0].t<t-4.6)buf.shift();
   }
+  function clothPts(f,cb){
+    if(f.cloth)for(const P of f.cloth)for(const q of P.pts)cb(q);
+    if(f.sleeves)for(const P of f.sleeves)for(const q of P.pts)cb(q);
+    if(f.hairCloth&&f.hairCloth.pts)for(const q of f.hairCloth.pts)cb(q);
+  }
+  function snapPelvis(){
+    const m=new Map();
+    for(const e of kmap)if(e.f._K&&e.f._K.pelvis)m.set(e.f,e.f._K.pelvis.clone());
+    return m;
+  }
+  const _cd=new THREE.Vector3();
+  function carryCloth(pre){
+    /* time jumped: rigidly carry each fighter's cloth by its pelvis
+       displacement, then settle a few ticks so it drapes the new pose —
+       otherwise the hakama hangs where the body USED to be */
+    for(const e of kmap){
+      const f=e.f;
+      if(!f._K||!f._K.pelvis||!pre.has(f))continue;
+      _cd.subVectors(f._K.pelvis,pre.get(f));
+      clothPts(f,q=>{ q.p.add(_cd); q.pp.add(_cd); });
+      try{
+        for(let i=0;i<3;i++){
+          f.tickCloth&&f.tickCloth(.02,f._K);
+          f.tickSleeves&&f.tickSleeves(.02,f._K);
+          f.tickHair&&f.tickHair(.02);
+        }
+      }catch(err){}
+    }
+  }
   function apply(F0,F1,a){
     let j=0;
     for(const o of objs){
@@ -7483,6 +7534,11 @@ const REPLAY=(()=>{
     game.state='replay'; game.timeScale=1;
     document.body.classList.add('cine');
     for(const f of roster())if(f.trailMesh)f.trailMesh.visible=false;
+    /* land on the start of the tape NOW, carrying the cloth along */
+    { const pre=snapPelvis();
+      let i0=0; while(i0<buf.length-1&&buf[i0].t<play.t0)i0++;
+      apply(buf[i0].F,buf[i0].F,0);
+      carryCloth(pre); }
     log('— the moment, again —',false);
     return true;
   }
@@ -7512,7 +7568,9 @@ const REPLAY=(()=>{
       1.45+Math.sin(play.ph*.8)*.15, play.mid.z+TMP1.z*play.r);
     camera.lookAt(play.mid);
     if(rt>=play.t1){
+      const pre=snapPelvis();
       const E=buf[buf.length-1]; apply(E.F,E.F,0);  // land on the present
+      carryCloth(pre);
       for(const f of roster())if(f.trailMesh)f.trailMesh.visible=true;
       play=null; buf.length=0;
       endDuel();

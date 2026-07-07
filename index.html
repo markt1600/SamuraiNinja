@@ -118,8 +118,15 @@
   #joynub{position:absolute;left:38px;top:38px;width:44px;height:44px;
     border-radius:50%;background:rgba(255,255,255,.16);
     border:1px solid rgba(255,255,255,.3)}
-  #swordzone{position:absolute;right:0;top:0;width:56%;height:100%;
+  #bladestick{position:absolute;right:26px;bottom:30px;width:120px;height:120px;
+    border:1px solid rgba(220,120,110,.35);border-radius:50%;
     pointer-events:auto;touch-action:none}
+  #bladenub{position:absolute;left:38px;top:38px;width:44px;height:44px;
+    border-radius:50%;background:rgba(220,120,110,.2);
+    border:1px solid rgba(230,140,130,.45)}
+  .stick-tag{position:absolute;left:0;right:0;top:124px;text-align:center;
+    font-size:9px;letter-spacing:.28em;color:rgba(255,255,255,.5);
+    pointer-events:none}
   .tbtn{position:absolute;width:74px;height:74px;border-radius:50%;
     border:1px solid rgba(255,255,255,.3);color:rgba(255,255,255,.75);
     background:rgba(20,24,34,.35);font-family:inherit;font-size:11px;
@@ -137,8 +144,8 @@
 <div id="vignette"></div>
 
 <div id="touchui">
-  <div id="joy"><div id="joynub"></div></div>
-  <div id="swordzone"></div>
+  <div id="joy"><div id="joynub"></div><div class="stick-tag">移動 MOVE</div></div>
+  <div id="bladestick"><div id="bladenub"></div><div class="stick-tag">刀 BLADE</div></div>
   <button class="tbtn" id="btn-guard">守<br>GUARD</button>
   <button class="tbtn" id="btn-thrust">突<br>THRUST</button>
 </div>
@@ -177,9 +184,9 @@
     <b>mouse</b><span>your blade has mass — swing hard to cut, slow taps glance off</span>
     <b>edge</b><span>a turning blade lands flat; commit through the line of the cut</span>
     <b>RMB</b><span>guard — raised at the last instant, it becomes a parry</span></div>
-    <div class="ctl"><b>BIND</b><span>when blades lock: press W to drive through, S to break away</span></div>
+    <div class="ctl"><b>BIND</b><span>when blades lock: walk INTO him to press through — or clinch; pull away to break</span></div>
     <div class="ctl"><b>shift</b><span>thrust posture — the point beats armor and ribs</span></div>
-    <div class="ctl"><b>W A S D</b><span>footwork — distance is life</span></div>
+    <div class="ctl"><b>W A S D</b><span>footwork in SCREEN directions — up, left, down, right; distance is life</span></div>
   <div class="rule"></div>
   <div id="select">
     <div class="selrow">
@@ -208,7 +215,7 @@
     </div>
   </div>
   <button class="begin" id="btn-begin">BEGIN</button>
-  <div style="margin-top:12px;font-size:10px;color:var(--dim);letter-spacing:.25em">BUILD V43</div>
+  <div style="margin-top:12px;font-size:10px;color:var(--dim);letter-spacing:.25em">BUILD V44</div>
   <div id="pickdbg" style="margin-top:4px;font-size:10px;color:var(--dim);letter-spacing:.1em"></div>
   <div class="warn">no health bar · anatomy is the health bar · a severed artery ends the duel</div>
 </div>
@@ -230,7 +237,7 @@
 </div>
 
 <script type="importmap">
-{ "imports": { "three": "./vendor/three.module.js?v=v43",
+{ "imports": { "three": "./vendor/three.module.js?v=v44",
                "three/addons/": "./vendor/addons/" } }
 </script>
 <script type="module">
@@ -245,7 +252,7 @@ import * as SkeletonUtils from 'three/addons/utils/SkeletonUtils.js';
    composite); keep r128-era color semantics */
 THREE.ColorManagement.enabled = false;
 window.THREE = Object.assign({}, THREE, { GLTFLoader, FBXLoader, SkeletonUtils });
-for (const src of ['physics.js?v=v43', 'game.js?v=v43'])
+for (const src of ['physics.js?v=v44', 'game.js?v=v44'])
   await new Promise((ok, fail) => {
     const s = document.createElement('script');
     s.src = src; s.onload = ok; s.onerror = fail;
