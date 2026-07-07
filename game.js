@@ -2425,6 +2425,54 @@ const MODELPIPE=(()=>{
       k.getWorldPosition(_da);
       gripLoc[side]=w.worldToLocal(_da.clone());
     }
+    /* the body's TRUE radius per bone, measured from the skinned mesh:
+       wound patches must hug this rig's actual flesh, not a standard
+       anatomy chart — on a slight fighter the chart hovers, on a giant
+       it drowns. Each vertex votes with its dominant bone's nearest
+       CORE ancestor; the trimmed mean of axis distances is the radius. */
+    const boneR={};
+    try{
+      const coreOf=new Map();
+      const acc={};
+      root.traverse(o=>{
+        if(!o.isSkinnedMesh)return;
+        const skel=o.skeleton, geo=o.geometry;
+        const si=geo.attributes.skinIndex, sw=geo.attributes.skinWeight;
+        const pos=geo.attributes.position;
+        if(!si||!sw||!pos)return;
+        /* map every skeleton bone to its nearest CORE ancestor */
+        const idx2core=skel.bones.map(bn=>{
+          if(coreOf.has(bn))return coreOf.get(bn);
+          let p=bn,found=null;
+          while(p&&!found){ for(const n of CORE)if(bones[n]===p){ found=n; break; }
+            p=p.parent; }
+          coreOf.set(bn,found); return found; });
+        o.updateMatrixWorld(true);
+        const stride=Math.max(1,Math.floor(pos.count/9000));
+        for(let v=0;v<pos.count;v+=stride){
+          let bw=-1,bi=0;
+          const xs=[si.getX(v),si.getY(v),si.getZ(v),si.getW(v)];
+          const ws=[sw.getX(v),sw.getY(v),sw.getZ(v),sw.getW(v)];
+          for(let k=0;k<4;k++)if(ws[k]>bw){ bw=ws[k]; bi=xs[k]; }
+          const cn=idx2core[bi]; if(!cn)continue;
+          const cb=bones[cn];
+          _da.fromBufferAttribute(pos,v);
+          if(o.applyBoneTransform)o.applyBoneTransform(v,_da);
+          _da.applyMatrix4(o.matrixWorld);
+          cb.getWorldPosition(_db);
+          _da.sub(_db);
+          cb.getWorldQuaternion(_qs);
+          _db.set(0,1,0).applyQuaternion(_qs);
+          _da.addScaledVector(_db,-_da.dot(_db));
+          const r2=_da.length();
+          (acc[cn]=acc[cn]||[]).push(r2);
+        }
+      });
+      for(const n in acc){
+        const arr=acc[n].sort((x,y)=>x-y);
+        boneR[n]=arr[Math.floor(arr.length*.7)];   // 70th percentile: the flesh
+      }
+    }catch(e){}
     /* facing calibration: forward derived from the leg bones (F = R×U,
        so F.z = right.x) must agree with the file's own +Z facing — a
        mirror-labeled rig would otherwise lock in 180° backwards */
@@ -2443,7 +2491,7 @@ const MODELPIPE=(()=>{
         const l1=_da.distanceTo(_db); H.getWorldPosition(_da);
         armL[s2]=[l1,_db.distanceTo(_da)]; }
     }
-    return {root,bones,aim,hLen,fSign,gripLoc,armL,scale:s,worldQ:{},anims};
+    return {root,bones,aim,hLen,fSign,gripLoc,armL,boneR,scale:s,worldQ:{},anims};
   }
   /* ---- locomotion: the model's own mocap breathes under the sim ----
      Idle/Walk/Run clips (bundled Xbot/Soldier ship them) crossfade by
@@ -4618,12 +4666,17 @@ function bladeVsBlade(a,b){
       if(now-(game._lastParry||0)<450)return false;
       game._lastParry=now;
       def.parries++;
+      /* the parry obeys the attacker's momentum: a heavy axe rebounds
+         less and drives the defender's arm back through the block */
+      const mAtt=Math.sqrt((att.weapon&&att.weapon.effMass)||1);
       att.stun=Math.max(att.stun,.6); att.pain=Math.min(100,att.pain+8);
-      att.tipVel.multiplyScalar(-.32);
+      att.tipVel.multiplyScalar(-.42/mAtt);
       TMP3.subVectors(att.tip,def.tip).normalize();
       att.tipTarget.copy(att.tip).addScaledVector(TMP3,1.1).setY(Math.max(.6,att.tip.y-.3));
-      att.softHit('shR',TMP3,2.0); att.softHit('chestT',TMP3,1.2);
-      att.stagger=(att.stagger||0)+.55;
+      att.softHit('shR',TMP3,2.0/mAtt); att.softHit('chestT',TMP3,1.2/mAtt);
+      def.softHit('shR',TMP4.copy(TMP3).negate(),.9*mAtt);
+      def.stamina=Math.max(0,def.stamina-6*mAtt);
+      att.stagger=(att.stagger||0)+.6/mAtt;
       if(att===enemy&&typeof enemyAI!=='undefined'){ enemyAI.state='recover'; enemyAI.t=1.0; enemyAI.plan=null; att.telegraph=false; }
       Sound.parry(); sparks(hitTmpA,14);
       game.timeScale=.4; game.slowT=.28;
@@ -4633,18 +4686,83 @@ function bladeVsBlade(a,b){
     };
     if(tryParry(a,b)||tryParry(b,a))return;
     if(rel<1.5)return;                     // resting contact: no clang, no deflect
-    const hard=rel>7;
-    Sound.clang(hard);
-    sparks(hitTmpA,Math.floor(clamp(rel,3,12)));
-    /* the faster blade is deflected by the steadier one; guards deflect harder */
-    const deflect=(f,other,factor)=>{
-      TMP2.subVectors(f.tip,hitTmpA).normalize();
-      f.tipVel.multiplyScalar(factor).addScaledVector(TMP2,rel*.35);
-      f.stamina=Math.max(0,f.stamina-rel*.8);
-    };
-    deflect(a,b,b.guarding?.15:.4);
-    deflect(b,a,a.guarding?.15:.4);
-    if(hard){ a.stun=Math.max(a.stun,.08); b.stun=Math.max(b.stun,.08); }
+    /* MOMENTUM-TRUE CLASH: each blade carries p = effMass x velocity at
+       the CONTACT POINT (steel pivots at the hands, so a tip strike
+       carries full speed while a forte contact carries a fraction, and
+       is proportionally harder to move). The impulse is exchanged along
+       the contact normal with restitution: the axe plows through a
+       katana's deflection, the light blade rebounds. */
+    const mA=(a.weapon&&a.weapon.effMass)||1, mB=(b.weapon&&b.weapon.effMass)||1;
+    const lA=(a.weapon&&a.weapon.len)||.93, lB=(b.weapon&&b.weapon.len)||.93;
+    const levA=lerp(.2,1,clamp(hitTmpA.distanceTo(a.bladeA)/lA,0,1));
+    const levB=lerp(.2,1,clamp(hitTmpB.distanceTo(b.bladeA)/lB,0,1));
+    TMP2.subVectors(hitTmpA,hitTmpB);                 // contact normal, B->A
+    if(TMP2.lengthSq()<1e-8)TMP2.copy(a.tipVel).sub(b.tipVel);
+    if(TMP2.lengthSq()<1e-8)TMP2.set(0,1,0);
+    TMP2.normalize();
+    TMP3.copy(a.tipVel).multiplyScalar(levA)
+        .addScaledVector(TMP4.copy(b.tipVel).multiplyScalar(levB),-1);
+    const vRel=TMP3.dot(TMP2);                        // closing speed at contact
+    if(vRel<0){
+      const meA=mA/levA, meB=mB/levB;                 // forte contact = massier
+      const e=.35+((a.guarding||b.guarding)?.2:0);    // a set guard is springier
+      const Jm=-(1+e)*vRel/(1/meA+1/meB);
+      a.tipVel.addScaledVector(TMP2, Jm/meA*levA);
+      b.tipVel.addScaledVector(TMP2,-Jm/meB*levB);
+      /* the bodies feel the exchange in proportion to the impulse */
+      const shove=clamp(Jm*.16,0,2.6);
+      TMP3.copy(TMP2);
+      a.softHit('shR',TMP3,shove*.7); a.softHit('chestT',TMP3,shove*.35);
+      TMP3.negate();
+      b.softHit('shR',TMP3,shove*.7); b.softHit('chestT',TMP3,shove*.35);
+      a.stamina=Math.max(0,a.stamina-Jm*.55);
+      b.stamina=Math.max(0,b.stamina-Jm*.55);
+      const hard=Jm>5.2;
+      Sound.clang(hard);
+      sparks(hitTmpA,Math.floor(clamp(Jm*1.5,3,14)));
+      if(hard){ /* momentum decides who staggers, not symmetry */
+        const pA=mA*a.tipVel.length(), pB=mB*b.tipVel.length();
+        const w=pA>pB?b:a;
+        w.stun=Math.max(w.stun,clamp(Jm*.02,.06,.25));
+        w.stagger=(w.stagger||0)+clamp(Jm*.035,0,.45);
+      }
+    } else { Sound.clang(false); sparks(hitTmpA,3); }
+
+  }
+}
+
+/* LIMB vs LIMB: two living fighters' arms cannot share the same air.
+   Capsule pairs are tested each frame and overlaps resolved through the
+   soft layer (with a physics nudge on deep contact), so a clinch
+   presses flesh aside instead of ghosting through it. */
+const _lcA=V3(), _lcB=V3(), _lcN=V3(), _lcN2=V3();
+const LIMB_VS=['forearmR','forearmL','upperArmR','upperArmL'];
+const LIMB_TGT=['forearmR','forearmL','upperArmR','upperArmL',
+  'chest','abdomen','head'];
+function limbContacts(a,b,dt){
+  if(!a.alive||!b.alive||!a.capsules||!b.capsules)return;
+  for(const ka of LIMB_VS){
+    if(a.severed['arm'+(ka.endsWith('R')?'R':'L')])continue;
+    const ca=a.capsules[ka]; if(!ca)continue;
+    for(const kb of LIMB_TGT){
+      if(/[aA]rm/.test(kb)&&b.severed['arm'+(kb.endsWith('R')?'R':'L')])continue;
+      const cb=b.capsules[kb]; if(!cb)continue;
+      const d=segSegClosest(ca.a,ca.b,cb.a,cb.b,_lcA,_lcB);
+      const need=ca.r+cb.r;
+      if(d<need&&d>1e-5){
+        const ov=need-d;
+        _lcN.subVectors(_lcA,_lcB).normalize();
+        _lcN2.copy(_lcN).negate();
+        const k=clamp(ov*30,0,1.6)*clamp(dt*60,0,1.5);
+        a.softHit(SOFTMAP[ka]||'shR',_lcN,k);
+        b.softHit(SOFTMAP[kb]||'chestT',_lcN2,k);
+        if(ov>.035){
+          a.physImpulse&&a.physImpulse(ka,_lcN,ov*30*dt);
+          b.physImpulse&&b.physImpulse(kb,_lcN2,ov*30*dt);
+        }
+        game._limbContacts=(game._limbContacts||0)+1;
+      }
+    }
   }
 }
 
@@ -5288,7 +5406,24 @@ Fighter.prototype._mountWoundPatch=function(partKey,worldPt,w,h,mat,hitDir){
     axis=new THREE.Vector3(0,1,0)
       .applyQuaternion(anchor.getWorldQuaternion(new THREE.Quaternion()));
   }
-  const r=((this.capsules&&this.capsules[partKey]&&this.capsules[partKey].r)||.09)+.012;
+  /* radius of the ACTUAL body here: a model uses its measured per-bone
+     flesh radius; a procedural build scales the anatomy chart by its
+     own proportion knobs */
+  let r;
+  if(this.model&&this.model.boneR){
+    const bn=MODELSEV.PART2BONE[partKey]||'Spine1';
+    r=this.model.boneR[bn];
+  }
+  if(!r){
+    const bs=this.build||{};
+    const mul=/upperArm|forearm/.test(partKey)?(bs.armR||bs.limb||1)
+      :/thigh|shin/.test(partKey)?(bs.legR||bs.limb||1)
+      :/chest/.test(partKey)?(bs.chest||bs.sh||1)*.9
+      :/abdomen|pelvis/.test(partKey)?(bs.waist||1)*.85:1;
+    r=((this.capsules&&this.capsules[partKey]&&this.capsules[partKey].r)||.09)
+      *clamp(mul,.6,2.6);
+  }
+  r=r+.012;
   const arc=clamp(w/r,.7,3.4);
   const m=new THREE.Mesh(
     new THREE.CylinderGeometry(r,r,h,12,1,true,-arc/2,arc),mat);
@@ -7063,6 +7198,7 @@ function frame(now){
 
     if(game.state==='fight'){
       bladeVsBlade(player,enemy);
+      limbContacts(player,enemy,dt);   // arms cannot share the same air
       bladeVsBody(player,enemy,log);
       bladeVsBody(enemy,player,log);
       if(player.dead||enemy.dead)endDuel();
