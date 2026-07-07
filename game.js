@@ -931,13 +931,13 @@ const DEAD_AT=.48;
 /* tapered limb: joint sphere at the pivot, shaft, condyle at the far end */
 function limbMesh(len,rTop,rBot,mat){
   const g=new THREE.Group();
-  const cyl=new THREE.Mesh(new THREE.CylinderGeometry(rTop,rBot,len,26),mat);
+  const cyl=new THREE.Mesh(new THREE.CylinderGeometry(rTop,rBot,len,42),mat);
   cyl.position.y=-len/2; cyl.castShadow=true; cyl.userData.shaft=true;
   /* generous joint spheres: bent limbs stay CONNECTED, no daylight at
      the elbow or knee */
-  const j=new THREE.Mesh(new THREE.SphereGeometry(rTop*1.14,20,14),mat); j.castShadow=true;
+  const j=new THREE.Mesh(new THREE.SphereGeometry(rTop*1.14,30,22),mat); j.castShadow=true;
   j.userData.joint=true;
-  const e=new THREE.Mesh(new THREE.SphereGeometry(rBot*1.04,20,14),mat); e.position.y=-len; e.castShadow=true;
+  const e=new THREE.Mesh(new THREE.SphereGeometry(rBot*1.04,30,22),mat); e.position.y=-len; e.castShadow=true;
   e.userData.end=true;
   g.add(cyl,j,e); g.userData.len=len; g.userData.r=Math.max(rTop,rBot);
   return g;
@@ -1011,7 +1011,7 @@ function buildSkinnedBody(kimonoMat,hakamaMat,B,skinMat){
     b.position.fromArray(bindPos[k]); root.add(b); bones.push(b); }
 
   const pos=[],nrm=[],sIdx=[],sWgt=[],uvs=[],idx=[],groups=[];
-  const SEG=36;
+  const SEG=60;
   let ringStart=0, vBase=0;
   /* a vertical tube in bind pose; rings: {c:[x,y,z],r,sz,skin:[b0,w0,b1,w1]} */
   function tube(rings,matIndex){
@@ -1075,7 +1075,9 @@ function buildSkinnedBody(kimonoMat,hakamaMat,B,skinMat){
       const cS=sm(1.08,1.3,y)*(1-sm(1.3,1.42,y));     // ribcage/chest barrel
       return 1+(B.waist-1)*wS+(B.sh-1)*sS+(B.hip-1)*hS+((B.chest||1)-1)*cS;
     };
-    const rings=prof.map(([y,r0,szz])=>{
+    const dens=P=>{ const o=[]; for(let i2=0;i2<P.length-1;i2++){ o.push(P[i2]);
+      o.push(P[i2].map((v,j2)=>(v+P[i2+1][j2])/2)); } o.push(P[P.length-1]); return o; };
+    const rings=dens(dens(prof)).map(([y,r0,szz])=>{
       const r=r0*shape(y);
       let skin;
       /* WIDE blend bands: twist spreads over the whole trunk instead of
@@ -1096,8 +1098,8 @@ function buildSkinnedBody(kimonoMat,hakamaMat,B,skinMat){
     const UA=side>0?BONES.uaR:BONES.uaL, Ch=BONES.chest;
     const x=.185*side, top=1.335, bot=1.045;
     const rings=[];
-    for(let i=0;i<=12;i++){
-      const t=i/12, y=lerp(top,bot,t);
+    for(let i=0;i<=26;i++){
+      const t=i/26, y=lerp(top,bot,t);
       const deltoid=.021*minJerkBell(clamp(t/.5,0,1));  // shoulder muscle
       /* slimmer rigid flare: the CLOTH sleeve carries the silhouette */
       const r=(lerp(.056,.07,Math.pow(t,1.35))+deltoid)*(B.armR||1);
@@ -1121,7 +1123,9 @@ function buildSkinnedBody(kimonoMat,hakamaMat,B,skinMat){
       [.88,.115],[.825,.121],[.77,.126],[.715,.131],[.66,.135],[.605,.138],
       [.55,.140],[.495,.141],[.44,.142],[.385,.136],[.33,.128],[.275,.116],
       [.22,.104],[.165,.090],[.13,.078],[.09,.068],[.05,.058]];
-    const rings=prof.map(([y,r])=>{
+    const dens2=P=>{ const o=[]; for(let i2=0;i2<P.length-1;i2++){ o.push(P[i2]);
+      o.push([(P[i2][0]+P[i2+1][0])/2,(P[i2][1]+P[i2+1][1])/2]); } o.push(P[P.length-1]); return o; };
+    const rings=dens2(dens2(prof)).map(([y,r])=>{
       let skin;
       if(y>.52)skin=[TH,1,SH,0];
       else if(y>.36)skin=blend(y,.52,.36,TH,SH);
@@ -1435,8 +1439,8 @@ class Fighter{
     }
     /* elbow joints: the arm bends AROUND something */
     const elbM=this.build.bare?skin:kimono;
-    parts.elbowR=new THREE.Mesh(new THREE.SphereGeometry(.048,14,10),elbM);
-    parts.elbowL=new THREE.Mesh(new THREE.SphereGeometry(.048,14,10),elbM);
+    parts.elbowR=new THREE.Mesh(new THREE.SphereGeometry(.048,22,16),elbM);
+    parts.elbowL=new THREE.Mesh(new THREE.SphereGeometry(.048,22,16),elbM);
     parts.elbowR.castShadow=parts.elbowL.castShadow=true;
     /* head: skull, jaw, hair, topknot; player wears a hachimaki */
     parts.head=new THREE.Group();
@@ -1445,7 +1449,7 @@ class Fighter{
       const faceMat=rimify(stdMat(0xffffff,{map:fTex||null,
         normalMap:skinNrm||null,roughness:.52}),.42,.4,.42,3,.3);
       if(faceMat.normalMap)faceMat.normalScale=new THREE.Vector2(.35,.35);
-      const headGeo=new THREE.SphereGeometry(D.headR,40,30);
+      const headGeo=new THREE.SphereGeometry(D.headR,64,46);
       headGeo.rotateY(-Math.PI/2);            // painted face looks down +Z
       sculptSkull(headGeo,D.headR,
         (palette.face&&palette.face.aged)?1:0); // a skull, not a balloon
@@ -1453,7 +1457,7 @@ class Fighter{
       skull.castShadow=true; skull.scale.set(.94,1.06,1);
       skull.userData.skull=true;
       const hairC=new THREE.Mesh(
-        new THREE.SphereGeometry(D.headR*1.04,22,16,0,Math.PI*2,0,1.6),hairM);
+        new THREE.SphereGeometry(D.headR*1.04,34,24,0,Math.PI*2,0,1.6),hairM);
       hairC.scale.set(.94,1.06,1); hairC.rotation.x=-.5;
       const mage=new THREE.Mesh(new THREE.CylinderGeometry(.015,.02,.09,8),hairM);
       mage.position.set(0,.095,-.02); mage.rotation.x=1.1;
@@ -2201,7 +2205,8 @@ const PICKER={
     /* the REAL meshes in the roster: loaded rigs riding the sim, with
        full severance, decals, and the head-taking ritual */
     {label:'⚔ PELEGRINI — knight',src:'models/knight.fbx'},
-    {label:'月 ARISSA — moonblade',src:'models/arissa.fbx'}],
+    {label:'月 ARISSA — moonblade',src:'models/arissa.fbx'},
+    {label:'燕 TSUBAME — the swift',src:'models/ch46.fbx'}],
   cycle(slot,dir){
     this.idx[slot]=(this.idx[slot]+dir+this.roster.length)%this.roster.length;
     this.apply(slot);
@@ -3637,6 +3642,20 @@ Fighter.prototype.updateAlive=function(dt,opponent){
       this.pos.addScaledVector(TMP1,(minSep-sep)*.6);
       const vn=this.vel.dot(TMP1);
       if(vn<0)this.vel.addScaledVector(TMP1,-vn*.9);
+    }
+  } else if(opponent.dead&&this.pos.distanceTo(opponent.pos)<.55){
+    /* the dead are not scenery: wading through a corpse shoves it,
+       its limbs jostle, and the walker feels the drag */
+    const sp2b=Math.hypot(this.vel.x,this.vel.z);
+    if(sp2b>.3){
+      TMP1.subVectors(opponent.pos,this.pos).setY(0);
+      if(TMP1.lengthSq()>1e-6){
+        TMP1.normalize();
+        opponent.wakeCorpse&&opponent.wakeCorpse();
+        opponent.physImpulse&&opponent.physImpulse(
+          Math.random()<.5?'pelvis':'chest',TMP1,sp2b*40*dt);
+        this.vel.multiplyScalar(Math.pow(.25,dt));   // flesh drags the boot
+      }
     }
   }
   { const rr=Math.hypot(this.pos.x,this.pos.z);
@@ -5250,13 +5269,53 @@ const splatTex=canTex(128,128,(x,w,h)=>{
     x.arc(w*.5+Math.cos(a)*r,h*.5+Math.sin(a)*r,1.5+Math.random()*3.5,0,6.283);
     x.fill(); }
 });
+/* a wound decal that HUGS the body: an open cylinder patch bent to the
+   part's capsule radius with its axis along the limb, so gashes and
+   bruises wrap the curve instead of floating as flat cards — on the
+   procedural tubes AND on loaded models (mounted to the bone) */
+Fighter.prototype._mountWoundPatch=function(partKey,worldPt,w,h,mat,hitDir){
+  let anchor,axis;
+  if(this.model&&typeof MODELSEV!=='undefined'){
+    anchor=MODELPIPE.findBone(this.model.root,
+      MODELSEV.PART2BONE[partKey]||'Spine1');
+    if(!anchor)return null;
+    anchor.updateMatrixWorld(true);
+    axis=new THREE.Vector3(0,1,0)
+      .applyQuaternion(anchor.getWorldQuaternion(new THREE.Quaternion()));
+  }else{
+    anchor=this.parts[partKey]; if(!anchor)return null;
+    anchor.updateMatrixWorld(true);
+    axis=new THREE.Vector3(0,1,0)
+      .applyQuaternion(anchor.getWorldQuaternion(new THREE.Quaternion()));
+  }
+  const r=((this.capsules&&this.capsules[partKey]&&this.capsules[partKey].r)||.09)+.012;
+  const arc=clamp(w/r,.7,3.4);
+  const m=new THREE.Mesh(
+    new THREE.CylinderGeometry(r,r,h,12,1,true,-arc/2,arc),mat);
+  m.renderOrder=4;
+  anchor.getWorldPosition(TMP1);
+  TMP2.subVectors(worldPt,TMP1);
+  const along=TMP2.dot(axis);
+  TMP3.copy(TMP2).addScaledVector(axis,-along);      // radial: arc faces here
+  if(TMP3.lengthSq()<1e-6){
+    TMP3.copy(hitDir||TMP3.set(0,0,1)).negate()
+      .addScaledVector(axis,-TMP3.dot(axis));
+    if(TMP3.lengthSq()<1e-6)TMP3.set(0,0,1);
+  }
+  TMP3.normalize();
+  TMP4.crossVectors(axis,TMP3);                      // X = Y×Z
+  const mx=new THREE.Matrix4().makeBasis(TMP4,axis,TMP3);
+  m.quaternion.setFromRotationMatrix(mx);
+  m.position.copy(TMP1).addScaledVector(axis,along); // centered ON the bone
+  scene.add(m); anchor.attach(m);
+  return m;
+};
 Fighter.prototype.addHitMark=function(partKey,worldPt,hitDir,severity,blunt){
   this._marks=(this._marks||0);
   if(this._marks>=32)return;
-  const part=this.parts[partKey]; if(!part)return;
   this._marks++;
   try{
-    const onCloth=!this.build.bare&&CLOTHED.test(partKey);
+    const onCloth=!this.build.bare&&CLOTHED.test(partKey)&&!this.model;
     const size=(severity==='mortal'?.46:severity==='severe'?.34:.24);
     const tex=blunt?bruiseTex:(onCloth?splatTex:brightGashTex);
     const mat=new THREE.MeshBasicMaterial({
@@ -5264,54 +5323,20 @@ Fighter.prototype.addHitMark=function(partKey,worldPt,hitDir,severity,blunt){
       color:blunt?0xb03048:0xffffff,
       opacity:blunt?.85:1,
       polygonOffset:true,polygonOffsetFactor:-5});
-    const m=new THREE.Mesh(
-      new THREE.PlaneGeometry(size,blunt?size*.85:(onCloth?size:size*.45)),mat);
-    m.renderOrder=4;
-    if(this.model&&typeof MODELSEV!=='undefined'){
-      /* a LOADED model wears its wounds on the bone */
-      const b=MODELPIPE.findBone(this.model.root,
-        MODELSEV.PART2BONE[partKey]||'Spine1');
-      if(!b)return;
-      /* face the mark against the blow, or radially off the bone */
-      if(hitDir&&hitDir.lengthSq()>1e-6){
-        TMP2.copy(hitDir).negate().normalize();
-      }else{
-        b.getWorldPosition(TMP1);
-        TMP2.subVectors(worldPt,TMP1); TMP2.y*=.3;
-        if(TMP2.lengthSq()<1e-6)TMP2.set(0,0,1); TMP2.normalize();
-      }
-      if(blunt)m.scale.setScalar(.7);   // a fist marks less area than steel
-      m.position.copy(worldPt).addScaledVector(TMP2,.015);
-      m.lookAt(TMP1.copy(m.position).addScaledVector(TMP2,1));
-      if(!blunt&&hitDir)
-        m.rotation.z=-Math.atan2(hitDir.y,
-          Math.hypot(hitDir.x,hitDir.z)+.001)*1.1+rand(-.25,.25);
-      scene.add(m); b.attach(m);
-      return;
-    }
-    part.updateMatrixWorld(true);
-    m.position.copy(part.worldToLocal(worldPt.clone())).multiplyScalar(1.08);
-    m.lookAt(m.position.clone().multiplyScalar(3));
-    /* the stripe follows the cut's line */
-    if(!blunt&&hitDir)
-      m.rotation.z=-Math.atan2(hitDir.y,
-        Math.hypot(hitDir.x,hitDir.z)+.001)*1.1+rand(-.25,.25);
-    else m.rotation.z=Math.random()*Math.PI;
-    part.add(m);
+    /* a mostly-vertical cut wraps tall and narrow; a sweep wraps wide */
+    const vert=!blunt&&hitDir&&Math.abs(hitDir.y)>Math.hypot(hitDir.x,hitDir.z)*.8;
+    const w=blunt?size*.7:(vert?size*.45:size);
+    const h=blunt?size*.6:(vert?size:size*.4);
+    this._mountWoundPatch(partKey,worldPt,w,h,mat,hitDir);
     /* the exit spray: satellites thrown ALONG the cut's travel */
     if(!blunt&&hitDir&&severity!=='minor'){
       for(let k=1;k<=2;k++){
-        const s2=new THREE.Mesh(new THREE.PlaneGeometry(size*.4,size*.4),
-          new THREE.MeshBasicMaterial({map:splatTex||null,transparent:true,
-            depthWrite:false,polygonOffset:true,polygonOffsetFactor:-5,
-            opacity:.9}));
+        const smat=new THREE.MeshBasicMaterial({map:splatTex||null,
+          transparent:true,depthWrite:false,polygonOffset:true,
+          polygonOffsetFactor:-5,opacity:.9});
         const wp=worldPt.clone().addScaledVector(hitDir,.1*k)
           .add(V3(rand(-.03,.03),rand(-.03,.03),rand(-.03,.03)));
-        s2.position.copy(part.worldToLocal(wp)).multiplyScalar(1.08);
-        s2.lookAt(s2.position.clone().multiplyScalar(3));
-        s2.rotation.z=Math.random()*Math.PI;
-        s2.renderOrder=4;
-        part.add(s2);
+        this._mountWoundPatch(partKey,wp,size*.4,size*.35,smat,hitDir);
       }
     }
   }catch(e){}
