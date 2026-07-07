@@ -6784,7 +6784,7 @@ function setup(){
   buildDiagram(document.getElementById('diagram-player'));
   buildDiagram(document.getElementById('diagram-enemy'));
   REPLAY.reset();
-  game.fatality=null;
+  game.fatality=null; game._fatalMark=null; game._fatalDone=null;
   game._verdictPend=null; game._verdictShown=false; game._lastVictor=null;
   ritualL.intensity=0; ritualAmb.intensity=0;
   applyAmbience(game.stage);    // a new night for a new opponent
@@ -7338,10 +7338,12 @@ function updateFatality(dt){
       log(bare?'the head is TORN from the shoulders':'one blow — the head leaves the body',true);
       game.timeScale=.25; game.slowT=.6; game.shake=Math.max(game.shake||0,1);
       game.adrenaline=Math.max(game.adrenaline||0,1);
+      game._fatalDone=performance.now();   // let the head fly LIVE first
       game.fatality=null; p._ritualGrabL=null; p._ritualGrabR=null;
       return;
     }
     v.severLimb(F.limb,pt.clone(),dir,log);
+    if(!F.struck)game._fatalMark=REPLAY.mark();   // the tape opens here
     F.struck=(F.struck||0)+1;
     Sound.cut(9); Sound.grunt&&Sound.grunt(1,v._vp||1);
     game.timeScale=.35; game.slowT=.35; game.shake=Math.max(game.shake||0,.7);
@@ -7684,7 +7686,7 @@ const REPLAY=(()=>{
         F[j++]=q.p.x; F[j++]=q.p.y; F[j++]=q.p.z; }
     }
     buf.push({t,F});
-    while(buf.length&&buf[0].t<t-4.6)buf.shift();
+    while(buf.length&&buf[0].t<t-8.2)buf.shift();
   }
   function apply(F0,F1,a){
     let j=0;
@@ -7726,7 +7728,13 @@ const REPLAY=(()=>{
     /* one closing frame so the replay ends exactly on the present */
     record(.0001); used=true;
     const t1=buf[buf.length-1].t;
-    play={t0:Math.max(buf[0].t,t1-2.9),t1,ph:0,i:0,victor,victim};
+    /* a fatality replay opens just before the FIRST chop, so the whole
+       execution — both arms and the head — plays back */
+    const span=(game._fatalMark!=null)
+      ?clamp(t1-(game._fatalMark-.7),2.9,7.5):2.9;
+    play={t0:Math.max(buf[0].t,t1-span),t1,ph:0,i:0,victor,victim};
+    play.rate=Math.max(.42,(t1-play.t0)/7);   // long tapes play a touch faster
+    game._fatalMark=null; game._fatalDone=null;
     const a=(victor&&victor.pos)||player.pos, b=(victim&&victim.pos)||enemy.pos;
     play.mid=a.clone().add(b).multiplyScalar(.5); play.mid.y=1.05;
     const ax=TMP1.subVectors(b,a).setY(0);
@@ -7755,7 +7763,7 @@ const REPLAY=(()=>{
   }
   function tick(dt){
     if(!play)return;
-    play.ph+=dt*.42;                              // slow: savour it
+    play.ph+=dt*(play.rate||.42);                 // slow: savour it
     const rt=play.t0+play.ph;
     while(play.i<buf.length-1&&buf[play.i+1].t<rt)play.i++;
     const A=buf[Math.min(play.i,buf.length-1)], B=buf[Math.min(play.i+1,buf.length-1)];
@@ -7819,9 +7827,11 @@ const REPLAY=(()=>{
       endDuel();
     }
   }
-  return {record,arm,tick,reset,
+  return {record,arm,tick,reset,mark(){return t;},
     dbg(){ const C=collect();
       return { buf:buf.length, playing:!!play, resets,
+      span:play?+(play.t1-play.t0).toFixed(2):null,
+      rate:play?+(play.rate||.42).toFixed(2):null,
       curSig:C.L.length+'/'+C.K.map(e=>e.keys.length+':'+e.np).join(','),
       oldSig:objs?objs._sig:null,
       objs:objs?objs.length:0,
@@ -8002,9 +8012,15 @@ function frame(now){
       }
       const allDead=enemy.dead&&(!enemy2||enemy2.dead);
       if((player.dead||allDead)&&!game.fatality){
-        const victim=player.dead?player:(game._lastKilled||enemy);
-        const victor=player.dead?livingFoe():player;
-        if(!REPLAY.arm(victor,victim))endDuel();
+        /* after a fatality the moment plays out LIVE — the head flies,
+           the body drops — before time walks back */
+        if(game._fatalDone&&performance.now()-game._fatalDone<2400){
+          /* recording continues; the breather goes on the tape too */
+        } else {
+          const victim=player.dead?player:(game._lastKilled||enemy);
+          const victor=player.dead?livingFoe():player;
+          if(!REPLAY.arm(victor,victim))endDuel();
+        }
       }
     }
   }
