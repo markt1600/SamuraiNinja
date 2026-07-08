@@ -1844,7 +1844,6 @@ class Fighter{
     parts.forearmL=limbMesh(D.foreArm,.058*LB,.04*LB,foreMat);
     /* a HAND: palm, four curled fingers, an opposed thumb.
        pose 'grip' wraps a handle along local +Y; 'fist' closes fully. */
-    const nailM=stdMat(0xd8c5b2,{roughness:.45});
     const mkHand=(pose,mirror)=>{
       const g=new THREE.Group();
       const inner=new THREE.Group();
@@ -1873,9 +1872,6 @@ class Fighter{
         j2.position.y=.036; j2.rotation.x=curl*m2;
         const seg2=new THREE.Mesh(new THREE.CapsuleGeometry(.0056,.02,3,10),skin);
         seg2.position.y=.015; j2.add(seg2); j1.add(j2);
-        const nail=new THREE.Mesh(new THREE.SphereGeometry(.0042,8,6),nailM);
-        nail.scale.set(1,.95,.45); nail.position.set(0,.023,-.0048);
-        seg2.add(nail);
         g.add(j1);
         g.userData.joints.push({j1,j2,ph:i*.7});
       }
@@ -1886,8 +1882,6 @@ class Fighter{
       th1.position.y=.017; tj.add(th1);
       const th2=new THREE.Mesh(new THREE.CapsuleGeometry(.0064,.016,3,10),skin);
       th2.position.y=.045; th2.rotation.x=pose==='fist'?1.15:.6; tj.add(th2);
-      const tn=new THREE.Mesh(new THREE.SphereGeometry(.0046,8,6),nailM);
-      tn.scale.set(1,.95,.45); tn.position.set(0,.02,-.0052); th2.add(tn);
       gAdd(tj);
       g.traverse(o=>{ if(o.isMesh)o.castShadow=true; });
       return g;
