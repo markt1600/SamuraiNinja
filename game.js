@@ -1041,7 +1041,7 @@ const DEAD_AT=.48;
 /* tapered limb: joint sphere at the pivot, shaft, condyle at the far end */
 function limbMesh(len,rTop,rBot,mat){
   const g=new THREE.Group();
-  const cyl=new THREE.Mesh(new THREE.CylinderGeometry(rTop,rBot,len,56),mat);
+  const cyl=new THREE.Mesh(new THREE.CylinderGeometry(rTop,rBot,len,68),mat);
   cyl.position.y=-len/2; cyl.castShadow=true; cyl.userData.shaft=true;
   /* generous joint spheres: bent limbs stay CONNECTED, no daylight at
      the elbow or knee */
@@ -1121,7 +1121,7 @@ function buildSkinnedBody(kimonoMat,hakamaMat,B,skinMat){
     b.position.fromArray(bindPos[k]); root.add(b); bones.push(b); }
 
   const pos=[],nrm=[],sIdx=[],sWgt=[],uvs=[],idx=[],groups=[];
-  const SEG=88;
+  const SEG=108;
   let ringStart=0, vBase=0;
   /* a vertical tube in bind pose; rings: {c:[x,y,z],r,sz,skin:[b0,w0,b1,w1]} */
   function tube(rings,matIndex){
@@ -1466,8 +1466,8 @@ class Fighter{
       normalMap:kimonoNrm||null}),.32,.42,.62,3,.5);
     const hakama=rimify(stdMat(palette.hakama,{roughness:.94,map:hakamaTex||null,
       normalMap:hakamaNrm||null}),.3,.38,.58,3,.42);
-    const skin=rimify(stdMat(palette.skin,{roughness:.55,map:skinTex||null,
-      normalMap:skinNrm||null}),.42,.4,.42,3,.32);
+    const skin=sssify(rimify(stdMat(palette.skin,{roughness:.55,map:skinTex||null,
+      normalMap:skinNrm||null}),.42,.4,.42,3,.32));
     if(skin.normalMap)skin.normalScale=new THREE.Vector2(.6,.6);
     const hairM=stdMat((palette.hair!==undefined)?palette.hair:0x14110d,{roughness:.9});
     const obiM=stdMat(palette.obi,{roughness:.8});
@@ -6150,11 +6150,43 @@ const skinTex=canTex(512,512,(ctx,w,h)=>{
 if(skinTex){ skinTex.wrapS=skinTex.wrapT=THREE.RepeatWrapping; skinTex.repeat.set(2,2); }
 const skinNrm=mkNormalTex(256,(x,w,h)=>{
   x.fillStyle='#808080'; x.fillRect(0,0,w,h);
-  for(let i=0;i<3200;i++){ const v=Math.random()<.5;
-    x.fillStyle=v?'rgba(60,60,60,.5)':'rgba(190,190,190,.35)';
+  /* muscle striation: soft fiber streaks running ALONG the limb (v) */
+  for(let i=0;i<110;i++){
+    const sx=Math.random()*w, sy=Math.random()*h, len=28+Math.random()*90;
+    const lit=Math.random()<.5;
+    const g=x.createLinearGradient(sx,0,sx+7,0);
+    g.addColorStop(0,'rgba(0,0,0,0)');
+    g.addColorStop(.5,lit?'rgba(200,200,200,.15)':'rgba(72,72,72,.18)');
+    g.addColorStop(1,'rgba(0,0,0,0)');
+    x.fillStyle=g; x.fillRect(sx,sy,7,len);
+  }
+  /* faint veins wandering down the flesh */
+  for(let i=0;i<9;i++){
+    x.strokeStyle='rgba(96,96,96,.22)'; x.lineWidth=1.6;
+    x.beginPath();
+    let px=Math.random()*w, py=Math.random()*h; x.moveTo(px,py);
+    for(let s=0;s<6;s++){ px+=(Math.random()-.5)*20; py+=10+Math.random()*16;
+      x.lineTo(px,py); }
+    x.stroke();
+  }
+  /* pores */
+  for(let i=0;i<2600;i++){ const v=Math.random()<.5;
+    x.fillStyle=v?'rgba(60,60,60,.45)':'rgba(190,190,190,.3)';
     const s=Math.random()<.85?1:2;
     x.fillRect(Math.random()*w,Math.random()*h,s,s); }
-},1.1);
+},1.25);
+/* hammered lacquer for armor plate */
+const armorNrm=mkNormalTex(128,(x,w,h)=>{
+  x.fillStyle='#808080'; x.fillRect(0,0,w,h);
+  for(let i=0;i<72;i++){
+    const cx=Math.random()*w, cy=Math.random()*h, r=3+Math.random()*7;
+    const g=x.createRadialGradient(cx,cy,0,cx,cy,r);
+    g.addColorStop(0,'rgba(52,52,52,.5)');
+    g.addColorStop(.7,'rgba(164,164,164,.22)');
+    g.addColorStop(1,'rgba(0,0,0,0)');
+    x.fillStyle=g; x.beginPath(); x.arc(cx,cy,r,0,6.283); x.fill();
+  }
+},1.6);
 if(skinNrm)skinNrm.repeat.set(2,2);
 overrideTex('kimono',t=>{ t.repeat.set(3,3); kimonoTex&&(kimonoTex.image=t.image,kimonoTex.needsUpdate=true); });
 overrideTex('hakama',t=>{ t.repeat.set(4,1.6); hakamaTex&&(hakamaTex.image=t.image,hakamaTex.needsUpdate=true); });
@@ -6224,6 +6256,23 @@ function rimify(m,r,g,b,power,strength){
     '  totalEmissiveRadiance += vec3('+r+','+g+','+b+')*f*'+strength+'; }'); };
   return m;
 }
+/* SKIN LIGHT: wrap-diffuse subsurface — light soaks a little past the
+   terminator and the shadow edge warms with blood, so flesh reads as
+   flesh instead of painted plastic. Chains after rimify. */
+function sssify(m){
+  const prev=m.onBeforeCompile;
+  m.onBeforeCompile=(s,r)=>{
+    prev&&prev(s,r);
+    s.fragmentShader=s.fragmentShader.replace(
+      'float dotNL = saturate( dot( geometryNormal, directLight.direction ) );\n\tvec3 irradiance = dotNL * directLight.color;',
+      'float rawNL = dot( geometryNormal, directLight.direction );\n'+
+      '\tfloat dotNL = saturate( ( rawNL + 0.32 ) / 1.32 );\n'+
+      '\tvec3 irradiance = dotNL * directLight.color;\n'+
+      '\tirradiance += directLight.color * vec3( 0.20, 0.048, 0.03 ) * pow( saturate( 1.0 - abs( rawNL ) ), 2.0 );');
+  };
+  m.customProgramCacheKey=()=>'sss+rim';
+  return m;
+}
 
 /* ================= CLOTH: the hakama obeys gravity ==================
    Verlet panels pinned at the waist, colliding with the legs, settling
@@ -6284,7 +6333,9 @@ Fighter.prototype.buildMaximus=function(){
 };
 Fighter.prototype.buildArmor=function(){
   const P=this.parts;
-  const lacq=stdMat(0x1e2027,{roughness:.42,metalness:.55});
+  const lacq=stdMat(0x1e2027,{roughness:.42,metalness:.55,
+    normalMap:(typeof armorNrm!=='undefined'&&armorNrm)||null});
+  if(lacq.normalMap)lacq.normalScale=new THREE.Vector2(.55,.55);
   const lacq2=lacq.clone(); lacq2.side=THREE.DoubleSide;
   const lace=stdMat(this.palette.accent,{roughness:.82});
   const shadowAll=g=>g.traverse(o=>{ if(o.isMesh)o.castShadow=true; });
