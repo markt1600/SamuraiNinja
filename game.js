@@ -2303,6 +2303,7 @@ class Fighter{
     if(!this.severed.armR){ place(P.forearmR,'elR','haR'); P.handR.position.copy(J.haR.p); }
     place(P.upperArmL,'shL','elL');
     if(!this.severed.armL){ place(P.forearmL,'elL','haL'); P.handL.position.copy(J.haL.p); }
+    this.syncFaBones&&this.syncFaBones();
     place(P.thighR,'hipR','knR'); place(P.shinR,'knR','ftR');
     place(P.thighL,'hipL','knL'); place(P.shinL,'knL','ftL');
     P.footR.position.copy(J.ftR.p); P.footL.position.copy(J.ftL.p);
@@ -3882,6 +3883,24 @@ Fighter.prototype.setPelvisBone=function(p,yaw){
   const b=this.skin.bones[this.skin.BONES.pelvis];
   b.position.copy(p); b.quaternion.setFromAxisAngle(UPY,yaw);
 };
+/* the skinned forearms RIDE the carrier parts — every pose path in the
+   game places the carriers (arm solve, ragdoll, puppets, disabled arms),
+   so syncing here can never leave a bone at bind and stretch the tube
+   across the ring */
+Fighter.prototype.syncFaBones=function(){
+  if(!this.skin||this.skin.BONES.faR===undefined)return;
+  const B=this.skin.BONES;
+  const one=(limb,part,idx)=>{
+    if(this.severed[limb]||!part)return;
+    const b=this.skin.bones[idx]; if(!b)return;
+    b.position.copy(part.position);
+    b.quaternion.copy(part.quaternion);
+    const span=(part.userData.len||.26)*(part.scale.y||1);
+    b.scale.set(1,clamp(span/.26,.75,1.55),1);
+  };
+  one('armR',this.parts.forearmR,B.faR);
+  one('armL',this.parts.forearmL,B.faL);
+};
 
 /* CoM-led stepping: the body falls where it's going; a foot reaches out
    to catch it. Planted feet are locked — position AND yaw — until they
@@ -3993,6 +4012,7 @@ Fighter.prototype.updateAlive=function(dt,opponent){
   if(this._pupPlay&&(game.state==='over'||game.introT>0)){
     if(MODELPIPE.tickPuppet(this,dt,_pj2)){
       this.renderJoints(_pj2);
+      this.syncFaBones&&this.syncFaBones();
       this.tickCloth(dt,_pj2);       // the clothes dance too
       this.tickSleeves(dt,_pj2);
       this.tickHair(dt);
@@ -4487,6 +4507,7 @@ Fighter.prototype.updateAlive=function(dt,opponent){
       MODELPIPE.blendMap=null;              // loco weights live one frame
     }
   }
+  this.syncFaBones();
   this.tickCloth(dt,this._K);
   this.tickSleeves(dt,this._K);
   this.tickHair(dt);
