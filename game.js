@@ -209,6 +209,55 @@ const Sound=(()=>{
     const g=ctx.createGain(); g.gain.setValueAtTime(.5,t); g.gain.exponentialRampToValueAtTime(.001,t+.3);
     o.connect(g).connect(ctx.destination); o.start(t); o.stop(t+.35);
   }
+  /* THE SCORE: a low drone and sparse hirajoshi flute phrases — breathy
+     triangle with vibrato, mostly silence. Intensity follows the duel. */
+  let musAt=3, drone=null;
+  const MSCALE=[0,2,3,7,8,12,14,15];
+  function tickMusic(dt,inten){
+    try{
+      if(!ctx)return;
+      const c=ac();
+      if(!drone){
+        drone={o:c.createOscillator(),g:c.createGain()};
+        drone.o.type='sine'; drone.o.frequency.value=73.42;   // D2
+        drone.g.gain.value=0;
+        drone.o.connect(drone.g); drone.g.connect(bus()); drone.o.start();
+      }
+      drone.g.gain.value+= (0.026*inten-drone.g.gain.value)*Math.min(dt*.5,1);
+      musAt-=dt;
+      if(musAt>0)return;
+      musAt=5+Math.random()*9-inten*3;
+      if(Math.random()>.2+inten*.55)return;      // mostly, the night is quiet
+      const t0=c.currentTime;
+      const notes=1+Math.floor(Math.random()*2.5);
+      let tt=t0;
+      for(let i=0;i<notes;i++){
+        const semi=MSCALE[Math.floor(Math.random()*MSCALE.length)]
+          -(Math.random()<.3?12:0);
+        const f0=293.66*Math.pow(2,semi/12);
+        const dur=.8+Math.random()*1.8;
+        const o=c.createOscillator(); o.type='triangle'; o.frequency.value=f0;
+        const vib=c.createOscillator(); vib.frequency.value=4.4+Math.random()*1.2;
+        const vg=c.createGain(); vg.gain.value=f0*.007;
+        vib.connect(vg); vg.connect(o.frequency);
+        const g=c.createGain();
+        g.gain.setValueAtTime(.0001,tt);
+        g.gain.exponentialRampToValueAtTime(.042+.04*inten,tt+.2);
+        g.gain.exponentialRampToValueAtTime(.0001,tt+dur);
+        o.connect(g); g.connect(bus());
+        const s=c.createBufferSource(); s.buffer=noiseBuf(Math.min(dur,1.8));
+        const bf=c.createBiquadFilter(); bf.type='bandpass';
+        bf.frequency.value=f0*2; bf.Q.value=2.4;
+        const g2=c.createGain(); g2.gain.setValueAtTime(.0001,tt);
+        g2.gain.exponentialRampToValueAtTime(.011,tt+.22);
+        g2.gain.exponentialRampToValueAtTime(.0001,tt+dur*.9);
+        s.connect(bf); bf.connect(g2); g2.connect(bus());
+        o.start(tt); o.stop(tt+dur+.1);
+        vib.start(tt); vib.stop(tt+dur+.1); s.start(tt);
+        tt+=dur*(.5+Math.random()*.6);
+      }
+    }catch(e){}
+  }
   function grunt(sev,pitch){ // a hurt voice: pitch-dropping buzz through a formant
     try{
       const c=ac(), t=c.currentTime, p=pitch||1;
@@ -232,7 +281,7 @@ const Sound=(()=>{
       s.connect(bf); bf.connect(g2); g2.connect(bus()); s.start(t);
     }catch(e){}
   }
-  return {ac,whoosh,clang,cut,thump,parry,startWind,tickWind,tickHeart,taiko,killMoment,step,setMuffle,scrape,grunt};
+  return {ac,whoosh,clang,cut,thump,parry,startWind,tickWind,tickHeart,taiko,killMoment,step,setMuffle,scrape,grunt,tickMusic};
 })();
 
 
@@ -508,7 +557,24 @@ const lanterns=[];
     /* r155+ physical falloff: point intensity is candela (inverse-square) */
     const light=new THREE.PointLight(SRGB(0xffb168).getHex(),2.8,9,2);
     light.position.set(x,1.25,z); scene.add(light);
-    lanterns.push({light,base:2.8,seed:i*2.3});
+    /* the cold air makes the light VISIBLE: a soft cone under the flame */
+    let ray=null;
+    try{
+      const rayTex=canTex(64,128,(x,w,h)=>{
+        const g=x.createLinearGradient(0,0,0,h);
+        g.addColorStop(0,'rgba(255,190,120,.5)');
+        g.addColorStop(.6,'rgba(255,170,100,.16)');
+        g.addColorStop(1,'rgba(255,160,90,0)');
+        x.fillStyle=g; x.fillRect(0,0,w,h);
+      });
+      ray=new THREE.Mesh(new THREE.ConeGeometry(.62,1.9,20,1,true),
+        new THREE.MeshBasicMaterial({map:rayTex||null,color:0xffb35c,
+          transparent:true,opacity:.10,blending:THREE.AdditiveBlending,
+          depthWrite:false,fog:false,side:THREE.DoubleSide}));
+      ray.position.copy(light.position); ray.position.y-=1.0;
+      ray.renderOrder=5; scene.add(ray);
+    }catch(e){}
+    lanterns.push({light,base:2.8,seed:i*2.3,ray});
   });
 })();
 
@@ -1109,14 +1175,17 @@ function sculptSkull(geo,r,age){
    ========================================================================= */
 function buildSkinnedBody(kimonoMat,hakamaMat,B,skinMat){
   B=B||BUILDS.musashi;
-  const BONES={pelvis:0,spine:1,chest:2,uaR:3,uaL:4,thR:5,shR:6,thL:7,shL:8};
+  const BONES={pelvis:0,spine:1,chest:2,uaR:3,uaL:4,thR:5,shR:6,thL:7,shL:8,
+    faR:9,faL:10};
   const bindPos={
     pelvis:[0,.9,0], spine:[0,1.07,0], chest:[0,1.38,0],
     uaR:[.185,1.335,0], uaL:[-.185,1.335,0],
     thR:[.10,.88,0], shR:[.10,.44,0], thL:[-.10,.88,0], shL:[-.10,.44,0],
+    faR:[.185,1.045,0], faL:[-.185,1.045,0],
   };
   const bones=[], root=new THREE.Bone();
-  const order=['pelvis','spine','chest','uaR','uaL','thR','shR','thL','shL'];
+  const order=['pelvis','spine','chest','uaR','uaL','thR','shR','thL','shL',
+    'faR','faL'];
   for(const k of order){ const b=new THREE.Bone();
     b.position.fromArray(bindPos[k]); root.add(b); bones.push(b); }
 
@@ -1256,6 +1325,20 @@ function buildSkinnedBody(kimonoMat,hakamaMat,B,skinMat){
       rings.push({c:[x,y,0],r,sz:1,skin,mf});
     }
     tube(rings,B.armsSkin?2:0);        // sleeveless builds show muscle
+  }
+  /* ---- forearms: skinned to their own bones, blended at the elbow ---- */
+  for(const side of [1,-1]){
+    const FA=side>0?BONES.faR:BONES.faL, UA=side>0?BONES.uaR:BONES.uaL;
+    const x=.185*side, top=1.045, bot=.785;
+    const rings=[];
+    for(let i=0;i<=30;i++){
+      const t=i/30, y=lerp(top,bot,t);
+      const swell=.008*minJerkBell(clamp(t/.55,0,1));   // flexor mass
+      const r=(lerp(.052,.036,Math.pow(t,1.2))+swell)*(B.limb||1);
+      const skin=t<.18?blend(t,0,.34,UA,FA):[FA,1,UA,0];
+      rings.push({c:[x,y,0],r,sz:1,skin});
+    }
+    tube(rings,B.tracksuit?0:2);       // bare flesh (the suit keeps sleeves)
   }
   /* ---- legs: one continuous hakama tube across the knee ---- */
   for(const side of [1,-1]){
@@ -1761,6 +1844,7 @@ class Fighter{
     parts.forearmL=limbMesh(D.foreArm,.058*LB,.04*LB,foreMat);
     /* a HAND: palm, four curled fingers, an opposed thumb.
        pose 'grip' wraps a handle along local +Y; 'fist' closes fully. */
+    const nailM=stdMat(0xd8c5b2,{roughness:.45});
     const mkHand=(pose,mirror)=>{
       const g=new THREE.Group();
       const inner=new THREE.Group();
@@ -1789,6 +1873,9 @@ class Fighter{
         j2.position.y=.036; j2.rotation.x=curl*m2;
         const seg2=new THREE.Mesh(new THREE.CapsuleGeometry(.0056,.02,3,10),skin);
         seg2.position.y=.015; j2.add(seg2); j1.add(j2);
+        const nail=new THREE.Mesh(new THREE.SphereGeometry(.0042,8,6),nailM);
+        nail.scale.set(1,.95,.45); nail.position.set(0,.023,-.0048);
+        seg2.add(nail);
         g.add(j1);
         g.userData.joints.push({j1,j2,ph:i*.7});
       }
@@ -1799,6 +1886,8 @@ class Fighter{
       th1.position.y=.017; tj.add(th1);
       const th2=new THREE.Mesh(new THREE.CapsuleGeometry(.0064,.016,3,10),skin);
       th2.position.y=.045; th2.rotation.x=pose==='fist'?1.15:.6; tj.add(th2);
+      const tn=new THREE.Mesh(new THREE.SphereGeometry(.0046,8,6),nailM);
+      tn.scale.set(1,.95,.45); tn.position.set(0,.02,-.0052); th2.add(tn);
       gAdd(tj);
       g.traverse(o=>{ if(o.isMesh)o.castShadow=true; });
       return g;
@@ -1857,6 +1946,10 @@ class Fighter{
     if(this.build.armor)this.buildArmor();
     if(this.build.hair==='long')this.buildHair(hairM);
     this.skinKimono=this.skin.kimono;
+    /* the skinned forearms carry the flesh now; the parts stay as
+       invisible carriers (capsules, wounds, severance pieces) */
+    for(const s of ['forearmR','forearmL'])
+      parts[s].traverse(o=>{ if(o.isMesh)o.visible=false; });
     const hideIn=(g,keep)=>g.traverse(o=>{
       if(o.isMesh&&!(keep&&keep(o)))o.visible=false; });
     hideIn(parts.chest,o=>o.userData.keep);
@@ -2095,6 +2188,11 @@ class Fighter{
     const fore=limb==='armR'?this.parts.forearmR:this.parts.forearmL;
     const hand=limb==='armR'?this.parts.handR:this.parts.handL;
     scene.attach(fore); scene.attach(hand);
+    /* the carrier becomes the visible flying piece; the skinned forearm
+       vanishes with the cut */
+    if(!this.model)fore.traverse(o=>{ if(o.isMesh)o.visible=true; });
+    { const kb=this.skin&&this.skin.bones[this.skin.BONES[limb==='armR'?'faR':'faL']];
+      if(kb){ kb.scale.setScalar(.0001); kb.position.set(0,-99,0); } }
     hand.position.copy(fore.position);
     /* a LOADED model: bake the real forearm+hand geometry into a rigid
        piece and let it ride the invisible procedural carrier — physics
@@ -2213,6 +2311,8 @@ class Fighter{
     this.setBone('spine',J.chestB.p,J.pelvis.p);
     this.setBone('chest',J.chestT.p,J.chestB.p);
     this.setBone('uaR',J.shR.p,J.elR.p); this.setBone('uaL',J.shL.p,J.elL.p);
+    if(!this.severed.armR&&J.haR)this.setBone('faR',J.elR.p,J.haR.p);
+    if(!this.severed.armL&&J.haL)this.setBone('faL',J.elL.p,J.haL.p);
     this.setBone('thR',J.hipR.p,J.knR.p); this.setBone('shR',J.knR.p,J.ftR.p);
     this.setBone('thL',J.hipL.p,J.knL.p); this.setBone('shL',J.knL.p,J.ftL.p);
     if(this.bleedRate>4&&this.blood>BLOOD_TOTAL*.3){
@@ -3275,20 +3375,26 @@ const GSLOCO=(()=>{
        crouch) stay in the clip — only the living OSCILLATION passes */
     const out=f._gslOut||(f._gslOut={bob:0,sway:0,push:0,hipYaw:0,chestYaw:0});
     L.avgY=lerp(L.avgY,_w.y,clamp(dt*.8,0,1));
-    out.bob=clamp(_w.y-L.avgY,-.08,.08);
-    out.sway=clamp(_w.x-L.avgX,-.08,.08);
-    out.push=clamp(_w.z-L.avgZ,-.08,.08);
+    /* AUTHORITY: in neutral the mocap speaks at nearly full voice; combat
+       intent (a fast blade, a raised guard, a stagger) hands it back */
+    const neu=clamp(1-(f.bladeSpeed||0)/3.5,0,1)
+      *(f.guarding?.4:1)*(f.stun>0?0:1);
+    const cl=.08+.10*neu, cy=.3+.32*neu;
+    out.bob=clamp(_w.y-L.avgY,-cl,cl);
+    out.sway=clamp(_w.x-L.avgX,-cl,cl);
+    out.push=clamp(_w.z-L.avgZ,-cl,cl);
+    L._cy=cy;
     if(B.thR&&B.thL){
       B.thR.getWorldPosition(_w2); B.thL.getWorldPosition(_w3);
       const hy=Math.atan2(-(_w2.z-_w3.z),(_w2.x-_w3.x)||1e-6);
       L.avgHY=lerp(L.avgHY,hy,clamp(dt*.8,0,1));
-      out.hipYaw=clamp(hy-L.avgHY,-.3,.3);
+      out.hipYaw=clamp(hy-L.avgHY,-(L._cy||.3),(L._cy||.3));
     }
     if(B.shR&&B.shL){
       B.shR.getWorldPosition(_w2); B.shL.getWorldPosition(_w3);
       const cy=Math.atan2(-(_w2.z-_w3.z),(_w2.x-_w3.x)||1e-6);
       L.avgCY=lerp(L.avgCY,cy,clamp(dt*.8,0,1));
-      out.chestYaw=clamp(cy-L.avgCY,-.3,.3);
+      out.chestYaw=clamp(cy-L.avgCY,-(L._cy||.3),(L._cy||.3));
     }
     return out;
   }
@@ -3545,6 +3651,8 @@ Fighter.prototype.renderJoints=function(_dj){
   this.setBone('spine',_dj.chestB,_dj.pelvis);
   this.setBone('chest',_dj.chestT,_dj.chestB);
   this.setBone('uaR',_dj.shR,_dj.elR); this.setBone('uaL',_dj.shL,_dj.elL);
+  if(!this.severed.armR)this.setBone('faR',_dj.elR,_dj.haR);
+  if(!this.severed.armL)this.setBone('faL',_dj.elL,_dj.haL);
   this.setBone('thR',_dj.hipR,_dj.knR); this.setBone('shR',_dj.knR,_dj.ankR);
   this.setBone('thL',_dj.hipL,_dj.knL); this.setBone('shL',_dj.knL,_dj.ankL);
   /* the sword falls with the hand that held it */
@@ -3760,7 +3868,7 @@ Fighter.prototype.setBoneYaw=function(name,from,to,yaw){
 /* bind-pose joint spans: thigh .88->.44, shin .44->.045, upper arm
    1.335->1.045 — the skinned tube must STRETCH to the live span or a
    lunging shin ends short of its boot */
-const _boneRest={thR:.44,thL:.44,shR:.395,shL:.395,uaR:.29,uaL:.29};
+const _boneRest={thR:.44,thL:.44,shR:.395,shL:.395,uaR:.29,uaL:.29,faR:.26,faL:.26};
 Fighter.prototype.setBone=function(name,from,to){
   const b=this.skin.bones[this.skin.BONES[name]];
   b.position.copy(from);
@@ -4309,6 +4417,7 @@ Fighter.prototype.updateAlive=function(dt,opponent){
     this._K.elR.copy(elR); this._K.haR.copy(handR);
     aimLimb(P.upperArmR,shR,elR); aimLimb(P.forearmR,elR,handR);
     this.setBone('uaR',shR,elR);
+    if(!this.severed.armR)this.setBone('faR',elR,handR);
     P.handR.position.copy(handR);
     P.handR.quaternion.copy(this.katana.quaternion);
     if(this.brokenParts&&this.brokenParts.forearmR&&!this.hasSword)
@@ -4329,6 +4438,7 @@ Fighter.prototype.updateAlive=function(dt,opponent){
       this._K.elL.copy(elL); this._K.haL.copy(handL);
       aimLimb(P.upperArmL,shL,elL); aimLimb(P.forearmL,elL,handL);
       this.setBone('uaL',shL,elL);
+      if(!this.severed.armL)this.setBone('faL',elL,handL);
       P.handL.position.copy(handL);
       P.handL.quaternion.copy(this.katana.quaternion);
     } else this.hangArm('L',shL,rightC,P);
@@ -4969,6 +5079,7 @@ function bladeVsBlade(a,b){
    soft layer (with a physics nudge on deep contact), so a clinch
    presses flesh aside instead of ghosting through it. */
 const _lcA=V3(), _lcB=V3(), _lcN=V3(), _lcN2=V3();
+const _frostC=new THREE.Color();
 const LIMB_VS=['forearmR','forearmL','upperArmR','upperArmL'];
 const LIMB_TGT=['forearmR','forearmL','upperArmR','upperArmL',
   'chest','abdomen','head'];
@@ -5064,6 +5175,18 @@ function updateLoose(f,dt){
   }
   if(f._fleshM)for(const m of f._fleshM)
     if(m.color&&f.bloodTint)m.color.lerp(f.bloodTint,dt*.05*(1-(f.bloodFrac||1)));
+  /* the snow claims the fallen: a settled corpse frosts over, slowly */
+  if(f.dead&&f._asleep){
+    f._frost=Math.min(1,(f._frost||0)+dt*.016);
+    const fk=f._frost*.5;
+    if(!f._frostBase){
+      f._frostBase=[];
+      for(const m of [f.kimonoMat,f.skinKimono,f.skin&&f.skin.hakama])
+        if(m&&m.color)f._frostBase.push([m,m.color.clone()]);
+    }
+    _frostC.setRGB(.82,.87,.92);
+    for(const [m,c0] of f._frostBase)m.color.lerpColors(c0,_frostC,fk);
+  }
   if(f.brokenParts){       /* broken shins: the foot flops */
     if(f.brokenParts.shinR&&f.feet)f.feet.R.roll=.55;
     if(f.brokenParts.shinL&&f.feet)f.feet.L.roll=-.55;
@@ -7917,8 +8040,10 @@ function frame(now){
     }
     S.geo.attributes.position.needsUpdate=true;
   }
-  for(const L of lanterns)
+  for(const L of lanterns){
     L.light.intensity=L.base*(0.82+0.22*Math.sin(now*.011+L.seed)+0.1*Math.sin(now*.037+L.seed*2.7));
+    if(L.ray)L.ray.material.opacity=.10*(L.light.intensity/L.base);
+  }
   for(const s of GLINTMATS)s.uniforms.uGlintT.value=now*.001;
   { const mt=now*.00015;
     for(const F of mists){
@@ -8157,6 +8282,10 @@ function frame(now){
     Sound.setMuffle(clamp(fade*.9+(player.dead?1:0),0,1));
   }
   Sound.tickWind(dt);
+  Sound.tickMusic&&Sound.tickMusic(dt,
+    game.state==='fight'?(game.bind?.85:.55)
+    :game.state==='replay'?.7
+    :game.state==='over'?.75:.25);
   if(player&&!player.dead&&game.state==='fight')
     Sound.tickHeart(dt,clamp((0.8-player.bloodFrac)*2.2,0,1));
   updateBloodFX(dt); updateSparks(dt); updateCamera(dt);
