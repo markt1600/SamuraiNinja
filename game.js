@@ -2192,7 +2192,7 @@ class Fighter{
        vanishes with the cut */
     if(!this.model)fore.traverse(o=>{ if(o.isMesh)o.visible=true; });
     { const kb=this.skin&&this.skin.bones[this.skin.BONES[limb==='armR'?'faR':'faL']];
-      if(kb){ kb.scale.setScalar(.0001); kb.position.set(0,-99,0); } }
+      if(kb)kb.scale.setScalar(.001); }   // syncFaBones glues it to the stump
     hand.position.copy(fore.position);
     /* a LOADED model: bake the real forearm+hand geometry into a rigid
        piece and let it ride the invisible procedural carrier — physics
@@ -3653,6 +3653,7 @@ Fighter.prototype.renderJoints=function(_dj){
   this.setBone('chest',_dj.chestT,_dj.chestB);
   this.setBone('uaR',_dj.shR,_dj.elR); this.setBone('uaL',_dj.shL,_dj.elL);
   if(!this.severed.armR)this.setBone('faR',_dj.elR,_dj.haR);
+  else this.syncFaBones&&this.syncFaBones();
   if(!this.severed.armL)this.setBone('faL',_dj.elL,_dj.haL);
   this.setBone('thR',_dj.hipR,_dj.knR); this.setBone('shR',_dj.knR,_dj.ankR);
   this.setBone('thL',_dj.hipL,_dj.knL); this.setBone('shL',_dj.knL,_dj.ankL);
@@ -3887,19 +3888,31 @@ Fighter.prototype.setPelvisBone=function(p,yaw){
    game places the carriers (arm solve, ragdoll, puppets, disabled arms),
    so syncing here can never leave a bone at bind and stretch the tube
    across the ring */
+const _faT=V3();
 Fighter.prototype.syncFaBones=function(){
   if(!this.skin||this.skin.BONES.faR===undefined)return;
   const B=this.skin.BONES;
-  const one=(limb,part,idx)=>{
-    if(this.severed[limb]||!part)return;
+  const one=(limb,part,ua,idx)=>{
     const b=this.skin.bones[idx]; if(!b)return;
+    if(this.severed[limb]){
+      /* collapse AT the stump and FOLLOW it — a bone parked far away
+         drags the elbow blend band into a stretched tube */
+      if(ua){
+        _faT.set(0,-(ua.userData.len||.29)*(ua.scale.y||1),0)
+          .applyQuaternion(ua.quaternion).add(ua.position);
+        b.position.copy(_faT); b.quaternion.copy(ua.quaternion);
+      }
+      b.scale.set(.001,.001,.001);
+      return;
+    }
+    if(!part)return;
     b.position.copy(part.position);
     b.quaternion.copy(part.quaternion);
     const span=(part.userData.len||.26)*(part.scale.y||1);
     b.scale.set(1,clamp(span/.26,.75,1.55),1);
   };
-  one('armR',this.parts.forearmR,B.faR);
-  one('armL',this.parts.forearmL,B.faL);
+  one('armR',this.parts.forearmR,this.parts.upperArmR,B.faR);
+  one('armL',this.parts.forearmL,this.parts.upperArmL,B.faL);
 };
 
 /* CoM-led stepping: the body falls where it's going; a foot reaches out
