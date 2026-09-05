@@ -20,18 +20,36 @@ const ZCombatMotion=(()=>{
    this.phase+=dt*speed/Math.max(.1,clip.speed)/clip.duration*sign;
    this.idlePhase+=dt/(ZMotionData.clips.idle.duration)*(f._breathRate||1);
    this.mix+=(clamp(speed/.55,0,1)-this.mix)*(1-Math.exp(-10*dt));
-   const idle=sample('idle',this.idlePhase),moving=sample(mode,this.phase),out={};
+   let moving=sample(mode,this.phase);
+   // Crossfade changes of gait; selecting a different clip must not teleport knees.
+   if(this.previousMode&&this.previousMode!==mode){this.transitionPose=this.lastMoving;this.transitionT=0;}
+   this.previousMode=mode;
+   if(this.transitionPose){
+    this.transitionT+=dt;const blend=ease(this.transitionT/.22);
+    for(const k of ZMotionData.joints)moving[k]=this.transitionPose[k].clone().lerp(moving[k],blend);
+    if(blend===1)this.transitionPose=null;
+   }
+   this.lastMoving=Object.fromEntries(Object.entries(moving).map(([k,v])=>[k,v.clone()]));
+   const idle=sample('idle',this.idlePhase),out={};
    const scale=f.dims.pelvisY/.915;
    for(const k of ZMotionData.joints){
     const p=idle[k].lerp(moving[k],this.mix).multiplyScalar(scale);
     out[k]=f.pos.clone().addScaledVector(rt,p.x).addScaledVector(fw,p.z);out[k].y=p.y;
+   }
+   // Blend into a staggered fighting stance at rest. Retain this stance through
+   // recovery so the lead foot is not immediately pulled back by the idle clip.
+   const stance=(1-this.mix)*clamp(1-speed/.25,0,1)*(f.hasSword&&!f.begging?1:0);
+   for(const side of ['R','L']){
+    const sign=side==='R'?1:-1;
+    const target=f.pos.clone().addScaledVector(rt,sign*.17).addScaledVector(fw,side==='L'?.23:-.18).setY(.045);
+    out['ank'+side].lerp(target,stance);
    }
    // A prepared strike sets the lead foot before the torso follows through.
    if(f._technique&&this.attackSerial!==f._technique.serial){
     this.attackSerial=f._technique.serial;
     if(this.attackSerial>0&&speed<.7){
      const lead='L',c=this.contacts[lead];
-     if(c&&!this.contacts.R?.step){
+     if(c&&!f.disabled.legL&&!this.contacts.R?.step){
       const to=f.pos.clone().addScaledVector(fw,.30).addScaledVector(rt,-.17).setY(.045);
       if(c.p.distanceTo(to)>.055)c.step={from:c.p.clone(),to,t:0};
      }
@@ -50,7 +68,7 @@ const ZCombatMotion=(()=>{
     const wasLocked=c.locked;
     const other=this.contacts[s==='R'?'L':'R'];
     // A stationary pivot repositions one foot at a time instead of skating.
-    if(!c.step&&speed<.25&&c.p.distanceTo(desired)>.14&&(!other||other.locked))c.step={from:c.p.clone(),to:desired.clone(),t:0};
+    if(!c.step&&speed<.25&&c.p.distanceTo(desired)>.14&&(!f._technique||f._technique.state==='guard')&&(!other||other.locked))c.step={from:c.p.clone(),to:desired.clone(),t:0};
     if(c.step){
      c.step.t+=dt;const t=clamp(c.step.t/.26,0,1);
      desired.lerpVectors(c.step.from,c.step.to,ease(t));desired.y=.045+Math.sin(t*Math.PI)*.055;
@@ -70,10 +88,13 @@ const ZCombatMotion=(()=>{
     }else foot.dragFrom=null;
     foot.p.copy(desired);foot.p.y=0;foot.lift=desired.y-.045;
     foot.swing=c.locked?0:clamp(foot.lift/.14,.02,.99);
-    foot.yaw=c.yaw+(f.bodyYaw-c.yaw)*(c.locked?0:.4);foot.roll=c.locked?0:clamp((oldLift-foot.lift)/Math.max(dt,.001)*.18,-.22,.28);
+    const yawDelta=Math.atan2(Math.sin(f.bodyYaw-c.yaw),Math.cos(f.bodyYaw-c.yaw));
+    // The rear foot pivots around its planted contact during hip drive.
+    const pivot=f._technique?(f._technique.body?.hip||0)*(s==='R'?.65:.22):0;
+    foot.yaw=c.yaw+yawDelta*(c.locked?0:.4)+pivot;foot.roll=c.locked?0:clamp((oldLift-foot.lift)/Math.max(dt,.001)*.18,-.22,.28);
    }
    if(f._technique){
-    const follow=clamp(f._technique.pose.sink/.065,0,1)*.09;
+    const follow=f._technique.body?.shift||0;
     for(const k of ZMotionData.joints)if(!k.startsWith('ank'))out[k].addScaledVector(fw,follow);
    }
    this.pose=out;return out;
@@ -91,8 +112,35 @@ const ZCombatMotion=(()=>{
   thrust:{h:[.02,.34,.56],pitch:.06,yaw:0,roll:0,twist:-.12,sink:.06}
  };
  const mixPose=(a,b,t)=>({h:a.h.map((x,i)=>x+(b.h[i]-x)*t),pitch:a.pitch+(b.pitch-a.pitch)*t,yaw:a.yaw+(b.yaw-a.yaw)*t,roll:a.roll+(b.roll-a.roll)*t,twist:a.twist+(b.twist-a.twist)*t,sink:a.sink+(b.sink-a.sink)*t});
+ // Cubic trajectories preserve velocity across preparation, impact and follow-through.
+ // The middle key describes passing through the target, not stopping at it.
+ const duration={prepare:.28,strike:.34,recover:.46};
+ const copy=p=>({...p,h:p.h.slice()});
+ function curve(keys,t){
+  let i=0;while(i<keys.length-2&&t>keys[i+1][0])i++;
+  const [ta,a]=keys[i],[tb,b]=keys[i+1],span=tb-ta,u=clamp((t-ta)/span,0,1);
+  const prev=keys[Math.max(0,i-1)],next=keys[Math.min(keys.length-1,i+2)];
+  const interpolate=(av,bv,pv,nv)=>{
+   const ma=i===0?0:(bv-pv)/(tb-prev[0]),mb=i+1===keys.length-1?0:(nv-av)/(next[0]-ta);
+   return (2*u*u*u-3*u*u+1)*av+(u*u*u-2*u*u+u)*span*ma+(-2*u*u*u+3*u*u)*bv+(u*u*u-u*u)*span*mb;
+  };
+  const out={h:a.h.map((v,j)=>interpolate(v,b.h[j],prev[1].h[j],next[1].h[j]))};
+  for(const k of ['pitch','yaw','roll','twist','sink'])out[k]=interpolate(a[k],b[k],prev[1][k],next[1][k]);
+  return out;
+ }
+ function trajectory(type,start,direction=1){
+  const wind=copy(type==='thrust'?poses.chamber:type==='across'?poses.side:poses.high);
+  const end=copy(type==='thrust'?poses.thrust:type==='across'?poses.across:poses.low);
+  if(type==='across'&&direction<0){
+   for(const p of [wind,end]){p.h[0]*=-1;p.yaw*=-1;p.roll*=-1;p.twist*=-1;}
+  }
+  const pass=mixPose(wind,end,.58);pass.h[2]+=(type==='thrust'?.055:.16);
+  // Raised arms, hip loading, then extension and a relaxed deceleration arc.
+  const settle=mixPose(end,poses.guard,.25);settle.h[2]+=.08;
+  return [[0,copy(start)],[.28,wind],[.45,pass],[.62,end],[.79,settle],[1.08,copy(poses.guard)]];
+ }
  class Technique{
-  constructor(){this.state='guard';this.t=0;this.pose={...poses.guard,h:poses.guard.h.slice()};this.type='down';this.telegraph=false;this.serial=0;this.q=Q();this.deflection=V();this.lastVelocity=null;}
+  constructor(){this.state='guard';this.t=0;this.pose={...poses.guard,h:poses.guard.h.slice()};this.type='down';this.telegraph=false;this.serial=0;this.q=Q();this.deflection=V();this.lastVelocity=null;this.body={hip:0,chest:0,shift:0,lean:0,extension:0};}
   update(f,dt){
    if(this.lastVelocity){
     const impulse=f.tipVel.clone().sub(this.lastVelocity);
@@ -111,33 +159,38 @@ const ZCombatMotion=(()=>{
     const fw=new THREE.Vector3(Math.sin(f.bodyYaw),0,Math.cos(f.bodyYaw)),rt=new THREE.Vector3(fw.z,0,-fw.x);
     const offset=f.tipTarget.clone().sub(f.pos);
     this.type=f.thrust?'thrust':Math.abs(offset.dot(rt))>.5?'across':'down';
-    this.buffer=0;this.recoveryStart=null;this.state='prepare';this.serial++;this.t=0;this.start={...this.pose,h:this.pose.h.slice()};
+    this.direction=offset.dot(rt)<0?-1:1;
+    this.buffer=0;this.recoveryStart=null;this.state='prepare';this.serial++;this.t=0;this.start=copy(this.pose);this.keys=trajectory(this.type,this.start,this.direction);
    }
    const speed=clamp((f.weapon.speed||1)*(.6+.4*f.swordControl),.35,1.35);
    this.t+=dt*speed;
-   const wind=this.type==='thrust'?poses.chamber:this.type==='across'?poses.side:poses.high;
-   const end=this.type==='thrust'?poses.thrust:this.type==='across'?poses.across:poses.low;
    let desired;
-   if(this.state==='prepare'){
-    desired=mixPose(this.start,wind,ease(this.t/.24));if(this.t>=.24){this.state='strike';this.t=0;}
-   }else if(this.state==='strike'){
-    const phase=clamp(this.t/(this.type==='thrust'?.20:.32),0,1);
-    desired=mixPose(wind,end,ease(phase));
-    // Hands lead the cut on a convex arc; the blade follows their acceleration.
-    // Linear handle interpolation kept horizontal cuts tucked against the chest.
-    const hands=ease(clamp(phase*1.18,0,1));
-    desired.h=wind.h.map((x,i)=>x+(end.h[i]-x)*hands);
-    if(this.type!=='thrust')desired.h[2]+=Math.sin(Math.PI*hands)*.16;
-    if(this.t>=(this.type==='thrust'?.20:.32)){this.state='recover';this.t=0;}
+   if(this.state==='prepare'||this.state==='strike'||(this.state==='recover'&&!this.recoveryStart)){
+    const offset=this.state==='prepare'?0:this.state==='strike'?.28:.62;
+    const time=offset+this.t;
+    desired=curve(this.keys||trajectory(this.type,this.pose),time);
+    const lead=ease(time/.18)*ease((1.08-time)/.18);
+    const hip=curve(this.keys,Math.min(1.08,time+.055*lead));
+    const chest=curve(this.keys,Math.min(1.08,time+.025*lead));
+    this.body.hip=hip.twist*.65;this.body.chest=chest.twist*1.15;
+    this.body.shift=clamp(desired.sink/.065,0,1)*.105;
+    this.body.lean=clamp(desired.sink,-.02,.08)*.65;
+    this.body.extension=Math.sin(Math.PI*clamp((time-.28)/.34,0,1));
+    if(this.t>=duration[this.state]){this.t-=duration[this.state];this.state=this.state==='prepare'?'strike':this.state==='strike'?'recover':'guard';}
    }else if(this.state==='recover'){
-    desired=mixPose(this.recoveryStart||end,poses.guard,ease(this.t/.38));
-    desired.h[2]+=.065*Math.sin(Math.PI*clamp(this.t/.38,0,1));if(this.t>=.38){this.state='guard';this.t=0;}
+    // Injury interrupts from the current pose, rather than snapping to the end key.
+    desired=mixPose(this.recoveryStart,poses.guard,ease(this.t/.46));
+    if(this.t>=.46){this.state='guard';this.t=0;this.recoveryStart=null;}
    }else{
     desired={...poses.guard,h:poses.guard.h.slice()};
     const fw=new THREE.Vector3(Math.sin(f.bodyYaw),0,Math.cos(f.bodyYaw)),rt=new THREE.Vector3(fw.z,0,-fw.x),offset=f.tipTarget.clone().sub(f.pos);
     desired.yaw=clamp(offset.dot(rt)*.25,-.32,.32);
     desired.pitch=clamp(.30+(offset.y-1.3)*.20,.12,.58);
     if(f.guarding){desired.h=[.02,.47,.32];desired.pitch=.95;}
+   }
+   if(this.state==='guard'||this.recoveryStart){
+    const fade=1-Math.exp(-10*dt);
+    for(const k of Object.keys(this.body))this.body[k]+=(0-this.body[k])*fade;
    }
    // Pose blending is limited to guard changes; committed cuts retain their
    // acceleration and follow-through rather than chasing the cursor each tick.

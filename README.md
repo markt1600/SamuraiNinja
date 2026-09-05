@@ -1,5 +1,29 @@
 # 斬 ZAN — a duel in the snow
 
+## Continuous full-body techniques (v65)
+
+Sword techniques now follow a six-key cubic trajectory through loading,
+preparation, target passage, follow-through and recovery. Velocity continues
+across phase boundaries rather than easing to zero at every intermediate pose.
+Horizontal cuts can start from either side, selected by the cursor's cut line.
+
+Hips lead the chest, which leads the hands and blade; the lead fades at both
+ends to avoid a rotation jump when an attack starts. Forward weight transfer,
+knee compression and elbow extension share the same technique timeline.
+Committed attacks reduce whole-body target tracking. Injury interruption still
+returns from the current pose, and physical blade deflection and anatomy remain
+part of the simulation.
+
+At rest, fighters settle into a staggered stance. The rear foot pivots with hip
+rotation, preparation plants the lead foot, and recovery retains the support
+stance. Changes between gait clips crossfade over 220 ms. Disabled legs retain
+their drag behavior. No new motion-capture session or external assets are needed.
+
+Tests cover both horizontal cut directions, nonzero blade velocity and bounded
+velocity change at phase boundaries, hip/chest sequencing, actual rig motion,
+foot contacts, injuries, and AI combat. These are mechanical safeguards; visual
+quality still needs normal-speed playtesting.
+
 ## Arm and torso follow-through (v64)
 
 The imported rig now follows the simulation's axial hip and chest rotation.

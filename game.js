@@ -2364,7 +2364,7 @@ const PHYS=(typeof ZPhys!=='undefined')?{
 if(PHYS.enabled){ PHYS.engine.g.set(0,-9.81,0); PHYS.engine.substeps=6; PHYS.engine.iters=3; }
 
 
-const ZAN_VERSION='v64';
+const ZAN_VERSION='v65';
 console.log('%c斬 ZAN '+ZAN_VERSION,'font-size:16px');
 
 /* =========================================================================
@@ -4013,7 +4013,7 @@ Fighter.prototype.updateAlive=function(dt,opponent){
   const inFlight=this.feet&&(this.feet.R.swing>0||this.feet.L.swing>0);
   this._pivot=lerp(this._pivot===undefined?1:this._pivot,inFlight?1.3:.45,clamp(dt*9,0,1));
   this.bodyYaw=lerpAngle(this.bodyYaw,this.yaw,
-    clamp(dt*6*this._pivot*Math.max(this.mobility,.3),0,1));
+    clamp(dt*6*this._pivot*Math.max(this.mobility,.3)*(this._technique&&this._technique.state==='strike'?.22:1),0,1));
 
   /* locomotion + separation + THE RING */
   this.pos.addScaledVector(this.vel,dt); this.pos.y=0;
@@ -4078,6 +4078,10 @@ Fighter.prototype.updateAlive=function(dt,opponent){
   }
 
   const fwd=DIRY(this.bodyYaw), right=V3(fwd.z,0,-fwd.x);
+  if(this.hasSword&&!this.weapon.blunt&&!this.begging){
+    this._technique=this._technique||new ZCombatMotion.Technique();
+    if(!this.stuck)this._technique.update(this,dt);
+  }else this._technique=null;
   this._locomotion=this._locomotion||new ZCombatMotion.Locomotion();
   const capturedPose=this._locomotion.update(this,dt);
   for(const side of ['R','L']){
@@ -4092,10 +4096,7 @@ Fighter.prototype.updateAlive=function(dt,opponent){
     if(foot.dragFrom&&groundMark&&foot.p.distanceToSquared(foot.dragFrom)>.0001)
       groundMark.drag(foot.dragFrom.x,foot.dragFrom.z,foot.p.x,foot.p.z);
   }
-  if(this.hasSword&&!this.weapon.blunt&&!this.begging){
-    this._technique=this._technique||new ZCombatMotion.Technique();
-    if(!this.stuck)this._technique.update(this,dt);
-  }else this._technique=null;
+
 
 
   /* guard freshness: a block raised in the last instant is a PARRY */
@@ -4203,7 +4204,7 @@ Fighter.prototype.updateAlive=function(dt,opponent){
   }
   this._supportY=lerp(this._supportY===undefined?supportHeight:this._supportY,supportHeight,damp(18,dt));
   pelvisY=Math.min(pelvisY,this._supportY);pelvis.y=pelvisY;
-  const pelvisYawA=this.bodyYaw+this.twist*.5-this._ctr*.7+(ML?ML.hipYaw*.62*mk:0);
+  const pelvisYawA=this.bodyYaw+(this._technique?this._technique.body.hip:this.twist*.5)-this._ctr*.7+(ML?ML.hipYaw*.62*mk:0);
   const fwdP=DIRY(pelvisYawA), rightP=V3(fwdP.z,0,-fwdP.x);
   pelvis.addScaledVector(rightP,this._wshift*.35);
   if(ML)pelvis.addScaledVector(fwdP,ML.push*.72*mk);
@@ -4215,7 +4216,7 @@ Fighter.prototype.updateAlive=function(dt,opponent){
   /* spine: pelvis → abdomen → chest, distributing lean and twist */
   const stoop=this.build.stoop||0;    // age rounds the back
   const lean=clamp(.04+stoop+this.tipVel.length()*.007+speed2d*.016,0,.12+stoop);
-  const chestYawA=this.bodyYaw+this.twist*1.1+this._ctr
+  const chestYawA=this.bodyYaw+(this._technique?this._technique.body.chest:this.twist*1.1)+this._ctr
     +(ML?ML.chestYaw*.72*mk:0);
   const fwdC=DIRY(chestYawA), rightC=V3(fwdC.z,0,-fwdC.x);
   const chestB=pelvis.clone().addScaledVector(fwdP,.03+lean*.3)
@@ -4227,7 +4228,7 @@ Fighter.prototype.updateAlive=function(dt,opponent){
   chestT.y=chestB.y+D.torso*.62+Math.sin(this.breath*1.6)*(.003+effort*.002);
   const capturedLean=capturedPose.chestT.clone().sub(capturedPose.pelvis).setY(0);
   chestT.addScaledVector(capturedLean,.65);
-  if(this._technique)chestT.addScaledVector(fwdC,this._technique.pose.sink*.5);
+  if(this._technique)chestT.addScaledVector(fwdC,this._technique.body.lean);
   this.soften('chestT',chestT,42,dt);
   const neckT=chestT.clone().addScaledVector(fwdC,.02); neckT.y=chestT.y+D.neck+.02;
   this.soften('neckT',neckT,34,dt);
@@ -4511,7 +4512,7 @@ Fighter.prototype.updateAlive=function(dt,opponent){
     if(this._ritualGrabL)handL=this._ritualGrabL.clone();
     /* the elbows: down and in at guard, out and up through the raise */
     const rise=clamp((handle.y-shR.y+.18)*2.6,0,1);
-    const extension=this._technique&&this._technique.state==='strike'?Math.sin(Math.PI*clamp(this._technique.t/(this._technique.type==='thrust'?.20:.32),0,1)):0;
+    const extension=this._technique?this._technique.body.extension:0;
     const hintR=rightC.clone().multiplyScalar(lerp(.85,1.2,rise))
       .addScaledVector(fwdC,lerp(-.3,.15,rise)+extension*.32); hintR.y=lerp(-.55,.5,rise);
     solveIK(shR,handR,D.upperArm,D.foreArm,hintR,elR);

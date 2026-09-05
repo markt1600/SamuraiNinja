@@ -17,6 +17,32 @@ const assert=require('node:assert/strict');const {loadGame}=require('./harness.c
  assert.equal(r.spontaneous,false);assert.deepEqual(r.states,['prepare','strike','recover','guard']);
  assert.ok(r.peak>8&&r.peak<22,JSON.stringify(r));assert.ok(r.twist>.15);
  assert.equal(r.interrupted,'recover');assert.ok(r.deflected>.05);
+ const {run:runFlow}=await loadGame();
+ const flow=JSON.parse(runFlow(`(()=>{
+  setup();const f=player;f.weapon={...f.weapon,speed:1};f.swordControl=1;f.stun=0;f.thrust=false;
+  const results=[];
+  for(const side of [-1,1]){
+   const t=new ZCombatMotion.Technique(),fw=DIRY(f.bodyYaw),rt=V3(fw.z,0,-fw.x);
+   f.tipTarget.copy(f.pos).addScaledVector(rt,side).addScaledVector(fw,1).setY(1.3);f._requestStrike=true;
+   let last=null,velocity=null,boundaries=[],min=10,max=-10,hipLead=0;
+   for(let i=0;i<280;i++){
+    const state=t.state;t.update(f,1/240);const p=t.weapon(f,V3(0,.9,0));
+    const tip=p.handle.clone().addScaledVector(p.dir,.93);
+    if(last){const v=tip.clone().sub(last).multiplyScalar(240);
+     if(state!==t.state&&state!=='guard'&&t.state!=='guard')boundaries.push({speed:v.length(),change:velocity?v.distanceTo(velocity):0});velocity=v;}
+    last=tip;min=Math.min(min,t.pose.h[0]);max=Math.max(max,t.pose.h[0]);
+    hipLead=Math.max(hipLead,Math.abs(t.body.hip/.65-t.body.chest/1.15));
+   }
+   results.push({side,direction:t.direction,min,max,boundaries,hipLead});
+  }
+  return JSON.stringify(results);
+ })()`));
+ for(const f of flow){
+  assert.equal(f.direction,f.side);assert.ok(f.max-f.min>.6,JSON.stringify(f));
+  assert.equal(f.boundaries.length,2);assert.ok(f.hipLead>.025,JSON.stringify(f));
+  for(const b of f.boundaries){assert.ok(b.speed>.3,JSON.stringify(f));assert.ok(b.change<1,JSON.stringify(f));}
+ }
+ console.log('Both cut directions retain velocity at phase boundaries and sequence hips before chest.',flow);
  const duel=JSON.parse(run(`(()=>{
   setup();game.state='fight';game.introT=0;for(const k of Object.keys(Sound))Sound[k]=()=>{};
   const ai=new AI(player,{skill:.9,reaction:.15,engage:[1.1,1.7],atkCircle:.7,atkBlock:.4,windupT:[.2,.35],strikeT:[.3,.5],speedMul:.9,parry:.2,maai:1.4,tempo:[.6,.9]});

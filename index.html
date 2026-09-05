@@ -194,7 +194,7 @@
   body.touch #btn-fatality.show{display:flex}
   body.touch #hint{display:none}
 </style>
-<link rel="stylesheet" href="presentation.css?v=v64.1">
+<link rel="stylesheet" href="presentation.css?v=v65.0">
 </head>
 <body>
 <div id="rotate"><div class="rk">斬</div>
@@ -311,7 +311,7 @@
 <a id="credits-link" href="credits.html" target="_blank" rel="noopener">ASSET CREDITS</a>
 <button id="sound-toggle" aria-label="Mute sound" aria-pressed="false">SOUND ON</button>
 <script type="importmap">
-{ "imports": { "three": "./vendor/three.module.js?v=v64.1",
+{ "imports": { "three": "./vendor/three.module.js?v=v65.0",
                "three/addons/": "./vendor/addons/" } }
 </script>
 <script type="module">
@@ -327,14 +327,14 @@ import * as SkeletonUtils from 'three/addons/utils/SkeletonUtils.js';
    composite); keep r128-era color semantics */
 THREE.ColorManagement.enabled = false;
 window.THREE = Object.assign({}, THREE, { GLTFLoader, FBXLoader, RGBELoader, SkeletonUtils });
-for (const src of ['audio.js?v=v64.1', 'motion.js?v=v64.1', 'motion-data.js?v=v64.1', 'combat-motion.js?v=v64.1', 'physics.js?v=v64.1', 'world.js?v=v64.1', 'game.js?v=v64.1'])
+for (const src of ['audio.js?v=v65.0', 'motion.js?v=v65.0', 'motion-data.js?v=v65.0', 'combat-motion.js?v=v65.0', 'physics.js?v=v65.0', 'world.js?v=v65.0', 'game.js?v=v65.0'])
   await new Promise((ok, fail) => {
     const s = document.createElement('script');
     s.src = src; s.onload = ok; s.onerror = fail;
     document.body.appendChild(s);
   });
 if(new URLSearchParams(location.search).has('qa')){
-  const qa=document.createElement('script');qa.src='tests/browser-qa.js?v=v64.1';document.body.appendChild(qa);
+  const qa=document.createElement('script');qa.src='tests/browser-qa.js?v=v65.0';document.body.appendChild(qa);
 }
 </script>
 </body>
