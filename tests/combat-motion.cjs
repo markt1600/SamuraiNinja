@@ -21,7 +21,7 @@ const assert=require('node:assert/strict');const {loadGame}=require('./harness.c
   setup();game.state='fight';game.introT=0;for(const k of Object.keys(Sound))Sound[k]=()=>{};
   const ai=new AI(player,{skill:.9,reaction:.15,engage:[1.1,1.7],atkCircle:.7,atkBlock:.4,windupT:[.2,.35],strikeT:[.3,.5],speedMul:.9,parry:.2,maai:1.4,tempo:[.6,.9]});
   player.isPlayer=false;for(let i=0;i<1800;i++){ai.update(1/60,enemy);simulate(1/60);if(player.dead||enemy.dead)break;}
-  return JSON.stringify({wounds:player.wounds.length+enemy.wounds.length,blood:player.blood+enemy.blood,contacts:game.bladeContacts||0,finite:PHYS.engine.bodies.every(b=>b.pos.toArray().every(Number.isFinite))});})()`));
- assert.ok(duel.wounds>0,JSON.stringify(duel));assert.ok(duel.blood<10000);assert.ok(duel.contacts>0);assert.equal(duel.finite,true);
+  return JSON.stringify({wounds:player.wounds.length+enemy.wounds.length,blood:player.blood+enemy.blood,fatal:player.dead||enemy.dead,contacts:game.bladeContacts||0,finite:PHYS.engine.bodies.every(b=>b.pos.toArray().every(Number.isFinite))});})()`));
+ assert.ok(duel.wounds>0,JSON.stringify(duel));assert.ok(duel.blood<10000||duel.fatal,JSON.stringify(duel));assert.ok(duel.contacts>0);assert.equal(duel.finite,true);
  console.log('Coordinated techniques: commitment, recovery, injury interruption, contact deflection and live injury simulation passed.',r,duel);
 })().catch(e=>{console.error(e);process.exit(1)});

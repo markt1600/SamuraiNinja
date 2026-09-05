@@ -83,10 +83,10 @@ const ZCombatMotion=(()=>{
  // yaw/pitch describe a rigid blade; roll describes the cutting plane.
  const poses={
   guard:{h:[.035,.29,.37],pitch:.32,yaw:0,roll:0,twist:0,sink:0},
-  high:{h:[.10,.66,.13],pitch:2.1,yaw:.12,roll:0,twist:.16,sink:-.015},
-  low:{h:[-.04,.22,.45],pitch:-.60,yaw:-.06,roll:0,twist:-.16,sink:.065},
-  side:{h:[.27,.39,.19],pitch:.28,yaw:1.30,roll:-1.57079632679,twist:.40,sink:.015},
-  across:{h:[-.25,.35,.36],pitch:.06,yaw:-1.20,roll:-1.57079632679,twist:-.40,sink:.065},
+  high:{h:[.12,.74,.08],pitch:2.1,yaw:.12,roll:0,twist:.16,sink:-.015},
+  low:{h:[-.10,.13,.43],pitch:-.60,yaw:-.06,roll:0,twist:-.16,sink:.065},
+  side:{h:[.34,.47,.12],pitch:.28,yaw:1.30,roll:-1.57079632679,twist:.48,sink:.015},
+  across:{h:[-.34,.26,.28],pitch:.06,yaw:-1.20,roll:-1.57079632679,twist:-.48,sink:.065},
   chamber:{h:[.10,.29,.20],pitch:.05,yaw:0,roll:0,twist:.12,sink:.025},
   thrust:{h:[.02,.34,.56],pitch:.06,yaw:0,roll:0,twist:-.12,sink:.06}
  };
@@ -121,10 +121,17 @@ const ZCombatMotion=(()=>{
    if(this.state==='prepare'){
     desired=mixPose(this.start,wind,ease(this.t/.24));if(this.t>=.24){this.state='strike';this.t=0;}
    }else if(this.state==='strike'){
-    desired=mixPose(wind,end,ease(this.t/(this.type==='thrust'?.20:.32)));
+    const phase=clamp(this.t/(this.type==='thrust'?.20:.32),0,1);
+    desired=mixPose(wind,end,ease(phase));
+    // Hands lead the cut on a convex arc; the blade follows their acceleration.
+    // Linear handle interpolation kept horizontal cuts tucked against the chest.
+    const hands=ease(clamp(phase*1.18,0,1));
+    desired.h=wind.h.map((x,i)=>x+(end.h[i]-x)*hands);
+    if(this.type!=='thrust')desired.h[2]+=Math.sin(Math.PI*hands)*.16;
     if(this.t>=(this.type==='thrust'?.20:.32)){this.state='recover';this.t=0;}
    }else if(this.state==='recover'){
-    desired=mixPose(this.recoveryStart||end,poses.guard,ease(this.t/.38));if(this.t>=.38){this.state='guard';this.t=0;}
+    desired=mixPose(this.recoveryStart||end,poses.guard,ease(this.t/.38));
+    desired.h[2]+=.065*Math.sin(Math.PI*clamp(this.t/.38,0,1));if(this.t>=.38){this.state='guard';this.t=0;}
    }else{
     desired={...poses.guard,h:poses.guard.h.slice()};
     const fw=new THREE.Vector3(Math.sin(f.bodyYaw),0,Math.cos(f.bodyYaw)),rt=new THREE.Vector3(fw.z,0,-fw.x),offset=f.tipTarget.clone().sub(f.pos);

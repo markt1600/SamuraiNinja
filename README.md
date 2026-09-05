@@ -1,5 +1,19 @@
 # 斬 ZAN — a duel in the snow
 
+## Arm and torso follow-through (v64)
+
+The imported rig now follows the simulation's axial hip and chest rotation.
+Previously, aiming the spine along its length reproduced lean but lost the
+shoulder twist, leaving the visible upper body facing forward through a cut.
+Immutable bind axes preserve the stable grip without pose feedback.
+
+Cuts now use wider hand paths with an outward arc, hand-leading blade timing,
+more elbow extension, and stronger hip/chest rotation. Knee compression and
+forward trunk movement accompany the strike and its recovery. The rendered-rig
+regression checks shoulder alignment, torso rotation, wrist and elbow travel,
+alongside the existing grip, deformation, contact and injury checks. The browser
+QA sword drill includes a half-speed toggle for inspecting the motion.
+
 ## Coordinated fighting movement (v63)
 
 The hand-to-hip spikes were a skinning defect: distal hand vertices below the

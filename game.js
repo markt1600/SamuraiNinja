@@ -2364,7 +2364,7 @@ const PHYS=(typeof ZPhys!=='undefined')?{
 if(PHYS.enabled){ PHYS.engine.g.set(0,-9.81,0); PHYS.engine.substeps=6; PHYS.engine.iters=3; }
 
 
-const ZAN_VERSION='v63';
+const ZAN_VERSION='v64';
 console.log('%c斬 ZAN '+ZAN_VERSION,'font-size:16px');
 
 /* =========================================================================
@@ -2784,6 +2784,8 @@ const MODELPIPE=(()=>{
         armL[s2]=[l1,_db.distanceTo(_da)]; }
     }
     const hipForward=V3(0,0,1).applyQuaternion(bones.Hips.getWorldQuaternion(new THREE.Quaternion()).invert());
+    const chestRight=bones.RightArm.getWorldPosition(V3()).sub(bones.LeftArm.getWorldPosition(V3())).normalize()
+      .applyQuaternion(bones.Spine2.getWorldQuaternion(new THREE.Quaternion()).invert());
     // Capture immutable bind directions BEFORE IK changes child translations.
     const bindAim={},gripQ={};
     for(const name of Object.keys(aim)){
@@ -2800,7 +2802,7 @@ const MODELPIPE=(()=>{
       const swing=new THREE.Quaternion().setFromUnitVectors(gripAxis,UPY);
       gripQ[side]=swing.multiply(q);
     }
-    return {root,bones,aim,bindAim,gripQ,hLen,hipForward,gripLoc,armL,boneR,scale:s,worldQ:{},anims};
+    return {root,bones,aim,bindAim,gripQ,hLen,hipForward,chestRight,gripLoc,armL,boneR,scale:s,worldQ:{},anims};
   }
   /* ---- locomotion: the model's own mocap breathes under the sim ----
      Idle/Walk/Run clips (bundled Xbot/Soldier ship them) crossfade by
@@ -2847,7 +2849,7 @@ const MODELPIPE=(()=>{
   /* drive the rig from joint positions (alive: f._K + head; dead: _dj) */
   function drive(f,J){
     const M=f.model; if(!M)return;
-    const fwd=DIRY(f.bodyYaw||0);
+    const fwd=J.hipR&&J.hipL?J.hipR.clone().sub(J.hipL).cross(UPY).normalize():DIRY(f.bodyYaw||0);
     const w=MODELPIPE.driveBlend===undefined?1:MODELPIPE.driveBlend;
     const bm=MODELPIPE.blendMap;
     const setW=(name,q)=>{ const b=M.bones[name]; if(!b)return;
@@ -2917,6 +2919,18 @@ const MODELPIPE=(()=>{
     _da.lerpVectors(J.chestB,J.chestT,.6);
     aimDelta('Spine1',J.chestB,_da);
     aimDelta('Spine2',_da,J.chestT);
+    // Positional spine aiming cannot express axial rotation. Match the
+    // simulated shoulder line, using an immutable bind axis to avoid feedback.
+    if(M.chestRight&&J.shR&&J.shL){
+      const b=M.bones.Spine2,axis=J.chestT.clone().sub(J.chestB).normalize();
+      const current=M.chestRight.clone().applyQuaternion(b.getWorldQuaternion(new THREE.Quaternion()));
+      const desired=J.shR.clone().sub(J.shL);
+      current.addScaledVector(axis,-current.dot(axis)).normalize();
+      desired.addScaledVector(axis,-desired.dot(axis)).normalize();
+      const angle=Math.atan2(current.clone().cross(desired).dot(axis),current.dot(desired));
+      const world=b.getWorldQuaternion(new THREE.Quaternion()).premultiply(new THREE.Quaternion().setFromAxisAngle(axis,angle));
+      setW('Spine2',world);
+    }
     /* the neck follows the trunk's LEAN, not the vertical: a sprinting
        chest pitches forward and a vertical neck target would counter-
        rotate the head backwards — half spine-continuation, half sim */
@@ -4189,7 +4203,7 @@ Fighter.prototype.updateAlive=function(dt,opponent){
   }
   this._supportY=lerp(this._supportY===undefined?supportHeight:this._supportY,supportHeight,damp(18,dt));
   pelvisY=Math.min(pelvisY,this._supportY);pelvis.y=pelvisY;
-  const pelvisYawA=this.bodyYaw+this.twist*.3-this._ctr*.7+(ML?ML.hipYaw*.62*mk:0);
+  const pelvisYawA=this.bodyYaw+this.twist*.5-this._ctr*.7+(ML?ML.hipYaw*.62*mk:0);
   const fwdP=DIRY(pelvisYawA), rightP=V3(fwdP.z,0,-fwdP.x);
   pelvis.addScaledVector(rightP,this._wshift*.35);
   if(ML)pelvis.addScaledVector(fwdP,ML.push*.72*mk);
@@ -4201,7 +4215,7 @@ Fighter.prototype.updateAlive=function(dt,opponent){
   /* spine: pelvis → abdomen → chest, distributing lean and twist */
   const stoop=this.build.stoop||0;    // age rounds the back
   const lean=clamp(.04+stoop+this.tipVel.length()*.007+speed2d*.016,0,.12+stoop);
-  const chestYawA=this.bodyYaw+this.twist*.8+this._ctr
+  const chestYawA=this.bodyYaw+this.twist*1.1+this._ctr
     +(ML?ML.chestYaw*.72*mk:0);
   const fwdC=DIRY(chestYawA), rightC=V3(fwdC.z,0,-fwdC.x);
   const chestB=pelvis.clone().addScaledVector(fwdP,.03+lean*.3)
@@ -4213,6 +4227,7 @@ Fighter.prototype.updateAlive=function(dt,opponent){
   chestT.y=chestB.y+D.torso*.62+Math.sin(this.breath*1.6)*(.003+effort*.002);
   const capturedLean=capturedPose.chestT.clone().sub(capturedPose.pelvis).setY(0);
   chestT.addScaledVector(capturedLean,.65);
+  if(this._technique)chestT.addScaledVector(fwdC,this._technique.pose.sink*.5);
   this.soften('chestT',chestT,42,dt);
   const neckT=chestT.clone().addScaledVector(fwdC,.02); neckT.y=chestT.y+D.neck+.02;
   this.soften('neckT',neckT,34,dt);
@@ -4496,8 +4511,9 @@ Fighter.prototype.updateAlive=function(dt,opponent){
     if(this._ritualGrabL)handL=this._ritualGrabL.clone();
     /* the elbows: down and in at guard, out and up through the raise */
     const rise=clamp((handle.y-shR.y+.18)*2.6,0,1);
+    const extension=this._technique&&this._technique.state==='strike'?Math.sin(Math.PI*clamp(this._technique.t/(this._technique.type==='thrust'?.20:.32),0,1)):0;
     const hintR=rightC.clone().multiplyScalar(lerp(.85,1.2,rise))
-      .addScaledVector(fwdC,lerp(-.3,.15,rise)); hintR.y=lerp(-.55,.5,rise);
+      .addScaledVector(fwdC,lerp(-.3,.15,rise)+extension*.32); hintR.y=lerp(-.55,.5,rise);
     solveIK(shR,handR,D.upperArm,D.foreArm,hintR,elR);
     this._ikR=(this._ikR||elR.clone()).copy(elR);      // the exact IK answer
     if(P.elbowR)P.elbowR.position.copy(elR);
@@ -4519,7 +4535,7 @@ Fighter.prototype.updateAlive=function(dt,opponent){
       game._span=Math.max(game._span||0,Math.abs(P.forearmR.scale.y*P.forearmR.userData.len-elR.distanceTo(handR))); }
     if(!this.disabled.armL&&!this.severed.armL){
       const hintL=rightC.clone().multiplyScalar(lerp(-.85,-1.2,rise))
-        .addScaledVector(fwdC,lerp(-.3,.15,rise)); hintL.y=lerp(-.55,.5,rise);
+        .addScaledVector(fwdC,lerp(-.3,.15,rise)+extension*.32); hintL.y=lerp(-.55,.5,rise);
       solveIK(shL,handL,D.upperArm,D.foreArm,hintL,elL);
       this._ikL=(this._ikL||elL.clone()).copy(elL);
       if(P.elbowL)P.elbowL.position.copy(elL);

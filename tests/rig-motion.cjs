@@ -15,7 +15,7 @@ const urls=new Map();function esmURL(file){if(!urls.has(file))urls.set(file,'dat
  const {context,THREE,run}=await loadGame({modelPipeline:true});THREE.SkeletonUtils=SkeletonUtils;context.rigFixture=rig;
  const result=JSON.parse(run(`(()=>{
   setup();game.state='fight';for(const k of Object.keys(Sound))Sound[k]=()=>{};
-  player.model=MODELPIPE.attach(player,rigFixture);let foot=0,grip=0,facing=1,relativeGrip=0,maxBladeStep=0,peakBladeSpeed=0,velocityError=0,handStretch=0,handWorst=null;let lastSword=null,lastTip=null;
+  player.model=MODELPIPE.attach(player,rigFixture);let foot=0,grip=0,facing=1,relativeGrip=0,maxBladeStep=0,peakBladeSpeed=0,velocityError=0,handStretch=0,handWorst=null,chestMatch=1,turnMin=10,turnMax=-10,handMin=10,handMax=-10,elbowMin=10,elbowMax=-10;let lastSword=null,lastTip=null;
   for(let i=0;i<480;i++){
    const phase=i%240,fw=DIRY(player.bodyYaw),rt=V3(fw.z,0,-fw.x);
    if(i%70===0)player._requestStrike=true;
@@ -24,6 +24,16 @@ const urls=new Map();function esmURL(file){if(!urls.has(file))urls.set(file,'dat
      .addScaledVector(rt,phase<120?Math.sin(phase*.12)*.8:0).setY(phase<120?1.4+Math.cos(phase*.12)*.65:1.3);
    player.vel.set(Math.sin(i*.05)*.8,0,.5);player.updateAlive(1/60,enemy);PHYS.engine.step(1/60);
    const M=player.model;
+   const actual=M.bones.RightArm.getWorldPosition(V3()).sub(M.bones.LeftArm.getWorldPosition(V3())).normalize();
+   const intended=player._K.shR.clone().sub(player._K.shL).normalize();
+   const trunk=player._K.chestT.clone().sub(player._K.chestB).normalize();
+   intended.addScaledVector(trunk,-intended.dot(trunk)).normalize();
+   chestMatch=Math.min(chestMatch,actual.dot(intended));
+   const fwBody=DIRY(player.bodyYaw),rightBody=V3(fwBody.z,0,-fwBody.x);
+   const turn=Math.atan2(-actual.dot(fwBody),actual.dot(rightBody));turnMin=Math.min(turnMin,turn);turnMax=Math.max(turnMax,turn);
+   const handY=M.bones.RightHand.getWorldPosition(V3()).y-player._K.pelvis.y;
+   const elbowY=M.bones.RightForeArm.getWorldPosition(V3()).y-player._K.pelvis.y;
+   handMin=Math.min(handMin,handY);handMax=Math.max(handMax,handY);elbowMin=Math.min(elbowMin,elbowY);elbowMax=Math.max(elbowMax,elbowY);
    if(i%60===0)M.root.traverse(o=>{
     if(!o.isSkinnedMesh)return;o.skeleton.update();
     const p=o.geometry.attributes.position,idx=o.geometry.index;
@@ -62,7 +72,11 @@ const urls=new Map();function esmURL(file){if(!urls.has(file))urls.set(file,'dat
   for(let i=0;i<30;i++)player.updateAlive(1/60,enemy);
   player.model.root.updateMatrixWorld(true);let finite=true;
   player.model.root.traverse(o=>{if(o.isSkinnedMesh){o.skeleton.update();for(let i=0;i<o.geometry.attributes.position.count;i+=97){const v=V3().fromBufferAttribute(o.geometry.attributes.position,i);o.applyBoneTransform(i,v);finite=finite&&v.toArray().every(Number.isFinite);}}});
-  return JSON.stringify({foot,grip,facing,relativeGrip,maxBladeStep,peakBladeSpeed,velocityError,handStretch,handWorst,repeatDrift,before,after,finite,severed:player.severed.armL});})()`));
+  return JSON.stringify({foot,grip,facing,relativeGrip,maxBladeStep,peakBladeSpeed,velocityError,handStretch,handWorst,chestMatch,torsoSweep:turnMax-turnMin,handSweep:handMax-handMin,elbowSweep:elbowMax-elbowMin,repeatDrift,before,after,finite,severed:player.severed.armL});})()`));
+ assert.ok(result.chestMatch>.998,JSON.stringify(result));
+ assert.ok(result.torsoSweep>.65,JSON.stringify(result));
+ assert.ok(result.handSweep>.4,JSON.stringify(result));
+ assert.ok(result.elbowSweep>.25,JSON.stringify(result));
  assert.ok(result.handStretch<3.6,JSON.stringify(result));
  assert.ok(result.peakBladeSpeed>4,JSON.stringify(result));
  assert.ok(result.velocityError<1e-8,JSON.stringify(result));

@@ -1,7 +1,7 @@
 /* Opt-in visual QA, loaded only with ?qa=1. No hooks in normal play. */
 const qaBox=document.createElement('aside');
 qaBox.style.cssText='position:fixed;top:8px;left:8px;z-index:1000;background:#101820ed;color:#eef;padding:12px;max-width:340px;max-height:78vh;overflow:auto;font:12px monospace;pointer-events:auto';
-qaBox.innerHTML='<button id="qa-walk">Movement sweep</button> <button id="qa-swing">Sword drill</button> <button id="qa-fight">Live fight</button> <button id="qa-wound">Wound showcase</button> <button id="qa-pause">Pause</button> <button id="qa-close">Hide diagnostics</button><pre id="qa-info"></pre>';
+qaBox.innerHTML='<button id="qa-walk">Movement sweep</button> <button id="qa-swing">Sword drill</button> <button id="qa-fight">Live fight</button> <button id="qa-wound">Wound showcase</button> <button id="qa-slow">Half speed</button> <button id="qa-pause">Pause</button> <button id="qa-close">Hide diagnostics</button><pre id="qa-info"></pre>';
 document.body.appendChild(qaBox);
 let qaSwing=false,qaWalk=false,qaT=0,qaFrames=[],qaLast=performance.now();
 const qaIntent=playerIntent,qaSim=simulate;
@@ -37,6 +37,7 @@ document.getElementById('qa-wound').onclick=()=>{
   enemyAI.update=()=>{};player._noBeg=true;enemy._noBeg=true;
   setTimeout(()=>{const f=enemy,pt=f._K.elL.clone();f.severLimb('armL',pt,V3(.2,.2,1),()=>{});f.addHitMark('chest',f._K.chestT.clone().add(V3(0,0,.13)),V3(1,.3,0),'severe',false);},1200);
 };
+document.getElementById('qa-slow').onclick=()=>{game.timeScale=game.timeScale===.5?1:.5;};
 document.getElementById('qa-pause').onclick=()=>{game.timeScale=game.timeScale===0?1:0;};
 document.getElementById('qa-close').onclick=()=>{qaBox.style.display='none';};
 function qaSample(now){qaFrames.push(now-qaLast);qaLast=now;if(qaFrames.length>180)qaFrames.shift();requestAnimationFrame(qaSample);}
