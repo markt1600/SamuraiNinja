@@ -14,7 +14,7 @@ async function loadGame({modelPipeline=false}={}){
  const math=Object.create(Math);math.random=()=>{randomSeed=(Math.imul(randomSeed,1664525)+1013904223)>>>0;return randomSeed/4294967296};
  const context=vm.createContext({THREE,document,window:{},innerWidth:1280,innerHeight:720,devicePixelRatio:1,
   console:{log(){},warn(){},error:console.error},Math:math,process,performance:{now:()=>0},requestAnimationFrame(){},addEventListener(){},setTimeout(){},clearTimeout(){},setInterval(){},localStorage:{getItem(){return null},setItem(){}},URLSearchParams,location:{search:''}});
- for(const f of ['audio.js','motion.js','physics.js','world.js','game.js']){
+ for(const f of ['audio.js','motion.js','motion-data.js','combat-motion.js','physics.js','world.js','game.js']){
   let source=fs.readFileSync(f,'utf8');
   // Enable only the real model pipeline, without enabling browser asset fetches.
   if(modelPipeline&&f==='game.js')source=source.replace("typeof process!=='undefined'||typeof THREE.GLTFLoader==='undefined'","typeof THREE.GLTFLoader==='undefined'");

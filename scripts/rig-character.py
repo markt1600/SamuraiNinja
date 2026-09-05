@@ -24,11 +24,11 @@ def bone(name,parent,xyz):landmarks.append((name,parent,np.array(xyz,dtype=float
 bone('Hips',None,[0,88,0]);bone('Spine','Hips',[0,104,0]);bone('Spine1','Spine',[0,119,0]);bone('Spine2','Spine1',[0,134,0]);bone('Neck','Spine2',[0,145,0]);bone('Head','Neck',[0,154,0]);bone('HeadTop','Head',[0,178,0])
 for side,sign in [('Right',1),('Left',-1)]:
  def B(n,p,x,y,z=0):return bone(side+n,side+p if p else 'Spine2',[sign*x,y,z])
- B('Shoulder',None,9,137);B('Arm','Shoulder',20,136);B('ForeArm','Arm',34,118,1);B('Hand','ForeArm',45,103,2)
+ B('Shoulder',None,9,137);B('Arm','Shoulder',20,136);B('ForeArm','Arm',34,118,1);B('Hand','ForeArm',45,103,8.5)
  # Fingers have separate chains so grip flexion is visible at the hilt.
- for fn,z in [('Index',5),('Middle',2.5),('Ring',0),('Pinky',-2.3)]:
-  for seg,x,y in [(1,48,98),(2,49,94.8),(3,49,92)]:B('Hand'+fn+str(seg),'Hand' if seg==1 else 'Hand'+fn+str(seg-1),x,y,z)
- for seg,x,y,z in [(1,44,101,6),(2,44,97,7),(3,44.5,94.5,7)]:B('HandThumb'+str(seg),'Hand' if seg==1 else 'HandThumb'+str(seg-1),x,y,z)
+ for fn,z in [('Index',12.6),('Middle',10.0),('Ring',7.5),('Pinky',5.2)]:
+  for seg,x,y in [(1,48,95),(2,49,90.5),(3,49,86.5)]:B('Hand'+fn+str(seg),'Hand' if seg==1 else 'Hand'+fn+str(seg-1),x,y,z)
+ for seg,x,y,z in [(1,44,98,12),(2,44,94,13.5),(3,44,90.5,13.7)]:B('HandThumb'+str(seg),'Hand' if seg==1 else 'HandThumb'+str(seg-1),x,y,z)
  bone(side+'UpLeg','Hips',[sign*11,85,0]);B('Leg','UpLeg',13,47,1.5);B('Foot','Leg',13,4,0);B('ToeBase','Foot',13,-2,12)
 ids={n:i for i,(n,p,v) in enumerate(landmarks)};positions=np.array([v for n,p,v in landmarks]);nodes=[]
 for n,p,v in landmarks:
@@ -47,12 +47,20 @@ def weights(P,material):
   n=landmarks[i][0];x=P[:,0];y=P[:,1]
   if 'Right' in n:d+=np.where(x<-.01,2,0)
   if 'Left' in n:d+=np.where(x>.01,2,0)
-  if any(k in n for k in ['Shoulder','Arm','Hand']):d+=np.where((abs(x)<.18)|(y<.88),2,0)
+  if any(k in n for k in ['Shoulder','Arm','Hand']):d+=np.where((abs(x)<.18)|(y<.77),2,0)
   if any(k in n for k in ['Leg','Foot','Toe']):d+=np.where(y>.96,2,0)
-  if 'Hand' in n:d+=np.where(abs(x)<.40,2,0)
-  if 'Hand' in n and any(k in n for k in ['Index','Middle','Ring','Pinky','Thumb']):d+=np.where(y>1.0,1,0)
+  if 'Hand' in n:d+=np.clip((.36-abs(x))/.08,0,1)*2
+  # Finger flexion starts at the knuckle, not across the back of the hand.
+  # Feather the transition so neighboring triangles cannot cross a hard mask.
+  if 'Hand' in n and any(k in n for k in ['Index','Middle','Ring','Pinky','Thumb']):
+   base=.975 if 'Thumb' in n else .94
+   d+=np.clip((y-base)/.055,0,1)*.35
   if n in ['Head','HeadTop']:d+=np.where(y<1.46,2,0)
   if n=='HeadTop':d+=.2
+  # Distal hands extend below the waist in the supplied A-pose. Never
+  # classify them as legs by height; this caused the long hip-to-finger spikes.
+  hand_region=(abs(x)>.395)&(y<1.065)
+  if not any(k in n for k in ['Hand','ForeArm']):d+=np.where(hand_region,10,0)
   D.append(d)
  D=np.array(D).T
  I=np.argsort(D,axis=1)[:,:4];d=np.take_along_axis(D,I,axis=1);W=1/(d+.018)**5

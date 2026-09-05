@@ -2364,7 +2364,7 @@ const PHYS=(typeof ZPhys!=='undefined')?{
 if(PHYS.enabled){ PHYS.engine.g.set(0,-9.81,0); PHYS.engine.substeps=6; PHYS.engine.iters=3; }
 
 
-const ZAN_VERSION='v62';
+const ZAN_VERSION='v63';
 console.log('%c斬 ZAN '+ZAN_VERSION,'font-size:16px');
 
 /* =========================================================================
@@ -2719,9 +2719,11 @@ const MODELPIPE=(()=>{
     const gripLoc={};
     for(const side of ['Right','Left']){
       const w=bones[side+'Hand']; if(!w)continue;
-      const k=findBone(root,side+'HandIndex2')||findBone(root,side+'HandMiddle2');
+      const k=findBone(root,side+'HandMiddle2')||findBone(root,side+'HandIndex2');
       if(!k)continue;
       k.getWorldPosition(_da);
+      const ring=findBone(root,side+'HandRing2');
+      if(ring)_da.lerp(ring.getWorldPosition(_db),.5);
       gripLoc[side]=w.worldToLocal(_da.clone());
     }
     /* the body's TRUE radius per bone, measured from the skinned mesh:
@@ -2791,7 +2793,11 @@ const MODELPIPE=(()=>{
     for(const side of ['Right','Left']){
       const b=bones[side+'Hand'],axis=bindAim[side+'Hand'];if(!b||!axis)continue;
       const q=b.getWorldQuaternion(new THREE.Quaternion());
-      const swing=new THREE.Quaternion().setFromUnitVectors(axis.clone().applyQuaternion(q),UPY);
+      const index=findBone(root,side+'HandIndex2'),pinky=findBone(root,side+'HandPinky2');
+      // The hilt runs ACROSS the curled fingers, from pinky to index.
+      // Aiming along a finger locked the contact but produced an impossible wrist.
+      const gripAxis=index&&pinky?index.getWorldPosition(V3()).sub(pinky.getWorldPosition(V3())).normalize():axis.clone().applyQuaternion(q);
+      const swing=new THREE.Quaternion().setFromUnitVectors(gripAxis,UPY);
       gripQ[side]=swing.multiply(q);
     }
     return {root,bones,aim,bindAim,gripQ,hLen,hipForward,gripLoc,armL,boneR,scale:s,worldQ:{},anims};
@@ -3957,49 +3963,6 @@ Fighter.prototype.syncFaBones=function(){
   one('armL',this.parts.forearmL,this.parts.upperArmL,B.faL);
 };
 
-/* CoM-led stepping: the body falls where it's going; a foot reaches out
-   to catch it. Planted feet are locked — position AND yaw — until they
-   step again. Heel strikes first, sole settles, toe pushes off. */
-Fighter.prototype.stepFoot=function(f,target,dt,otherPlanted,disabled,speed2d,urgent){
-  const dmg=f===this.feet.R?this.legDamage.R:this.legDamage.L;
-  /* moving faster means LONGER strides, not machine-gun shuffles: the
-     trigger distance grows with speed so each step carries further */
-  const thresh=(disabled?.34:clamp(.11+speed2d*.022,.11,.2))+dmg*.06;
-  if(f.swing>0){
-    f.swing=Math.min(1,f.swing+dt/f.dur);
-    const t=f.swing, ss=minJerk(t);
-    f.p.lerpVectors(f.from,f.to,ss);
-    f.lift=disabled?0:minJerkBell(t)*(clamp(.05+speed2d*.028,.05,.115)+(this.snowDepth||0)*.6)*(1-dmg*.55);
-    f.yaw=lerpAngle(f.yawFrom,this.bodyYaw,ss);   // foot re-aims only in flight
-    /* toe-off then heel-first: rotation profile over the swing */
-    f.roll= t<.25 ? .38*minJerk(t/.25)
-          : t<.75 ? lerp(.38,-.22,minJerk((t-.25)/.5))
-          : lerp(-.22,-.14,minJerk((t-.75)/.25));
-    if(disabled&&groundMark&&f.p.distanceToSquared(f.from)>.002)
-      groundMark.drag(f.from.x,f.from.z,f.p.x,f.p.z);
-    if(f.swing>=1){ f.swing=0; f.lift=0; f.settle=.09;
-      /* the body SETTLES onto the landed foot — weight, not gliding */
-      this.softHit&&this.softHit('chestB',V3(0,-1,0),.035+speed2d*.025);
-      Sound.step&&Sound.step(speed2d,f.p);
-      if(!disabled&&groundMark&&!onIce(f.p))groundMark.foot(f.p.x,f.p.z,f.yaw); }
-  } else {
-    f.lift=0;
-    if(f.settle>0){ f.settle-=dt; f.roll=lerp(0,-.14,clamp(f.settle/.09,0,1)); }
-    else f.roll=0;
-    const yawErr=Math.abs(angDiff(this.bodyYaw,f.yaw));
-    const need=f.p.distanceTo(target)>thresh || yawErr>.72 || urgent;
-    if(otherPlanted && need){
-      f.swing=1e-4; f.from=f.p.clone(); f.yawFrom=f.yaw;
-      f.to=target.clone(); f.to.y=0;
-      // Keep the landing under the reachable support envelope.
-      const reach=f.to.clone().sub(this.pos).setY(0);
-      if(reach.length()>.5)f.to.copy(this.pos).add(reach.setLength(.5)).setY(0);
-      const hurt=1+dmg*.8+(disabled?1.2:0)+(this.snowDepth||0)*1.6;
-      f.dur=clamp((urgent?.17:.3)-speed2d*.028,.15,.3)*hurt/Math.max(this.mobility,.35);
-    }
-  }
-};
-
 // Muscle force builds and releases over time; knockback stays in velocity.
 // The same drive applies to player and AI, including impaired mobility.
 Fighter.prototype.bodyImpact=function(direction,energy){
@@ -4101,6 +4064,25 @@ Fighter.prototype.updateAlive=function(dt,opponent){
   }
 
   const fwd=DIRY(this.bodyYaw), right=V3(fwd.z,0,-fwd.x);
+  this._locomotion=this._locomotion||new ZCombatMotion.Locomotion();
+  const capturedPose=this._locomotion.update(this,dt);
+  for(const side of ['R','L']){
+    const foot=this.feet[side];
+    if(foot.landed){
+      const speed=Math.hypot(this.vel.x,this.vel.z);
+      this._bodyBounceV=(this._bodyBounceV||0)-Math.min(.10,speed*.035);
+      this.softHit&&this.softHit('chestB',V3(0,-1,0),.035+speed*.025);
+      Sound.step&&Sound.step(speed,foot.p);
+      if(groundMark&&!onIce(foot.p))groundMark.foot(foot.p.x,foot.p.z,foot.yaw);
+    }
+    if(foot.dragFrom&&groundMark&&foot.p.distanceToSquared(foot.dragFrom)>.0001)
+      groundMark.drag(foot.dragFrom.x,foot.dragFrom.z,foot.p.x,foot.p.z);
+  }
+  if(this.hasSword&&!this.weapon.blunt&&!this.begging){
+    this._technique=this._technique||new ZCombatMotion.Technique();
+    if(!this.stuck)this._technique.update(this,dt);
+  }else this._technique=null;
+
 
   /* guard freshness: a block raised in the last instant is a PARRY */
   if(this.guarding&&!this._wasGuard)this.guardStart=simNow();
@@ -4111,7 +4093,7 @@ Fighter.prototype.updateAlive=function(dt,opponent){
   /* hip drive: lateral sword momentum rotates the trunk */
   const latV=this.tipVel.dot(right);
   const prevTwist=this.twist;
-  this.twist=lerp(this.twist,clamp(latV*.045,-.55,.55),clamp(dt*9,0,1));
+  this.twist=lerp(this.twist,this._technique?this._technique.pose.twist:clamp(latV*.045,-.55,.55),clamp(dt*16,0,1));
   const twistRate=Math.abs(this.twist-prevTwist)/Math.max(dt,1e-4);
   /* kinetic chain: cut power comes from the whole body, not the wrists.
      off-balance = weak; mid-step = weak; hips driving = strong */
@@ -4153,25 +4135,7 @@ Fighter.prototype.updateAlive=function(dt,opponent){
   this.prevVel.copy(this.vel);
   TMP3.clampLength(0,14).multiplyScalar(.004).addScaledVector(this.vel,.009);
   this.leanV.lerp(TMP3,clamp(dt*5,0,1)); this.leanV.y=0;
-  /* inverted-pendulum catch point ~0.26s ahead */
-  const catchPt=TMP4.copy(this.pos).addScaledVector(this.vel,.14);
-  const stride=clamp(speed2d*.065,0,.12);
-  const vdir=speed2d>.3?TMP3.copy(this.vel).setY(0).normalize():fwd;
-  const tgtR=catchPt.clone().addScaledVector(right,.17).addScaledVector(fwd,.16)
-    .addScaledVector(vdir,stride*(1-this.legDamage.R*.5));
-  const tgtL=catchPt.clone().addScaledVector(right,-.17).addScaledVector(fwd,-.12)
-    .addScaledVector(vdir,stride*(1-this.legDamage.L*.5));
-  /* a kneeling man gathers his feet beneath him — no leg stretched to a
-     foot planted a stride away under the skirt */
-  if((this.kneel>0||this.begging)&&!this.disabled.legR&&!this.disabled.legL){
-    const kk=Math.max(this.kneel||0,this.begging?.9:0)*.8;
-    TMP3.copy(this.pos).addScaledVector(right,.14).addScaledVector(fwd,.06);
-    tgtR.lerp(TMP3,kk);
-    TMP3.copy(this.pos).addScaledVector(right,-.14).addScaledVector(fwd,-.24);
-    tgtL.lerp(TMP3,kk);
-  }
-  /* balance: if the CoM escapes the support line, an urgent catch-step */
-  let urgR=false,urgL=false;
+  // Balance is evaluated against the motion controller's support contacts.
   if(ft.R.swing===0&&ft.L.swing===0){
     const ax=ft.L.p, bx=ft.R.p;
     TMP2.subVectors(bx,ax); const L2=Math.max(TMP2.lengthSq(),1e-6);
@@ -4179,32 +4143,7 @@ Fighter.prototype.updateAlive=function(dt,opponent){
     const tt=clamp(TMP3.dot(TMP2)/L2,0,1);
     TMP3.addScaledVector(TMP2,-tt); TMP3.y=0;
     this.balanceErr=Math.max(0,TMP3.length()-.06);
-    if(TMP3.length()>.19){                       // outside the support strip
-      if(TMP3.dot(right)>0)urgR=true; else urgL=true;
-    }
   } else this.balanceErr=(this.balanceErr||0)*.9;
-  // Both feet must get support time. Choose the most displaced foot,
-  // then alternate; never give the right foot first refusal every frame.
-  const airborneR=ft.R.swing>0, airborneL=ft.L.swing>0;
-  let lead=null;
-  if(!airborneR&&!airborneL){
-    const er=ft.R.p.distanceToSquared(tgtR)+(urgR?.2:0);
-    const el=ft.L.p.distanceToSquared(tgtL)+(urgL?.2:0);
-    lead=this._lastStep==='R'?'L':this._lastStep==='L'?'R':er>el?'R':'L';
-  }
-  this.stepFoot(ft.R,tgtR,dt,lead==='R',this.disabled.legR,speed2d,urgR);
-  this.stepFoot(ft.L,tgtL,dt,lead==='L',this.disabled.legL,speed2d,urgL);
-  if(!airborneR&&ft.R.swing>0)this._lastStep='R';
-  if(!airborneL&&ft.L.swing>0)this._lastStep='L';
-  const stepping=ft.R.swing>0||ft.L.swing>0;
-  // Landing compresses the supporting leg before it recovers its height.
-  if((airborneR&&ft.R.swing===0)||(airborneL&&ft.L.swing===0)){
-    const hurt=airborneR?this.legDamage.R:this.legDamage.L;
-    this._bodyBounceV=(this._bodyBounceV||0)-clamp(speed2d*.035*(1+hurt*.5),0,.10);
-  }
-
-  /* pelvis rides between the feet — visible weight transfer */
-  const feetMid=TMP2.addVectors(ft.R.p,ft.L.p).multiplyScalar(.5);
   let hurtSag=(this.disabled.legR?.15:0)+(this.disabled.legL?.15:0)
     +lerp(.1,0,clamp(this.bloodFrac,0,1));
   /* limp: sag when weight is on the damaged leg (other foot in flight) */
@@ -4217,10 +4156,6 @@ Fighter.prototype.updateAlive=function(dt,opponent){
   this.idleT=idle?(this.idleT||0)+dt:0;
   const swayT=idle?Math.sin(this.breath*.55)*.02+Math.sin(this.breath*.19)*.013:0;
   this._sway=lerp(this._sway||0,swayT,clamp(dt*1.5,0,1));
-  if(false){ // no random movement impulses while standing still       // an honest little repositioning step
-    this._nextShift=this.idleT+4+Math.random()*3.5;
-    this.vel.x+=rand(-.3,.3); this.vel.z+=rand(-.22,.22);
-  }
   /* stride mechanics: the weight rides the planted foot, the pelvis dips
      through mid-swing, and the shoulders counter-rotate against the hips */
   let wshift=0, stepDip=0, strideCtr=0;
@@ -4235,15 +4170,15 @@ Fighter.prototype.updateAlive=function(dt,opponent){
   this._ctr=lerp(this._ctr||0,strideCtr*.16*clamp(speed2d,0,1.4),clamp(dt*9,0,1));
   /* mocap life: the loco clips lend the trunk their true timing — and
      the faster the body moves, the more the clip owns the rhythm */
-  const ML=(this.alive&&!(this.kneel>0)&&!this.begging&&typeof GSLOCO!=='undefined')
+  const ML=(!capturedPose&&this.alive&&!(this.kneel>0)&&!this.begging&&typeof GSLOCO!=='undefined')
     ?GSLOCO.tick(this,dt,speed2d):null;
   const mk=ML?.4:0;
   const bounceTarget=-stepDip*(.009+clamp(speed2d,0,2)*.005);
   this._bodyBounceV=((this._bodyBounceV||0)+120*(bounceTarget-(this._bodyBounce||0))*dt)/(1+19*dt);
   this._bodyBounce=clamp((this._bodyBounce||0)+this._bodyBounceV*dt,-.035,.012);
-  let pelvisY=D.pelvisY-hurtSag+this._bodyBounce
+  let pelvisY=capturedPose.pelvis.y-hurtSag+this._bodyBounce-(this._technique?this._technique.pose.sink:0)
     +Math.sin(this.breath*1.6)*(.004+effort*.002)+(this.previewBob||0)+(ML?ML.bob*1.05*mk:0);
-  const pelvis=V3(lerp(feetMid.x,this.pos.x,.82),pelvisY,lerp(feetMid.z,this.pos.z,.82));
+  const pelvis=capturedPose.pelvis.clone();pelvis.y=pelvisY;
   // Lower the hips to reach a planted ankle, rather than sliding that ankle.
   const legReach=(D.thigh+D.shin)*.985;
   let supportHeight=D.pelvisY;
@@ -4256,7 +4191,7 @@ Fighter.prototype.updateAlive=function(dt,opponent){
   pelvisY=Math.min(pelvisY,this._supportY);pelvis.y=pelvisY;
   const pelvisYawA=this.bodyYaw+this.twist*.3-this._ctr*.7+(ML?ML.hipYaw*.62*mk:0);
   const fwdP=DIRY(pelvisYawA), rightP=V3(fwdP.z,0,-fwdP.x);
-  pelvis.addScaledVector(rightP,(this._sway||0)+this._wshift+(ML?ML.sway*.92*mk:0));
+  pelvis.addScaledVector(rightP,this._wshift*.35);
   if(ML)pelvis.addScaledVector(fwdP,ML.push*.72*mk);
 
   /* flinch spring: hits ripple through the trunk */
@@ -4276,6 +4211,8 @@ Fighter.prototype.updateAlive=function(dt,opponent){
   const chestT=chestB.clone().addScaledVector(fwdC,lean).add(this.flinch)
     .add(this.leanV);
   chestT.y=chestB.y+D.torso*.62+Math.sin(this.breath*1.6)*(.003+effort*.002);
+  const capturedLean=capturedPose.chestT.clone().sub(capturedPose.pelvis).setY(0);
+  chestT.addScaledVector(capturedLean,.65);
   this.soften('chestT',chestT,42,dt);
   const neckT=chestT.clone().addScaledVector(fwdC,.02); neckT.y=chestT.y+D.neck+.02;
   this.soften('neckT',neckT,34,dt);
@@ -4339,6 +4276,7 @@ Fighter.prototype.updateAlive=function(dt,opponent){
   shL.y=chestT.y-.045+brRise;
   const ctrl=this.swordControl;
   if(this.hasSword){
+    if(!this._technique||this.weapon.blunt||this.stuck){
     const W=this.weapon||WEAPONS.katana;
     let K=(this.thrust?150:110)*W.speed;
     const dampingRatio=this.thrust?1:.92;
@@ -4461,12 +4399,18 @@ Fighter.prototype.updateAlive=function(dt,opponent){
     if(this.bladeSpeed>6.5 && simNow()-this.lastWhoosh>260){
       Sound.whoosh(this.bladeSpeed,this.tip); this.lastWhoosh=simNow(); }
 
+    }
     /* TWO-HANDED GRIP: the hands sweep a compressed arc anchored at the
        solar plexus; the WRISTS articulate the blade through the full arc.
        Raise the tip overhead and the blade cocks back (furikaburi);
        cut through and the tip snaps far ahead of the hands. The blade
        is no longer collinear with the arm — it is HELD, not pointed. */
-    const BL=this.weapon&&this.weapon.blunt;
+    const BL=this.weapon&&this.weapon.blunt,handle=V3(),bladeDir=V3();
+    if(this._technique&&!this.stuck&&!BL){
+      const pose=this._technique.weapon(this,pelvis);
+      handle.copy(pose.handle);bladeDir.copy(pose.dir);
+      this.katana.position.copy(handle);this.katana.quaternion.copy(pose.q);
+    }else{
     const gripAnchor=chestB.clone().addScaledVector(fwdC,BL?.2:.14);
     gripAnchor.y=chestB.y+(BL?.3:.12);      // fists ride high
     const toTip=TMP1.subVectors(this.tip,gripAnchor);
@@ -4474,14 +4418,14 @@ Fighter.prototype.updateAlive=function(dt,opponent){
     TMP3.copy(fwdC).setY(-.18).normalize();          // neutral guard direction
     const handDir=TMP2.copy(toTip).lerp(TMP3,.5).normalize();
     const gripR=clamp(.28+reach*.10,.30,.48);
-    const handle=gripAnchor.clone().addScaledVector(handDir,gripR);
+    handle.copy(gripAnchor).addScaledVector(handDir,gripR);
     const headY=chestT.y+.28;                        // hands rise less than steel
     if(this.tip.y>headY)handle.y+=Math.min((this.tip.y-headY)*.30,.14);
     /* the grip never leaves the sword arm's honest reach */
     { TMP4.subVectors(handle,shR); const hd=TMP4.length();
       const maxR=(D.upperArm+D.foreArm)*.94;
       if(hd>maxR)handle.copy(shR).addScaledVector(TMP4.divideScalar(hd),maxR); }
-    const bladeDir=TMP2.subVectors(this.tip,handle);
+    bladeDir.subVectors(this.tip,handle);
     if(bladeDir.lengthSq()<.04)bladeDir.copy(toTip); // degenerate guard
     bladeDir.normalize();
     clampBladeDir(bladeDir,fwdC,rightC);
@@ -4512,6 +4456,7 @@ Fighter.prototype.updateAlive=function(dt,opponent){
       _pq.setFromAxisAngle(UPY,this.katRoll);
       this.katana.quaternion.multiply(_pq);
     }
+    }
     /* keep previous segment for swept collision */
     if(this.bladeA){ this.prevBladeA.copy(this.bladeA); this.prevBladeB.copy(this.bladeB); this.hadPrev=true; }
     else this.hadPrev=false;
@@ -4523,6 +4468,19 @@ Fighter.prototype.updateAlive=function(dt,opponent){
     if(this.hadPrev)this.bladeVel.subVectors(this.bladeB,this.prevBladeB).divideScalar(dt);
     else this.bladeVel.set(0,0,0);
     this.bladeSpeed=this.bladeVel.length();
+    if(this.bladeSpeed>6.5&&simNow()-this.lastWhoosh>260){Sound.whoosh(this.bladeSpeed,this.bladeB);this.lastWhoosh=simNow();}
+    if(this._technique&&!this.stuck&&!this.weapon.blunt){
+      this.tip.copy(this.bladeB);this.tipVel.copy(this.bladeVel);
+      this._technique.lastVelocity=this.tipVel.clone();
+      // The authored blade's cutting edge faces local +Z. Distinguish a
+      // leading edge from a flat/backward swipe using the actual contact motion.
+      const lateral=this.bladeVel.clone().addScaledVector(bladeDir,-this.bladeVel.dot(bladeDir));
+      if(lateral.lengthSq()>.16){
+        const edge=V3(0,0,1).applyQuaternion(this.katana.quaternion);
+        this.alignment=clamp(lateral.normalize().dot(edge),.02,1);
+      }
+      if(this._technique.state==='strike')this.thrust=this._technique.type==='thrust';
+    }
 
     /* arms: two-bone IK with anatomical elbow hints */
     const elR=V3(),elL=V3();
@@ -4603,8 +4561,12 @@ Fighter.prototype.updateAlive=function(dt,opponent){
       const dl=TMP4.length();
       if(dl>legMax)ank.copy(hip).addScaledVector(TMP4.divideScalar(dl),legMax);
     } }
-  solveIK(hipR,ankR,D.thigh,D.shin,kneeHint,knR);
-  solveIK(hipL,ankL,D.thigh,D.shin,kneeHint,knL);
+  const kneeHintR=capturedPose.knR.clone().sub(capturedPose.hipR);
+  const kneeHintL=capturedPose.knL.clone().sub(capturedPose.hipL);
+  if(kneeHintR.lengthSq()<1e-8)kneeHintR.copy(kneeHint);
+  if(kneeHintL.lengthSq()<1e-8)kneeHintL.copy(kneeHint);
+  solveIK(hipR,ankR,D.thigh,D.shin,kneeHintR,knR);
+  solveIK(hipL,ankL,D.thigh,D.shin,kneeHintL,knL);
   this.soften('knR',knR,85,dt); this.soften('knL',knL,85,dt);
   TMP4.subVectors(knR,hipR).normalize(); knR.copy(hipR).addScaledVector(TMP4,D.thigh);
   TMP4.subVectors(knL,hipL).normalize(); knL.copy(hipL).addScaledVector(TMP4,D.thigh);
@@ -4759,7 +4721,11 @@ document.addEventListener('pointerlockchange',()=>{
   if(!document.pointerLockElement&&game.state==='fight')
     log('pointer freed — click to take up the sword again',false);
 });
-addEventListener('mousedown',e=>{ if(e.button===2)input.rmb=true; });
+addEventListener('mousedown',e=>{
+  if(e.target&&e.target.closest&&e.target.closest('button,a,input,select'))return;
+  if(e.button===2)input.rmb=true;
+  if(e.button===0&&game.state==='fight'&&player)player._requestStrike=true;
+});
 addEventListener('mouseup',e=>{ if(e.button===2)input.rmb=false; });
 addEventListener('contextmenu',e=>e.preventDefault());
 
@@ -7027,8 +6993,8 @@ function applyAmbience(stage){
 }
 // Existing rigged assets keep their appearance; the simulation owns the
 // joints and damage. A load arriving after a restart cannot dress an old actor.
-const CHARACTER_ASSETS={musashi:'models/ronin.glb',yoroi:'models/ronin.glb',
-  onna:'models/ronin.glb',okina:'models/Old Man.fbx'};
+const CHARACTER_ASSETS={musashi:'models/ronin.glb?v=rig4',yoroi:'models/ronin.glb?v=rig4',
+  onna:'models/ronin.glb?v=rig4',okina:'models/Old Man.fbx'};
 function dressFighter(f,slot){
   if(!MODELPIPE.enabled)return;
   if(slot&&MODELPIPE.current[slot]){f.setModel(MODELPIPE.current[slot]);return;}
@@ -7404,7 +7370,7 @@ if(IS_TOUCH){
   joy.addEventListener('touchstart',e=>{ e.preventDefault();
     const t=e.changedTouches[0]; joyId=t.identifier; joyAt(t); },{passive:false});
   bl.addEventListener('touchstart',e=>{ e.preventDefault();
-    const t=e.changedTouches[0]; swId=t.identifier; bladeAt(t); },{passive:false});
+    const t=e.changedTouches[0]; swId=t.identifier; bladeAt(t); if(game.state==='fight')player._requestStrike=true; },{passive:false});
   addEventListener('touchmove',e=>{
     for(const t of e.changedTouches){
       if(t.identifier===joyId)joyAt(t);
@@ -7428,7 +7394,7 @@ if(IS_TOUCH){
       b.classList.remove('on'); fn(false); },{passive:false});
   };
   hold('btn-guard',v=>input.rmb=v);
-  hold('btn-thrust',v=>input.shift=v);
+  hold('btn-thrust',v=>{input.shift=v;if(v&&game.state==='fight')player._requestStrike=true;});
   hold('btn-fatality',v=>{ if(v)beginFatality(); });
   document.addEventListener('contextmenu',e=>e.preventDefault());
 }

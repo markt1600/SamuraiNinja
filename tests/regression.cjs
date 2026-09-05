@@ -82,7 +82,7 @@ const {FixedClock,PoseBuffer}=require('../motion.js');
  });
  await test('feet alternate and planted support does not slide',()=>{
   const result=JSON.parse(run(`(()=>{
-   setup();game.state='fight';let r=0,l=0,slide=0,air=0,kneeError=0;
+   setup();game.state='fight';let r=0,l=0,slide=0,air=0,kneeError=0,steps=0;const stepSound=Sound.step;Sound.step=()=>steps++;
    for(let i=0;i<300;i++){
     player.vel.set(0,0,.9);const ft=player.feet;
     const pr=ft.R.p.clone(),pl=ft.L.p.clone(),sr=ft.R.swing,sl=ft.L.swing;
@@ -93,10 +93,10 @@ const {FixedClock,PoseBuffer}=require('../motion.js');
     if(ft.R.swing>0&&ft.L.swing>0)air++;
     kneeError=Math.max(kneeError,Math.abs(player._K.hipR.distanceTo(player._K.knR)-player.dims.thigh));
    }
-   return JSON.stringify({r,l,slide,air,kneeError});
+   Sound.step=stepSound;return JSON.stringify({r,l,slide,air,kneeError,steps});
   })()`));
-  assert.ok(result.r>=5&&result.l>=5,JSON.stringify(result));assert.ok(Math.abs(result.r-result.l)<=1);
-  assert.equal(result.slide,0);assert.equal(result.air,0);assert.ok(result.kneeError<1e-7);
+  assert.ok(result.r>=5&&result.l>=5,JSON.stringify(result));assert.ok(Math.abs(result.r-result.l)<=1,JSON.stringify(result));
+  assert.ok(result.steps>=5);assert.equal(result.slide,0);assert.equal(result.air,0);assert.ok(result.kneeError<1e-7);
  });
  await test('frame schedule does not change movement or anatomy state',()=>{
   const results=[];

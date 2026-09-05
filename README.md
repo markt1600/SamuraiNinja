@@ -1,5 +1,33 @@
 # 斬 ZAN — a duel in the snow
 
+## Coordinated fighting movement (v63)
+
+The hand-to-hip spikes were a skinning defect: distal hand vertices below the
+old height cutoff were weighted to the upper leg. The corrected hand landmarks
+and anatomical masks are baked into `models/ronin.glb`; the asset test now rejects
+leg/torso influences on those hand vertices.
+
+`combat-motion.js` replaces the free-tip sword drive for armed techniques and
+independent procedural foot chasing with a coordinated controller:
+
+- The bundled Mixamo idle, walk, strafe and run clips supply gait, knee direction,
+  pelvis height and torso lean. Playback follows actual travel speed. Contact
+  locking and alternating support prevent the mocap from sliding planted feet.
+- Authored two-hand cuts and thrusts have preparation, strike and recovery phases,
+  hip rotation, knee compression, lead-foot placement and follow-through.
+- Cursor movement selects the cut line; **left click commits**, **Shift + left
+  click thrusts**, **right click guards**, and **WASD moves**. The controls are
+  shown on the start screen. Moving the cursor alone does not initiate attacks.
+- Blade contacts still generate impulses; deflection modifies the motion target.
+  Significant stun interrupts a technique. Contact speed drives injury energy;
+  the existing anatomy, bone gates, bleeding, severance and disability remain.
+- Regenerate capture data with `node scripts/bake-motion.cjs`. `npm test` covers
+  contact locking, grip stability, hand weights, technique phases, interruption,
+  deflection and an AI duel that must produce both blade contacts and injuries.
+
+This uses the current Three.js renderer and anatomical simulation. It is a new
+character-motion layer, not a claim of a finished commercial animation system.
+
 ## Movement, grip and wound response (v62)
 
 - Imported rigs use immutable bind directions. Both hands maintain weapon-local

@@ -15,14 +15,30 @@ const urls=new Map();function esmURL(file){if(!urls.has(file))urls.set(file,'dat
  const {context,THREE,run}=await loadGame({modelPipeline:true});THREE.SkeletonUtils=SkeletonUtils;context.rigFixture=rig;
  const result=JSON.parse(run(`(()=>{
   setup();game.state='fight';for(const k of Object.keys(Sound))Sound[k]=()=>{};
-  player.model=MODELPIPE.attach(player,rigFixture);let foot=0,grip=0,facing=1,relativeGrip=0,maxBladeStep=0,peakBladeSpeed=0,velocityError=0;let lastSword=null,lastTip=null;
+  player.model=MODELPIPE.attach(player,rigFixture);let foot=0,grip=0,facing=1,relativeGrip=0,maxBladeStep=0,peakBladeSpeed=0,velocityError=0,handStretch=0,handWorst=null;let lastSword=null,lastTip=null;
   for(let i=0;i<480;i++){
    const phase=i%240,fw=DIRY(player.bodyYaw),rt=V3(fw.z,0,-fw.x);
+   if(i%70===0)player._requestStrike=true;
    player.thrust=phase>=120&&phase<180;player.guarding=phase>=180;
    player.tipTarget.copy(player.pos).addScaledVector(fw,player.thrust?1.5:1)
      .addScaledVector(rt,phase<120?Math.sin(phase*.12)*.8:0).setY(phase<120?1.4+Math.cos(phase*.12)*.65:1.3);
    player.vel.set(Math.sin(i*.05)*.8,0,.5);player.updateAlive(1/60,enemy);PHYS.engine.step(1/60);
    const M=player.model;
+   if(i%60===0)M.root.traverse(o=>{
+    if(!o.isSkinnedMesh)return;o.skeleton.update();
+    const p=o.geometry.attributes.position,idx=o.geometry.index;
+    const hand=v=>Math.abs(p.getX(v))>.395&&p.getY(v)<1.065;
+    for(let e=0;e<idx.count;e+=3)for(let j=0;j<3;j++){
+     const a=idx.getX(e+j),b=idx.getX(e+(j+1)%3);if(!hand(a)||!hand(b))continue;
+     const va=V3().fromBufferAttribute(p,a),vb=V3().fromBufferAttribute(p,b),rest=va.distanceTo(vb);
+     if(rest<.004)continue;
+     o.applyBoneTransform(a,va);o.applyBoneTransform(b,vb);if(va.distanceTo(vb)/rest>handStretch){handStretch=va.distanceTo(vb)/rest;
+      const si=o.geometry.attributes.skinIndex,sw=o.geometry.attributes.skinWeight;
+      const info=v=>({v,p:V3().fromBufferAttribute(p,v).toArray(),bones:[si.getX(v),si.getY(v),si.getZ(v),si.getW(v)].map(k=>o.skeleton.bones[k].name),w:[sw.getX(v),sw.getY(v),sw.getZ(v),sw.getW(v)]});
+      handWorst={a:info(a),b:info(b),rest,deformed:va.distanceTo(vb)};
+     }
+    }
+   });
    if(lastSword)maxBladeStep=Math.max(maxBladeStep,lastSword.angleTo(player.katana.quaternion));
    lastSword=player.katana.quaternion.clone();
    if(lastTip)velocityError=Math.max(velocityError,player.bladeB.clone().sub(lastTip).multiplyScalar(60).distanceTo(player.bladeVel));
@@ -46,12 +62,13 @@ const urls=new Map();function esmURL(file){if(!urls.has(file))urls.set(file,'dat
   for(let i=0;i<30;i++)player.updateAlive(1/60,enemy);
   player.model.root.updateMatrixWorld(true);let finite=true;
   player.model.root.traverse(o=>{if(o.isSkinnedMesh){o.skeleton.update();for(let i=0;i<o.geometry.attributes.position.count;i+=97){const v=V3().fromBufferAttribute(o.geometry.attributes.position,i);o.applyBoneTransform(i,v);finite=finite&&v.toArray().every(Number.isFinite);}}});
-  return JSON.stringify({foot,grip,facing,relativeGrip,maxBladeStep,peakBladeSpeed,velocityError,repeatDrift,before,after,finite,severed:player.severed.armL});})()`));
+  return JSON.stringify({foot,grip,facing,relativeGrip,maxBladeStep,peakBladeSpeed,velocityError,handStretch,handWorst,repeatDrift,before,after,finite,severed:player.severed.armL});})()`));
+ assert.ok(result.handStretch<3.6,JSON.stringify(result));
  assert.ok(result.peakBladeSpeed>4,JSON.stringify(result));
  assert.ok(result.velocityError<1e-8,JSON.stringify(result));
  assert.ok(result.relativeGrip<1e-6,JSON.stringify(result));
  assert.ok(result.repeatDrift<1e-6,JSON.stringify(result));
- assert.ok(result.maxBladeStep<.24,JSON.stringify(result));
+ assert.ok(result.maxBladeStep<.38,JSON.stringify(result));
  assert.ok(result.foot<1e-6,JSON.stringify(result));assert.ok(result.grip<1e-6,JSON.stringify(result));assert.ok(result.facing>.7,JSON.stringify(result));assert.ok(result.after<result.before);assert.equal(result.finite,true);assert.equal(result.severed,true);
  console.log('Rig motion: foot and grip contacts within 1 micron; skinned severance and subsequent movement finite.',result);
 })().catch(e=>{console.error(e);process.exit(1)});

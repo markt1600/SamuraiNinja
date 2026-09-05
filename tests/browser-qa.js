@@ -14,7 +14,8 @@ simulate=function(dt){
     player.tipTarget.copy(player.pos).addScaledVector(DIRY(player.bodyYaw),1.1).setY(1.3);
   }
   if(qaSwing){
-    qaT+=dt;enemyAI.update=()=>{};player.vel.set(0,0,0);enemy.vel.set(0,0,0);
+    const oldT=qaT;qaT+=dt;enemyAI.update=()=>{};
+    if(Math.floor(oldT/1.3)!==Math.floor(qaT/1.3))player._requestStrike=true;player.vel.set(0,0,0);enemy.vel.set(0,0,0);
     const t=qaT%8,fw=DIRY(player.bodyYaw),rt=V3(fw.z,0,-fw.x);
     player.thrust=t>=4&&t<6;player.guarding=t>=6;
     player.tipTarget.copy(player.pos).addScaledVector(fw,player.thrust?1.55:1)
@@ -24,7 +25,7 @@ simulate=function(dt){
 };
 document.getElementById('qa-swing').onclick=()=>{
   document.getElementById('menu').classList.add('hidden');restart();qaWalk=false;qaSwing=true;qaT=0;
-  player._noBeg=true;enemy._noBeg=true;game.introT=0;enemy.pos.z+=3;
+  player._noBeg=true;enemy._noBeg=true;game.introT=0;enemy.pos.z+=1.5;
 };
 document.getElementById('qa-walk').onclick=()=>{qaSwing=false;
   document.getElementById('menu').classList.add('hidden');restart();qaWalk=true;qaT=0;
@@ -51,5 +52,5 @@ setInterval(()=>{
   feet:{R:ft.R.swing,L:ft.L.swing},ankleError:{R:ankleError('R'),L:ankleError('L')},
   gripError:player.model&&player.model.gripLoc.Right?player.model.bones.RightHand.localToWorld(player.model.gripLoc.Right.clone()).distanceTo(K.haR):null,
   gripAngle:player.model&&player.model.gripQ.Right?player.katana.quaternion.clone().invert().multiply(player.model.bones.RightHand.getWorldQuaternion(new THREE.Quaternion())).angleTo(player.model.gripQ.Right):null,
-  bladeSpeed:player.bladeSpeed,materials:mats},null,2);
+  bladeSpeed:player.bladeSpeed,technique:player._technique&&player._technique.state,gait:player._locomotion&&player._locomotion.mode,materials:mats},null,2);
 },1000);

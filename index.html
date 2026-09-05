@@ -194,7 +194,7 @@
   body.touch #btn-fatality.show{display:flex}
   body.touch #hint{display:none}
 </style>
-<link rel="stylesheet" href="presentation.css?v=v62.2">
+<link rel="stylesheet" href="presentation.css?v=v63.5">
 </head>
 <body>
 <div id="rotate"><div class="rk">斬</div>
@@ -244,19 +244,19 @@
   <div class="rule"></div>
   <div id="howto-desktop">
     <div class="controls">
-      <b>mouse</b><span>your blade has mass — swing hard to cut, slow taps glance off</span>
+      <b>mouse</b><span>choose a cut line · left click commits the strike</span>
       <b>edge</b><span>a turning blade lands flat; commit through the line of the cut</span>
       <b>RMB</b><span>guard — raised at the last instant, it becomes a parry</span>
       <b>BIND</b><span>when blades lock: walk INTO him to press through — or clinch; pull away to break</span>
-      <b>shift</b><span>thrust posture — the point beats armor and ribs</span>
+      <b>shift</b><span>hold shift + left click to thrust</span>
       <b>W A S D</b><span>footwork in SCREEN directions — up, left, down, right</span>
     </div>
   </div>
   <div id="howto-touch" class="controls">
-    <b>刀 right stick</b><span>your blade — push where the edge should go; fast pushes cut</span>
+    <b>刀 right stick</b><span>touch to commit a cut; position selects the cut line</span>
     <b>移動 left stick</b><span>footwork in screen directions — distance is life</span>
     <b>守 GUARD</b><span>hold to guard — raised at the last instant, it parries</span>
-    <b>突 THRUST</b><span>hold for thrust posture — the point beats armor</span>
+    <b>突 THRUST</b><span>tap to commit a thrust</span>
     <b>BIND</b><span>blades locked: walk INTO him to press or clinch; pull away to break</span>
   </div>
   <div class="rule"></div>
@@ -311,7 +311,7 @@
 <a id="credits-link" href="credits.html" target="_blank" rel="noopener">ASSET CREDITS</a>
 <button id="sound-toggle" aria-label="Mute sound" aria-pressed="false">SOUND ON</button>
 <script type="importmap">
-{ "imports": { "three": "./vendor/three.module.js?v=v62.2",
+{ "imports": { "three": "./vendor/three.module.js?v=v63.5",
                "three/addons/": "./vendor/addons/" } }
 </script>
 <script type="module">
@@ -327,14 +327,14 @@ import * as SkeletonUtils from 'three/addons/utils/SkeletonUtils.js';
    composite); keep r128-era color semantics */
 THREE.ColorManagement.enabled = false;
 window.THREE = Object.assign({}, THREE, { GLTFLoader, FBXLoader, RGBELoader, SkeletonUtils });
-for (const src of ['audio.js?v=v62.2', 'motion.js?v=v62.2', 'physics.js?v=v62.2', 'world.js?v=v62.2', 'game.js?v=v62.2'])
+for (const src of ['audio.js?v=v63.5', 'motion.js?v=v63.5', 'motion-data.js?v=v63.5', 'combat-motion.js?v=v63.5', 'physics.js?v=v63.5', 'world.js?v=v63.5', 'game.js?v=v63.5'])
   await new Promise((ok, fail) => {
     const s = document.createElement('script');
     s.src = src; s.onload = ok; s.onerror = fail;
     document.body.appendChild(s);
   });
 if(new URLSearchParams(location.search).has('qa')){
-  const qa=document.createElement('script');qa.src='tests/browser-qa.js?v=v62.2';document.body.appendChild(qa);
+  const qa=document.createElement('script');qa.src='tests/browser-qa.js?v=v63.5';document.body.appendChild(qa);
 }
 </script>
 </body>
