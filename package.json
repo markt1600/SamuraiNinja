@@ -1,0 +1,11 @@
+{
+  "name": "zan-samurai-ninja",
+  "version": "0.61.0",
+  "private": true,
+  "description": "Simulation-first sword fighting in a winter forest",
+  "scripts": {
+    "test": "node tests/regression.cjs && node tests/audio.cjs && node tests/character.cjs && node tests/rig-motion.cjs",
+    "check": "node --check audio.js && node --check game.js && node --check physics.js && node --check motion.js && node --check world.js"
+  },
+  "engines": { "node": ">=18" }
+}

@@ -1,0 +1,222 @@
+{
+  "steel-1.wav": {
+    "source": "medieval_sfx_weapon_on_weapon_2_of_2/Spear Katana Blade on Blade.wav",
+    "startSeconds": 0.25,
+    "seconds": 0.281
+  },
+  "steel-2.wav": {
+    "source": "medieval_sfx_weapon_on_weapon_2_of_2/Spear Katana Blade on Blade.wav",
+    "startSeconds": 1.12,
+    "seconds": 0.301
+  },
+  "steel-3.wav": {
+    "source": "medieval_sfx_weapon_on_weapon_2_of_2/Spear Katana Blade on Blade.wav",
+    "startSeconds": 2.04,
+    "seconds": 1.085
+  },
+  "steel-4.wav": {
+    "source": "medieval_sfx_weapon_on_weapon_2_of_2/Spear Katana Blade on Blade.wav",
+    "startSeconds": 6.07,
+    "seconds": 1.085
+  },
+  "steel-5.wav": {
+    "source": "medieval_sfx_weapon_on_weapon_2_of_2/Spear Katana Blade on Blade.wav",
+    "startSeconds": 8.97,
+    "seconds": 0.286
+  },
+  "steel-6.wav": {
+    "source": "medieval_sfx_weapon_on_weapon_2_of_2/Spear Katana Blade on Blade.wav",
+    "startSeconds": 9.83,
+    "seconds": 0.945
+  },
+  "parry-1.wav": {
+    "source": "medieval_sfx_weapon_on_weapon_2_of_2/Seax Katana Blade on Blade.wav",
+    "startSeconds": 0.1,
+    "seconds": 0.722
+  },
+  "parry-2.wav": {
+    "source": "medieval_sfx_weapon_on_weapon_2_of_2/Seax Katana Blade on Blade.wav",
+    "startSeconds": 2.94,
+    "seconds": 1.09
+  },
+  "parry-3.wav": {
+    "source": "medieval_sfx_weapon_on_weapon_2_of_2/Seax Katana Blade on Blade.wav",
+    "startSeconds": 4.71,
+    "seconds": 0.873
+  },
+  "parry-4.wav": {
+    "source": "medieval_sfx_weapon_on_weapon_2_of_2/Seax Katana Blade on Blade.wav",
+    "startSeconds": 7.45,
+    "seconds": 0.176
+  },
+  "impact-1.wav": {
+    "source": "wet_towel_on_floor/wet_towel_on_floor/wet_towel_on_floor-01.flac",
+    "startSeconds": 0,
+    "seconds": 0.463
+  },
+  "impact-2.wav": {
+    "source": "wet_towel_on_floor/wet_towel_on_floor/wet_towel_on_floor-02.flac",
+    "startSeconds": 0,
+    "seconds": 0.489
+  },
+  "impact-3.wav": {
+    "source": "wet_towel_on_floor/wet_towel_on_floor/wet_towel_on_floor-03.flac",
+    "startSeconds": 0,
+    "seconds": 0.481
+  },
+  "impact-4.wav": {
+    "source": "wet_towel_on_floor/wet_towel_on_floor/wet_towel_on_floor-04.flac",
+    "startSeconds": 0,
+    "seconds": 0.454
+  },
+  "flesh-1.wav": {
+    "source": "independent_nu_ljudbank-wet_squish_slurp_impacts/impsplat/impactsplat01.mp3.flac",
+    "startSeconds": 0,
+    "seconds": 0.95
+  },
+  "flesh-2.wav": {
+    "source": "independent_nu_ljudbank-wet_squish_slurp_impacts/impsplat/impactsplat02.mp3.flac",
+    "startSeconds": 0,
+    "seconds": 0.944
+  },
+  "flesh-3.wav": {
+    "source": "independent_nu_ljudbank-wet_squish_slurp_impacts/impsplat/impactsplat03.mp3.flac",
+    "startSeconds": 0,
+    "seconds": 0.742
+  },
+  "flesh-4.wav": {
+    "source": "independent_nu_ljudbank-wet_squish_slurp_impacts/impsplat/impactsplat04.mp3.flac",
+    "startSeconds": 0,
+    "seconds": 0.727
+  },
+  "snow-1.wav": {
+    "source": "qubodup-wet_snow_steps/qubodup-wet_snow_steps/snow_step_wet-01.flac",
+    "startSeconds": 0,
+    "seconds": 0.442
+  },
+  "snow-2.wav": {
+    "source": "qubodup-wet_snow_steps/qubodup-wet_snow_steps/snow_step_wet-02.flac",
+    "startSeconds": 0,
+    "seconds": 0.318
+  },
+  "snow-3.wav": {
+    "source": "qubodup-wet_snow_steps/qubodup-wet_snow_steps/snow_step_wet-03.flac",
+    "startSeconds": 0,
+    "seconds": 0.439
+  },
+  "snow-4.wav": {
+    "source": "qubodup-wet_snow_steps/qubodup-wet_snow_steps/snow_step_wet-04.flac",
+    "startSeconds": 0,
+    "seconds": 0.346
+  },
+  "snow-5.wav": {
+    "source": "qubodup-wet_snow_steps/qubodup-wet_snow_steps/snow_step_wet-05.flac",
+    "startSeconds": 0,
+    "seconds": 0.198
+  },
+  "snow-6.wav": {
+    "source": "qubodup-wet_snow_steps/qubodup-wet_snow_steps/snow_step_wet-06.flac",
+    "startSeconds": 0,
+    "seconds": 0.432
+  },
+  "snow-7.wav": {
+    "source": "qubodup-wet_snow_steps/qubodup-wet_snow_steps/snow_step_wet-07.flac",
+    "startSeconds": 0,
+    "seconds": 0.255
+  },
+  "snow-8.wav": {
+    "source": "qubodup-wet_snow_steps/qubodup-wet_snow_steps/snow_step_wet-08.flac",
+    "startSeconds": 0,
+    "seconds": 0.523
+  },
+  "snow-9.wav": {
+    "source": "qubodup-wet_snow_steps/qubodup-wet_snow_steps/snow_step_wet-09.flac",
+    "startSeconds": 0,
+    "seconds": 0.665
+  },
+  "swish-1.wav": {
+    "source": "swoshes/swosh-03.flac",
+    "startSeconds": 0,
+    "seconds": 0.576
+  },
+  "swish-2.wav": {
+    "source": "swoshes/swosh-08.flac",
+    "startSeconds": 0,
+    "seconds": 0.33
+  },
+  "swish-3.wav": {
+    "source": "swoshes/swosh-15.flac",
+    "startSeconds": 0,
+    "seconds": 0.416
+  },
+  "swish-4.wav": {
+    "source": "swoshes/swosh-24.flac",
+    "startSeconds": 0,
+    "seconds": 0.714
+  },
+  "swish-5.wav": {
+    "source": "swoshes/swosh-32.flac",
+    "startSeconds": 0,
+    "seconds": 1.403
+  },
+  "cloth-1.wav": {
+    "source": "weapons-apparel/sfx/quiver-leather-squeeze-01.wav",
+    "startSeconds": 0,
+    "seconds": 0.719
+  },
+  "cloth-2.wav": {
+    "source": "weapons-apparel/sfx/quiver-leather-squeeze-03.wav",
+    "startSeconds": 0,
+    "seconds": 0.816
+  },
+  "cloth-3.wav": {
+    "source": "weapons-apparel/sfx/quiver-leather-squeeze-06.wav",
+    "startSeconds": 0,
+    "seconds": 1.366
+  },
+  "cloth-4.wav": {
+    "source": "weapons-apparel/sfx/quiver-leather-squeeze-10.wav",
+    "startSeconds": 0,
+    "seconds": 0.68
+  },
+  "scrape-1.wav": {
+    "source": "weapons-apparel/sfx/sword-thermos-scrape-01.wav",
+    "startSeconds": 0,
+    "seconds": 2.14
+  },
+  "scrape-2.wav": {
+    "source": "weapons-apparel/sfx/sword-thermos-scrape-02.wav",
+    "startSeconds": 0,
+    "seconds": 1.971
+  },
+  "scrape-3.wav": {
+    "source": "weapons-apparel/sfx/sword-thermos-scrape-03.wav",
+    "startSeconds": 0,
+    "seconds": 1.753
+  },
+  "voice-1.wav": {
+    "source": "slightscreams/slightscream-02.flac",
+    "startSeconds": 0,
+    "seconds": 0.363
+  },
+  "voice-2.wav": {
+    "source": "slightscreams/slightscream-04.flac",
+    "startSeconds": 0,
+    "seconds": 0.582
+  },
+  "voice-3.wav": {
+    "source": "slightscreams/slightscream-06.flac",
+    "startSeconds": 0,
+    "seconds": 0.513
+  },
+  "voice-4.wav": {
+    "source": "slightscreams/slightscream-09.flac",
+    "startSeconds": 0,
+    "seconds": 0.488
+  },
+  "voice-5.wav": {
+    "source": "slightscreams/slightscream-12.flac",
+    "startSeconds": 0,
+    "seconds": 0.378
+  }
+}

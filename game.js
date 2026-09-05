@@ -14,6 +14,9 @@ const angDiff=(a,b)=>{ let d=a-b; while(d>Math.PI)d-=2*Math.PI; while(d<-Math.PI
 const minJerk=t=>{ t=clamp(t,0,1); return t*t*t*(10+t*(-15+6*t)); };
 const minJerkBell=t=>{ t=clamp(t,0,1); return 16*t*t*(1-t)*(1-t); }; // 0→1→0, peak .5
 const rand=(a,b)=>a+Math.random()*(b-a);
+const damp=(rate,dt)=>1-Math.exp(-rate*dt);
+let simulationTime=0;
+const simNow=()=>simulationTime*1000;
 const TMP1=V3(), TMP2=V3(), TMP3=V3(), TMP4=V3();
 const IS_TOUCH=(typeof process==='undefined')&&(typeof window!=='undefined')&&
   (('ontouchstart' in window)||((typeof navigator!=='undefined'&&navigator.maxTouchPoints)|0)>0);
@@ -45,29 +48,47 @@ function segSegClosest(p1,q1,p2,q2,out1,out2){
 
 /* ------------------------------ audio --------------------------------- */
 const Sound=(()=>{
-  let ctx=null,busG=null,busF=null;
+  let ctx=null,busG=null,busF=null,master=null,samples=null,muted=false;
   const ac=()=>ctx||(ctx=new (window.AudioContext||window.webkitAudioContext)());
   const bus=()=>{ const c=ac();
     if(!busG){ try{
       busF=c.createBiquadFilter(); busF.type='lowpass'; busF.frequency.value=18000;
       busG=c.createGain(); busG.gain.value=1;
-      busG.connect(busF); busF.connect(bus());
+      master=c.createGain(); master.gain.value=muted?0:.7;
+      const compressor=c.createDynamicsCompressor();
+      compressor.threshold.value=-12;compressor.knee.value=8;compressor.ratio.value=8;
+      compressor.attack.value=.003;compressor.release.value=.18;
+      busG.connect(busF);busF.connect(compressor);compressor.connect(master);master.connect(c.destination);
+      samples=new ZAudio.SampleBank(c,busG,ZAudio.manifest);samples.load();
     }catch(e){ busG=null; return c.destination; } }
     return busG||c.destination; };
+  function sample(kind,gain,rate=1,pos){
+    if(!ctx)return false;bus();
+    let pan=0;
+    if(pos&&typeof camera!=='undefined'){
+      const projected=pos.clone().project(camera);pan=clamp(projected.x*.8,-.85,.85);
+      gain/=1+Math.max(0,pos.distanceTo(camera.position)-4)*.13;
+    }
+    return samples&&samples.play(kind,{gain,rate:rate*rand(.97,1.03),pan});
+  }
+  function toggleMute(){muted=!muted;if(master)master.gain.setTargetAtTime(muted?0:.7,ac().currentTime,.02);return muted;}
+  function audioStatus(){return {loaded:samples?Object.values(samples.buffers).reduce((n,a)=>n+a.length,0):0,failed:samples?samples.failed:[],voices:samples?samples.voices.size:0,state:ctx?ctx.state:'not started'};}
   function setMuffle(m){ try{ if(busF)
     busF.frequency.setTargetAtTime(lerp(16000,760,clamp(m,0,1)),ac().currentTime,.25);
   }catch(e){} }
   function noiseBuf(len){ const b=ac().createBuffer(1,ac().sampleRate*len,ac().sampleRate);
     const d=b.getChannelData(0); for(let i=0;i<d.length;i++)d[i]=Math.random()*2-1; return b; }
-  function whoosh(speed){ // blade cutting air — filtered noise sweep
+  function whoosh(speed,pos){
+    if(sample('swish',clamp((speed-4)/20,.08,.4),clamp(.8+speed*.02,.8,1.2),pos))return; // blade cutting air — filtered noise sweep
     if(!ctx)return; const t=ctx.currentTime, s=ctx.createBufferSource(); s.buffer=noiseBuf(.35);
     const f=ctx.createBiquadFilter(); f.type='bandpass'; f.Q.value=1.2;
     f.frequency.setValueAtTime(300+speed*90,t); f.frequency.exponentialRampToValueAtTime(120,t+.3);
     const g=ctx.createGain(); const vol=clamp((speed-4)/10,0,1)*.5;
     g.gain.setValueAtTime(0,t); g.gain.linearRampToValueAtTime(vol,t+.05); g.gain.exponentialRampToValueAtTime(.001,t+.32);
-    s.connect(f).connect(g).connect(ctx.destination); s.start(t);
+    s.connect(f).connect(g).connect(bus()); s.start(t);
   }
-  function scrape(){ // steel grinding on steel, low and mean
+  function scrape(pos){
+    if(sample('scrape',.15,1,pos))return; // steel grinding on steel, low and mean
     try{
       const c=ac(), t=c.currentTime;
       const s=c.createBufferSource(); s.buffer=noiseBuf(.22);
@@ -79,7 +100,8 @@ const Sound=(()=>{
       s.connect(f); f.connect(g); g.connect(bus()); s.start(t);
     }catch(e){}
   }
-  function step(speed){ // snow crunch, weight-scaled
+  function step(speed,pos){
+    if(sample('snow',.13+clamp(speed,0,3)*.055,1,pos)){sample('cloth',.035+speed*.008,1,pos);return;} // snow crunch, weight-scaled
     try{
       const c=ac(), t=c.currentTime;
       const s=c.createBufferSource(); s.buffer=noiseBuf(.07);
@@ -167,7 +189,8 @@ const Sound=(()=>{
       duckWind();
     }catch(e){}
   }
-  function parry(){ // bright double-ring — steel turned aside
+  function parry(pos){
+    if(sample('parry',.48,1.04,pos))return; // bright double-ring — steel turned aside
     try{
       const c=ac(); const t=c.currentTime;
       [1560,2340,1170].forEach((f0,i)=>{
@@ -180,34 +203,37 @@ const Sound=(()=>{
       });
     }catch(e){}
   }
-  function clang(hard){ // steel on steel
+  function clang(hard,pos){
+    if(sample('steel',hard?.5:.27,hard?.95:1.06,pos))return; // steel on steel
     if(!ctx)return; const t=ctx.currentTime, g=ctx.createGain();
     g.gain.setValueAtTime(hard?.5:.28,t); g.gain.exponentialRampToValueAtTime(.001,t+.7);
-    g.connect(ctx.destination);
+    g.connect(bus());
     [2470,3610,5120,1830].forEach((fr,i)=>{ const o=ctx.createOscillator(); o.type='sine';
       o.frequency.value=fr*rand(.98,1.02); const og=ctx.createGain(); og.gain.value=.25/(i+1);
       o.connect(og).connect(g); o.start(t); o.stop(t+.7); });
     const s=ctx.createBufferSource(); s.buffer=noiseBuf(.06); const sg=ctx.createGain();
     sg.gain.setValueAtTime(.4,t); sg.gain.exponentialRampToValueAtTime(.001,t+.05);
-    s.connect(sg).connect(ctx.destination); s.start(t);
+    s.connect(sg).connect(bus()); s.start(t);
   }
-  function cut(depth){ // flesh
+  function cut(depth,pos){
+    if(sample('flesh',clamp(depth/18,.12,.45),1,pos))return; // flesh
     if(!ctx)return; const t=ctx.currentTime, s=ctx.createBufferSource(); s.buffer=noiseBuf(.2);
     const f=ctx.createBiquadFilter(); f.type='lowpass'; f.frequency.value=900;
     const g=ctx.createGain(); g.gain.setValueAtTime(clamp(depth/8,0.15,0.6),t);
     g.gain.exponentialRampToValueAtTime(.001,t+.18);
-    s.connect(f).connect(g).connect(ctx.destination); s.start(t);
+    s.connect(f).connect(g).connect(bus()); s.start(t);
     const o=ctx.createOscillator(); o.type='sine'; o.frequency.setValueAtTime(140,t);
     o.frequency.exponentialRampToValueAtTime(50,t+.15);
     const og=ctx.createGain(); og.gain.setValueAtTime(clamp(depth/10,.1,.5),t);
     og.gain.exponentialRampToValueAtTime(.001,t+.16);
-    o.connect(og).connect(ctx.destination); o.start(t); o.stop(t+.2);
+    o.connect(og).connect(bus()); o.start(t); o.stop(t+.2);
   }
-  function thump(){ // body hits snow
+  function thump(force=1,pos){
+    if(sample('impact',clamp(force*.4,.12,.5),.9,pos))return; // body hits snow
     if(!ctx)return; const t=ctx.currentTime, o=ctx.createOscillator(); o.type='sine';
     o.frequency.setValueAtTime(90,t); o.frequency.exponentialRampToValueAtTime(35,t+.25);
     const g=ctx.createGain(); g.gain.setValueAtTime(.5,t); g.gain.exponentialRampToValueAtTime(.001,t+.3);
-    o.connect(g).connect(ctx.destination); o.start(t); o.stop(t+.35);
+    o.connect(g).connect(bus()); o.start(t); o.stop(t+.35);
   }
   /* THE SCORE: a low drone and sparse hirajoshi flute phrases — breathy
      triangle with vibrato, mostly silence. Intensity follows the duel. */
@@ -258,7 +284,8 @@ const Sound=(()=>{
       }
     }catch(e){}
   }
-  function grunt(sev,pitch){ // a hurt voice: pitch-dropping buzz through a formant
+  function grunt(sev,pitch,pos){
+    if(sample('voice',.15+sev*.18,clamp(pitch||1,.9,1.1),pos))return; // a hurt voice: pitch-dropping buzz through a formant
     try{
       const c=ac(), t=c.currentTime, p=pitch||1;
       const o=c.createOscillator(); o.type='sawtooth';
@@ -281,7 +308,7 @@ const Sound=(()=>{
       s.connect(bf); bf.connect(g2); g2.connect(bus()); s.start(t);
     }catch(e){}
   }
-  return {ac,whoosh,clang,cut,thump,parry,startWind,tickWind,tickHeart,taiko,killMoment,step,setMuffle,scrape,grunt,tickMusic};
+  return {ac,toggleMute,audioStatus,whoosh,clang,cut,thump,parry,startWind,tickWind,tickHeart,taiko,killMoment,step,setMuffle,scrape,grunt,tickMusic};
 })();
 
 
@@ -289,6 +316,7 @@ const Sound=(()=>{
 const renderer=new THREE.WebGLRenderer({antialias:true});
 renderer.setSize(innerWidth,innerHeight);
 renderer.setPixelRatio(Math.min(devicePixelRatio,2));
+renderer.info.autoReset=false;
 renderer.shadowMap.enabled=true;
 renderer.shadowMap.type=THREE.PCFSoftShadowMap;
 renderer.outputColorSpace=THREE.SRGBColorSpace;
@@ -300,9 +328,10 @@ const SRGB=(hex)=>new THREE.Color(hex).convertSRGBToLinear();
 const stdMat=(hex,opts)=>new THREE.MeshStandardMaterial(Object.assign({color:SRGB(hex)},opts||{}));
 
 const scene=new THREE.Scene();
-scene.background=SRGB(0x0c0f14);
+scene.background=SRGB(0x263444);
+scene.fog=new THREE.FogExp2(SRGB(0x60717d),.022);
 /* the kicker: a cool fill from the off side, cinema's second light */
-const kickL=new THREE.DirectionalLight(0x8fb0e8,.32);
+const kickL=new THREE.DirectionalLight(SRGB(0xb2c5d6),.65);
 kickL.position.set(14,9,-10); scene.add(kickL);
 /* no fog: the night is clear and deep */
 
@@ -314,8 +343,8 @@ kickL.position.set(14,9,-10); scene.add(kickL);
     const env=new THREE.Scene();
     const skyG=canTex(64,256,(x,w,h)=>{
       const g=x.createLinearGradient(0,0,0,h);
-      g.addColorStop(0,'#0a1020'); g.addColorStop(.55,'#141f33');
-      g.addColorStop(.8,'#3a4a5e'); g.addColorStop(1,'#93a2b4');
+      g.addColorStop(0,'#354b66'); g.addColorStop(.55,'#78909f');
+      g.addColorStop(.8,'#bbc4c8'); g.addColorStop(1,'#e0e5e6');
       x.fillStyle=g; x.fillRect(0,0,w,h); });
     if(!skyG)return;
     env.add(new THREE.Mesh(new THREE.SphereGeometry(50,16,12),
@@ -348,11 +377,12 @@ const POST=(()=>{
       minFilter:THREE.LinearFilter,magFilter:THREE.LinearFilter,
       format:THREE.RGBAFormat,type:THREE.HalfFloatType,
       depthBuffer:!!depth,stencilBuffer:false});
-    const SS=IS_TOUCH?1.0:1.4;          // phones skip the supersample
+    const SS=1.0;          // phones skip the supersample
     let W=innerWidth,H=innerHeight;
     const rtScene=mkRT(Math.round(W*SS),Math.round(H*SS),true),
           rtA=mkRT(W>>1,H>>1), rtB=mkRT(W>>1,H>>1),      // tight halo, half res
           rtC=mkRT(W>>2,H>>2), rtD=mkRT(W>>2,H>>2);      // wide glow, quarter res
+    rtScene.samples=IS_TOUCH?0:4;
     const quadGeo=new THREE.PlaneGeometry(2,2);
     const VS='varying vec2 vUv; void main(){ vUv=uv; gl_Position=vec4(position.xy,0.,1.); }';
     const mat=(fs,uniforms)=>{ const m=new THREE.ShaderMaterial({
@@ -398,7 +428,7 @@ const POST=(()=>{
         '  vec2 off=vec2(cos(ang),sin(ang))*rad*vec2(uP.x,uP.y)*.5/max(-p.z,.6);'+
         '  vec3 sp=vpos(vUv+off);'+
         '  vec3 dv=sp-p; float dl=length(dv);'+
-        '  occ+=max(0.,dot(n,dv/max(dl,1e-4))-.08)*smoothstep(.9,.15,dl);'+
+        '  occ+=max(0.,dot(n,dv/max(dl,1e-4))-.08)*(1.-smoothstep(.15,.9,dl));'+
         ' }'+
         ' float aoV=clamp(1.-occ*'+(2.0/(IS_TOUCH?8:12)).toFixed(4)+',0.,1.);'+
         ' gl_FragColor=vec4(vec3(aoV),1.);}',
@@ -424,14 +454,14 @@ const POST=(()=>{
       'uniform float uExposure;'+
       'void main(){'+
       ' vec2 cc=vUv-.5; float rr=dot(cc,cc);'+
-      ' vec2 ca=cc*rr*.028;'+                                 // chromatic fringe
+      ' vec2 ca=cc*rr*.0015;'+                                 // chromatic fringe
       ' vec3 c; c.r=texture2D(scene,vUv+ca).r;'+
       ' c.g=texture2D(scene,vUv).g;'+
       ' c.b=texture2D(scene,vUv-ca).b;'+
       ' float aoS=texture2D(tAO,vUv).r;'+
       ' c*=mix(1.,aoS,uAOs);'+                                // contact shadow, pre-bloom
-      ' c+=texture2D(bloom,vUv).rgb*.85;'+                    // tight halo
-      ' c+=texture2D(bloom2,vUv).rgb*1.2;'+                   // wide atmospheric glow
+      ' c+=texture2D(bloom,vUv).rgb*.18;'+                    // tight halo
+      ' c+=texture2D(bloom2,vUv).rgb*.22;'+                   // wide atmospheric glow
       ' c*=uExposure;'+
       ' float l=dot(c,vec3(.2126,.7152,.0722));'+
       ' c=mix(c,vec3(l),uDesat);'+                              // life drains the colour
@@ -441,13 +471,13 @@ const POST=(()=>{
       ' c=max(vec3(0.),(c*(2.51*c+.03))/(c*(2.43*c+.59)+.14));'+  // ACES filmic (the ONLY tonemap)
       ' c=(c-.5)*1.04+.5+.004;'+                             // gentle grade over ACES
       ' float l2=dot(c,vec3(.2126,.7152,.0722));'+
-      ' c=mix(vec3(l2),c,1.12);'+                              // saturation
+      ' c=mix(vec3(l2),c,.97);'+                              // saturation
       ' float gr=fract(sin(dot(vUv*vec2(917.,761.)+uTime,vec2(12.9898,78.233)))*43758.5);'+
-      ' c+=(gr-.5)*.028;'+                                     // film grain
-      ' c=pow(clamp(c,0.,1.),vec3(1./2.2));'+
+      ' c+=(gr-.5)*.003;'+                                     // film grain
+      ' c=clamp(c,0.,1.); c=mix(c*12.92,1.055*pow(c,vec3(1./2.4))-.055,step(vec3(.0031308),c));'+
       ' gl_FragColor=vec4(c,1.);}',
       {scene:{value:rtScene.texture},bloom:{value:rtA.texture},bloom2:{value:rtC.texture},
-       tAO:{value:(aoOK?rtAO:rtScene).texture},uAOs:{value:aoOK?.72:0},
+       tAO:{value:(aoOK?rtAO:rtScene).texture},uAOs:{value:aoOK?.5:0},
        uDesat:{value:0},uVig:{value:0},uAdren:{value:0},uTime:{value:0},
        uExposure:{value:1.12}});
     const quadScene=new THREE.Scene();
@@ -475,9 +505,9 @@ const POST=(()=>{
           comp.uniforms.tAO.value=rtAO.texture;
         }
         pass(bright,rtA);
-        blurPair(rtA,rtB,W>>1,H>>1,2);
+        blurPair(rtA,rtB,W>>1,H>>1,1);
         copy.uniforms.tex.value=rtA.texture; pass(copy,rtC);   // downsample the halo
-        blurPair(rtC,rtD,W>>2,H>>2,2);                          // and let it breathe
+        blurPair(rtC,rtD,W>>2,H>>2,1);                          // and let it breathe
         comp.uniforms.bloom.value=rtA.texture;
         comp.uniforms.bloom2.value=rtC.texture;
         renderer.setRenderTarget(null); pass(comp,null);
@@ -523,13 +553,16 @@ moon.shadow.mapSize.set(2048,2048);
 moon.shadow.camera.left=-8; moon.shadow.camera.right=8;
 moon.shadow.camera.top=8; moon.shadow.camera.bottom=-8;
 moon.shadow.camera.near=2; moon.shadow.camera.far=30;
-moon.shadow.bias=-.0004;
+moon.shadow.bias=-.00015; moon.shadow.normalBias=.025; moon.shadow.radius=3;
 { const rim=new THREE.DirectionalLight(SRGB(0x39496a).getHex(),.4);
   rim.position.set(8,4,-9); scene.add(rim); }
 scene.add(moon);
-const hemiL=new THREE.HemisphereLight(SRGB(0x2c3a4e).getHex(),SRGB(0x0a0c10).getHex(),.6);
+const hemiL=new THREE.HemisphereLight(SRGB(0xa9bdcf),SRGB(0x6c716c),.45);
 scene.add(hemiL);
-const AMB={};   // handles for stage ambience (sky repaint etc.)
+// A broad sky fill exposes dark armor without emissive textures.
+const skyFill=new THREE.DirectionalLight(SRGB(0xc7d8e4),.7);
+skyFill.position.set(1,5,9);scene.add(skyFill);
+const AMB={backdrops:[]};   // handles for stage ambience (sky repaint etc.)
 
 const RING_R=5.0;
 
@@ -709,8 +742,8 @@ function snowGlintify(m,cellScale,strength){
         '}');
   };
 }
-snowGlintify(ringGroundMat,'92.','2.6');
-snowGlintify(groundMat,'70.','1.7');
+snowGlintify(ringGroundMat,'92.','.28');
+snowGlintify(groundMat,'70.','.18');
 
 /* ---- contact shadows: a soft dark pool that keeps a body ON the snow
    (the moon's shadow map alone leaves feet floating on bright ground) */
@@ -778,32 +811,7 @@ function mkContactShadow(){
 })();
 
 /* treeline silhouettes — trunked, tiered pines, three draw calls total */
-(function trees(){
-  const N=96;
-  const mat=new THREE.MeshBasicMaterial({color:SRGB(0x0a0c10)});
-  const trunkM=new THREE.MeshBasicMaterial({color:SRGB(0x060709)});
-  const snowM=new THREE.MeshBasicMaterial({color:SRGB(0x525c68)});
-  const tiers=new THREE.InstancedMesh(new THREE.ConeGeometry(1,1,7),mat,N*3);
-  const trunks=new THREE.InstancedMesh(new THREE.CylinderGeometry(.09,.14,1,5),trunkM,N);
-  const caps=new THREE.InstancedMesh(new THREE.ConeGeometry(1,1,6),snowM,N);
-  const M=new THREE.Matrix4(), Q=new THREE.Quaternion(),
-        UP=new THREE.Vector3(0,1,0), P=new THREE.Vector3(), S=new THREE.Vector3();
-  let ti=0;
-  for(let i=0;i<N;i++){
-    const a=rand(0,Math.PI*2), r=rand(19,46), h=rand(4,11), base=rand(1,2.1);
-    const x=Math.cos(a)*r, z=Math.sin(a)*r;
-    Q.setFromAxisAngle(UP,rand(0,6.28));
-    trunks.setMatrixAt(i,M.compose(P.set(x,h*.15,z),Q,S.set(base,h*.3,base)));
-    /* three stacked, shrinking canopy tiers — a pine, not a traffic cone */
-    for(let k=0;k<3;k++){
-      const rr=base*(1-k*.28), hh=h*.45;
-      tiers.setMatrixAt(ti++,M.compose(P.set(x,h*(.18+.21*k)+hh*.5,z),Q,S.set(rr,hh,rr)));
-    }
-    caps.setMatrixAt(i,M.compose(P.set(x,h*.78,z),Q,S.set(base*.34,h*.3,base*.34)));
-  }
-  tiers.instanceMatrix.needsUpdate=trunks.instanceMatrix.needsUpdate=caps.instanceMatrix.needsUpdate=true;
-  scene.add(tiers,trunks,caps);
-})();
+buildWinterWorld(scene,stdMat,SRGB);
 
 /* moon with halo */
 (function moondisc(){
@@ -857,7 +865,7 @@ const mists=[];   // faint drifting fog banks beyond the ring
     const sky=new THREE.Mesh(new THREE.SphereGeometry(90,24,16),
       new THREE.MeshBasicMaterial({map:skyTex,side:THREE.BackSide,
         depthWrite:false,fog:false}));
-    sky.renderOrder=-20; scene.add(sky);
+    sky.renderOrder=-20; scene.add(sky);AMB.backdrops.push(sky);
   }
   /* stars: a few hundred points, denser near the zenith */
   { const N=420, ps=new Float32Array(N*3), sz=new Float32Array(N);
@@ -872,8 +880,8 @@ const mists=[];   // faint drifting fog banks beyond the ring
     g.setAttribute('position',new THREE.BufferAttribute(ps,3));
     const stars=new THREE.Points(g,new THREE.PointsMaterial({
       color:0xcdd8ee,size:.42,sizeAttenuation:true,transparent:true,
-      opacity:.85,depthWrite:false,fog:false}));
-    stars.renderOrder=-19; scene.add(stars);
+      opacity:.12,depthWrite:false,fog:false}));
+    stars.renderOrder=-19; scene.add(stars);AMB.backdrops.push(stars);
   }
   /* mountains: two silhouette ridgelines, far and farther */
   const ridge=(dist,height,tone,seed)=>{
@@ -890,7 +898,7 @@ const mists=[];   // faint drifting fog banks beyond the ring
       /* faint snow on the upper slopes */
       ctx.globalCompositeOperation='source-atop';
       const g=ctx.createLinearGradient(0,0,0,h);
-      g.addColorStop(0,'rgba(120,135,155,.5)'); g.addColorStop(.4,'rgba(120,135,155,0)');
+      g.addColorStop(0,'rgba(227,235,240,.8)'); g.addColorStop(.75,'rgba(185,201,210,.04)');
       ctx.fillStyle=g; ctx.fillRect(0,0,w,h);
     },{transparent:true});
     if(!tex)return;
@@ -901,13 +909,13 @@ const mists=[];   // faint drifting fog banks beyond the ring
       const a=k*Math.PI/2+seed;
       m.position.set(Math.sin(a)*dist,height*.32,Math.cos(a)*dist);
       m.lookAt(0,height*.32,0);
-      m.renderOrder=-18+ (dist<60?1:0);
+      m.renderOrder=-18+ (dist<60?1:0);AMB.backdrops.push(m);
       scene.add(m);
     }
   };
-  ridge(70,26,'#070b13',1.7);
-  ridge(61,21,'#090e18',7.9);
-  ridge(52,17,'#0b111c',4.2);
+  ridge(70,26,'#96a5b0',1.7);
+  ridge(61,21,'#7c8e9b',7.9);
+  ridge(52,17,'#637986',4.2);
 })();
 
 
@@ -930,8 +938,8 @@ function snowLayer(n,area,size,speed){
   const drift=new Float32Array(n); for(let i=0;i<n;i++)drift[i]=rand(0,6.28);
   SNOWS.push({geo,n,area,speed,drift});
 }
-snowLayer(900,16,.075,.55);
-snowLayer(1100,28,.04,.42);
+snowLayer(650,16,.035,.48);
+snowLayer(900,28,.022,.36);
 
 /* ------------------------- blood visuals pools ------------------------- */
 const bloodStains=[]; const allStains=[]; let stainCount=0;
@@ -955,48 +963,62 @@ function addStain(x,z,r){
 }
 function addPool(x,z){
   const mat=stainTex
-    ?new THREE.MeshBasicMaterial({map:stainTex,transparent:true,depthWrite:false,color:SRGB(0xb15050).getHex()})
+    ?new THREE.MeshStandardMaterial({map:stainTex,transparent:true,depthWrite:false,color:SRGB(0x8c6565),roughness:.22,polygonOffset:true,polygonOffsetFactor:-1})
     :new THREE.MeshBasicMaterial({color:SRGB(0x5c0d0d).getHex(),transparent:true,opacity:.92,depthWrite:false});
   const m=new THREE.Mesh(new THREE.PlaneGeometry(2.6,2.6),mat);
   m.rotation.x=-Math.PI/2; m.position.set(x,.007,z); m.scale.set(.01,.01,.01);
   scene.add(m); const p={mesh:m,r:.01}; bloodStains.push(p); return p;
 }
 
-/* blood spray particles */
+/* Lit droplets: varying radii, ballistic travel, air drag and wet impact. */
 const SPRAY_N=1000;
-const sprayGeo=new THREE.BufferGeometry();
-const sprayPos=new Float32Array(SPRAY_N*3);
-for(let i=0;i<SPRAY_N;i++)sprayPos[i*3+1]=-99;
-sprayGeo.setAttribute('position',new THREE.BufferAttribute(sprayPos,3));
-const sprayMat=new THREE.PointsMaterial({color:SRGB(0xa31414).getHex(),size:.045,transparent:true,opacity:.95,depthWrite:false});
-if(snowSprite)sprayMat.map=snowSprite;
-const sprayPts=new THREE.Points(sprayGeo,sprayMat);
-sprayPts.frustumCulled=false; scene.add(sprayPts);
-const sprayVel=new Float32Array(SPRAY_N*3), sprayLife=new Float32Array(SPRAY_N);
+const sprayGeo=new THREE.SphereGeometry(1,6,4);
+const sprayMat=stdMat(0x50080c,{roughness:.22,metalness:0});
+const sprayPts=new THREE.InstancedMesh(sprayGeo,sprayMat,SPRAY_N);
+sprayPts.instanceMatrix.setUsage(THREE.DynamicDrawUsage);sprayPts.frustumCulled=false;
+scene.add(sprayPts);
+const sprayPos=new Float32Array(SPRAY_N*3),sprayVel=new Float32Array(SPRAY_N*3),
+ sprayLife=new Float32Array(SPRAY_N),sprayRadius=new Float32Array(SPRAY_N);
+const sprayDummy=new THREE.Object3D(),sprayDirection=V3();
+sprayDummy.scale.setScalar(0);sprayDummy.updateMatrix();
+for(let i=0;i<SPRAY_N;i++)sprayPts.setMatrixAt(i,sprayDummy.matrix);
 let sprayHead=0;
 function emitBlood(p,dir,speed,n){
-  for(let i=0;i<n;i++){
-    const k=sprayHead=(sprayHead+1)%SPRAY_N;
-    sprayPos[k*3]=p.x; sprayPos[k*3+1]=p.y; sprayPos[k*3+2]=p.z;
-    sprayVel[k*3]  =dir.x*speed*rand(.4,1.1)+rand(-.6,.6);
-    sprayVel[k*3+1]=dir.y*speed*rand(.4,1.1)+rand(.2,1.2);
-    sprayVel[k*3+2]=dir.z*speed*rand(.4,1.1)+rand(-.6,.6);
-    sprayLife[k]=rand(.5,1.1);
+  sprayDirection.copy(dir).normalize();speed=clamp(speed,0,5);
+  for(let i=0;i<Math.min(n,SPRAY_N);i++){
+    const k=sprayHead=(sprayHead+1)%SPRAY_N,momentum=rand(.5,1);
+    sprayPos[k*3]=p.x;sprayPos[k*3+1]=p.y;sprayPos[k*3+2]=p.z;
+    sprayVel[k*3]=sprayDirection.x*speed*momentum+rand(-.3,.3);
+    sprayVel[k*3+1]=sprayDirection.y*speed*momentum+rand(-.12,.35);
+    sprayVel[k*3+2]=sprayDirection.z*speed*momentum+rand(-.3,.3);
+    sprayRadius[k]=rand(.002,.007);sprayLife[k]=2.2;
   }
 }
 function updateBloodFX(dt){
   for(let k=0;k<SPRAY_N;k++){
-    if(sprayLife[k]<=0){ continue; }
+    if(sprayLife[k]<=0)continue;
     sprayLife[k]-=dt;
-    sprayVel[k*3+1]-=9.81*dt;
-    sprayPos[k*3]+=sprayVel[k*3]*dt; sprayPos[k*3+1]+=sprayVel[k*3+1]*dt; sprayPos[k*3+2]+=sprayVel[k*3+2]*dt;
-    if(sprayPos[k*3+1]<=0.01){
-      if(Math.random()<.18)addStain(sprayPos[k*3],sprayPos[k*3+2],rand(.04,.12));
-      sprayLife[k]=0; sprayPos[k*3+1]=-99;
+    const drag=Math.exp(-dt*(.16+.0015/sprayRadius[k]));
+    sprayVel[k*3]*=drag;sprayVel[k*3+2]*=drag;
+    sprayVel[k*3+1]=sprayVel[k*3+1]*drag-9.81*dt;
+    for(let a=0;a<3;a++)sprayPos[k*3+a]+=sprayVel[k*3+a]*dt;
+    if(sprayPos[k*3+1]<=.012){
+      addStain(sprayPos[k*3],sprayPos[k*3+2],sprayRadius[k]*rand(2.5,6));
+      sprayLife[k]=0;
     }
+    if(sprayLife[k]<=0)sprayDummy.scale.setScalar(0);
+    else{
+      sprayDummy.position.fromArray(sprayPos,k*3);sprayDirection.fromArray(sprayVel,k*3);
+      const speed=sprayDirection.length();if(speed>.001)sprayDummy.quaternion.setFromUnitVectors(V3(0,1,0),sprayDirection.divideScalar(speed));
+      const r=sprayRadius[k];sprayDummy.scale.set(r,r*(1+Math.min(speed*.14,1.2)),r);
+    }
+    sprayDummy.updateMatrix();sprayPts.setMatrixAt(k,sprayDummy.matrix);
   }
-  sprayGeo.attributes.position.needsUpdate=true;
-  for(const p of bloodStains){ p.mesh.scale.set(p.r,p.r,p.r); }
+  sprayPts.instanceMatrix.needsUpdate=true;
+  for(const p of bloodStains){
+    p.age=(p.age||0)+dt;p.mesh.scale.set(p.r,p.r,p.r);
+    if(p.mesh.material.roughness!==undefined)p.mesh.material.roughness=lerp(.22,.72,clamp(p.age/75,0,1));
+  }
 }
 
 /* =========================================================================
@@ -2093,7 +2115,7 @@ class Fighter{
   /* ------------------------------ wounds ----------------------------- */
   applyCut(partKey,energy,alignment,isThrust,hitPoint,hitDir,log){
     const A=ANATOMY[partKey]; if(!A)return null;
-    const now=performance.now();
+    const now=simNow();
     if(this.hitCooldown[partKey]&&now-this.hitCooldown[partKey]<380)return null;
     this.hitCooldown[partKey]=now;
 
@@ -2124,7 +2146,7 @@ class Fighter{
       }
     }
     if(deepest){
-      Sound.cut(depth);
+      Sound.cut(depth,hitPoint);
       emitBlood(hitPoint,hitDir,clamp(energy/40,1,4),Math.floor(clamp(depth*4,4,26)));
       this.pain+=depth*4;
       if(!this.dead)Sound.grunt(clamp(depth/9,.3,1),this._vp||(this._vp=rand(.8,1.25)));
@@ -2146,8 +2168,8 @@ class Fighter{
     }
     switch(L.effect){
       case 'bleedMinor': this.bleedRate+=2; break;
-      case 'artery': this.bleedRate+=L.rate; this.arterialWound={part:partKey}; break;
-      case 'arteryLeg': this.bleedRate+=L.rate; this.disabled[L.limb]=true; this.arterialWound={part:partKey}; break;
+      case 'artery': this.bleedRate+=L.rate; this.arterialWound={part:partKey,anchored:true}; addSquirt(this,partKey,hitPoint,120,clamp(L.rate/35,.4,1.8)); break;
+      case 'arteryLeg': this.bleedRate+=L.rate; this.disabled[L.limb]=true; this.arterialWound={part:partKey,anchored:true}; addSquirt(this,partKey,hitPoint,120,clamp(L.rate/35,.4,1.8)); break;
       case 'lung': this.lungHit=true; this.bleedRate+=L.rate; break;
       case 'gut': this.bleedRate+=L.rate; this.pain+=35; break;
       case 'ribs': this.bleedRate+=3; this.pain+=20; break;
@@ -2199,8 +2221,7 @@ class Fighter{
     }
     /* the torn ends: jagged flesh, protruding bone */
     const ua=limb==='armR'?this.parts.upperArmR:this.parts.upperArmL;
-    this.stumpAt=attachStump(ua,-this.dims.upperArm,.052);   // on the body
-    attachStump(fore,0,.048);                                 // on the piece
+    if(!this.model){this.stumpAt=attachStump(ua,-this.dims.upperArm,.052);attachStump(fore,0,.048);}
     this.severedPieces=this.severedPieces||[];
     this.severedPieces.push({mesh:fore,bleed:1.6,
       vel:V3(hitDir.x*2+rand(-1,1),2.2,hitDir.z*2+rand(-1,1)),
@@ -2313,7 +2334,7 @@ class Fighter{
     if(this.bleedRate>4&&this.blood>BLOOD_TOTAL*.3){
       this.blood-=this.bleedRate*.35*dt;
       if(this.pool){ this.pool.r=Math.min(1.6,this.pool.r+this.bleedRate*dt*.0012);
-        this.pool.mesh.position.set(J.chestB.p.x,.007,J.chestB.p.z); }
+         }
       if(Math.random()<dt*6)emitBlood(J.neck.p,V3(0,.5,0),.8,2);
     }
   }
@@ -2341,7 +2362,7 @@ const PHYS=(typeof ZPhys!=='undefined')?{
 if(PHYS.enabled){ PHYS.engine.g.set(0,-9.81,0); PHYS.engine.substeps=6; PHYS.engine.iters=3; }
 
 
-const ZAN_VERSION='v41';
+const ZAN_VERSION='v61';
 console.log('%c斬 ZAN '+ZAN_VERSION,'font-size:16px');
 
 /* =========================================================================
@@ -2452,6 +2473,7 @@ const PICKER={
         (!isP&&SELECT.E==='musashi')?D.palette:null,
         x,isP?1:-1,isP,SELECT[slot]);
       if(isP)player=nf; else enemy=nf;
+      dressFighter(nf,slot);
       pickdbg(slot+' \u2192 '+BUILDS[SELECT[slot]].label);
     }catch(e){ pickdbg('rebuild: '+e.message); }
   },
@@ -2493,6 +2515,7 @@ const PICKER={
       }catch(err){ pickdbg('apply: '+err.message); }
     } else if(e.src&&typeof MODELPIPE!=='undefined'&&MODELPIPE.enabled){
       MODELPIPE.load(e.src,g=>{
+        if(this.roster[this.idx[slot]]!==e)return;
         if(!g){ if(el)el.textContent=e.label+' (missing)'; return; }
         MODELPIPE.current[slot]=g;
         const f=slot==='P'?player:enemy;
@@ -2523,16 +2546,20 @@ const MODELPIPE=(()=>{
     'models/Xbot.glb','models/Soldier.glb'];
 
   /* models/index.json (["file.glb",...]) prepends to the cycle */
-  const cache={};
+  const cache={},pending={};
   function load(url,cb){
     if(cache[url])return cb(cache[url]);
     if(cache[url]===false)return cb(null);
-    const done=g=>{ cache[url]=g; cb(g); };
-    const fail=()=>{ cache[url]=false; cb(null); };
-    if(/^drop:/.test(url))return cb(cache[url]||null);
+    if(pending[url]){pending[url].push(cb);return;}
+    pending[url]=[cb];
+    const done=g=>{cache[url]=g||false;const callbacks=pending[url];delete pending[url];for(const fn of callbacks)fn(g);};
+    const fail=()=>done(null);
+    if(/^drop:/.test(url))return done(cache[url]||null);
     if(/\.fbx$/i.test(url)){
       if(typeof THREE.FBXLoader==='undefined')return fail();
-      new THREE.FBXLoader().load(encodeURI(url),obj=>done({scene:obj}),undefined,fail);
+      const manager=new THREE.LoadingManager();let asset=null;
+      manager.onLoad=()=>{if(asset)done(asset);};
+      new THREE.FBXLoader(manager).load(encodeURI(url),obj=>{asset={scene:obj,source:url};},undefined,fail);
     } else {
       new THREE.GLTFLoader().load(encodeURI(url),done,undefined,fail);
     }
@@ -2571,28 +2598,36 @@ const MODELPIPE=(()=>{
     root.updateMatrixWorld(true);
     const box=new THREE.Box3().setFromObject(root);
     const h=Math.max(box.max.y-box.min.y,.1);
-    const s=1.72/h;
+    const s=(gltf.scene.userData.intendedHeight||1.72)/h;
     root.scale.setScalar(s);
     root.traverse(o=>{ if(o.isMesh){ o.castShadow=true; o.frustumCulled=false;
       if(o.material){
-        const own=m=>{ const c=m.clone();
-          /* some FBX materials arrive flagged transparent — a fighter
-             must be SOLID, not a ghost the ropes show through */
-          c.transparent=false; c.opacity=1; c.depthWrite=true;
-          /* models that arrive without textures often read pitch black
-             under the moon — lift them to a dark steel that keeps shape */
-          if(!c.map&&c.color){ const hsl={h:0,s:0,l:0}; c.color.getHSL(hsl);
-            if(hsl.l<.06)c.color.setHSL(hsl.h,Math.min(hsl.s,.4),.16); }
-          /* faint self-light so dark costumes read under the moon. For
-             textured materials the emission follows the TEXTURE (the
-             base color is white and says nothing about darkness); for
-             flat colors, only dark ones get the lift */
-          if(c.emissive!==undefined){
-            if(c.map){ c.emissiveMap=c.map; c.emissive.setScalar(.07); }
-            else if(c.color){ const hsl={h:0,s:0,l:0};
-              c.color.getHSL(hsl);
-              c.emissive.copy(c.color).multiplyScalar(hsl.l<.35?.045:0); }
+        const own=m=>{
+          // FBX Phong shininess is converted to microfacet roughness. Keep
+          // supplied textures, skinning, normal maps and cutout hair masks.
+          const c=m.isMeshStandardMaterial?m.clone():new THREE.MeshStandardMaterial({
+            name:m.name,color:m.color?m.color.clone():new THREE.Color(1,1,1),
+            map:m.map||null,normalMap:m.normalMap||null,bumpMap:m.bumpMap||null,
+            bumpScale:m.bumpScale===undefined?1:m.bumpScale,
+            roughness:clamp(Math.sqrt(2/((m.shininess||12)+2)),.42,.88),metalness:0,
+            side:m.side,alphaMap:m.alphaMap||null
+          });
+          c.transparent=false;c.opacity=1;c.depthWrite=true;
+          c.alphaTest=(m.transparent||m.alphaMap)?Math.max(m.alphaTest||0,.4):(m.alphaTest||0);
+          // Empty FBX texture references otherwise sample opaque black.
+          if(c.map&&!c.map.image){
+            c.map=null;
+            const samurai=/samurai\.fbx$/i.test(gltf.source||'');
+            c.color.copy(SRGB(samurai?0x515860:0x9da1a3));
+            if(samurai){c.metalness=.6;c.roughness=.45;}
           }
+          if(c.normalMap&&!c.normalMap.image)c.normalMap=null;
+          if(c.bumpMap&&!c.bumpMap.image)c.bumpMap=null;
+          c.envMapIntensity=1;
+          if(!m.isMeshStandardMaterial&&c.map)c.color.setScalar(1);
+          if(!m.isMeshStandardMaterial&&/blinn5|lambert2/i.test(c.name)){c.metalness=.5;c.roughness=.38;}
+          if(c.map)c.map.anisotropy=Math.min(8,renderer.capabilities.getMaxAnisotropy());
+          if(c.emissive){c.emissive.setScalar(0);c.emissiveMap=null;}
           c._base=c.color?c.color.clone():null; return c; };
         o.material=Array.isArray(o.material)?o.material.map(own):own(o.material);
       } } });
@@ -2723,8 +2758,8 @@ const MODELPIPE=(()=>{
           _da.applyMatrix4(o.matrixWorld);
           cb.getWorldPosition(_db);
           _da.sub(_db);
-          cb.getWorldQuaternion(_qs);
-          _db.set(0,1,0).applyQuaternion(_qs);
+          if(aim[cn]){aim[cn].getWorldPosition(_dc);_db.subVectors(_dc,_db).normalize();}
+          else{cb.getWorldQuaternion(_qs);_db.set(0,1,0).applyQuaternion(_qs);}
           _da.addScaledVector(_db,-_da.dot(_db));
           const r2=_da.length();
           (acc[cn]=acc[cn]||[]).push(r2);
@@ -2735,15 +2770,6 @@ const MODELPIPE=(()=>{
         boneR[n]=arr[Math.floor(arr.length*.7)];   // 70th percentile: the flesh
       }
     }catch(e){}
-    /* facing calibration: forward derived from the leg bones (F = R×U,
-       so F.z = right.x) must agree with the file's own +Z facing — a
-       mirror-labeled rig would otherwise lock in 180° backwards */
-    let fSign=1;
-    if(bones.RightUpLeg&&bones.LeftUpLeg){
-      bones.RightUpLeg.getWorldPosition(_da);
-      bones.LeftUpLeg.getWorldPosition(_db);
-      if(_da.x-_db.x<0)fSign=-1;
-    }
     /* the model's own arm segment lengths: its elbows must bend where
        ITS anatomy says, not where the sim body's proportions fall */
     const armL={};
@@ -2753,7 +2779,8 @@ const MODELPIPE=(()=>{
         const l1=_da.distanceTo(_db); H.getWorldPosition(_da);
         armL[s2]=[l1,_db.distanceTo(_da)]; }
     }
-    return {root,bones,aim,hLen,fSign,gripLoc,armL,boneR,scale:s,worldQ:{},anims};
+    const hipForward=V3(0,0,1).applyQuaternion(bones.Hips.getWorldQuaternion(new THREE.Quaternion()).invert());
+    return {root,bones,aim,hLen,hipForward,gripLoc,armL,boneR,scale:s,worldQ:{},anims};
   }
   /* ---- locomotion: the model's own mocap breathes under the sim ----
      Idle/Walk/Run clips (bundled Xbot/Soldier ship them) crossfade by
@@ -2793,8 +2820,7 @@ const MODELPIPE=(()=>{
       Hips:1, RightFoot:1, LeftFoot:1,                  // anchors stay sim-true
       Spine:lerp(.88,.7,move), Spine1:lerp(.88,.7,move), Spine2:lerp(.9,.75,move),
       Neck:.92, Head:.95,
-      RightUpLeg:lerp(.9,.55,move), RightLeg:lerp(.9,.55,move),
-      LeftUpLeg:lerp(.9,.55,move), LeftLeg:lerp(.9,.55,move),
+      RightUpLeg:1, RightLeg:1, LeftUpLeg:1, LeftLeg:1,
     };
     return true;
   }
@@ -2845,13 +2871,13 @@ const MODELPIPE=(()=>{
     };
     aimDelta('Hips',J.pelvis,J.chestB);
     { /* facing: twist the pelvis about the trunk axis toward bodyYaw */
-      const b=M.bones.Hips, rl=M.bones.RightUpLeg, ll=M.bones.LeftUpLeg;
-      if(b&&rl&&ll){
-        rl.getWorldPosition(_x); ll.getWorldPosition(_y);
-        _da.subVectors(_x,_y).multiplyScalar(M.fSign||1); // live anatomical right
+      const b=M.bones.Hips;
+      if(b){
         _z.subVectors(J.chestB,J.pelvis).normalize();
-        _da.addScaledVector(_z,-_da.dot(_z));
-        _db.crossVectors(_da,_z);                    // live forward (R×U)
+        // A fixed bind-space forward axis is independent of foot placement.
+        // Deriving facing from already-retargeted hips fed last frame back in.
+        _db.copy(M.hipForward).applyQuaternion(b.getWorldQuaternion(_qp));
+        _db.addScaledVector(_z,-_db.dot(_z));
         _da.copy(fwd).addScaledVector(_z,-fwd.dot(_z));
         if(_db.lengthSq()>1e-8&&_da.lengthSq()>1e-8){
           _db.normalize(); _da.normalize();
@@ -2891,8 +2917,6 @@ const MODELPIPE=(()=>{
     const twoHand=!!gdir&&J.haL.distanceTo(J.haR)<.32;
     const hrR=gdir?_dc.copy(J.haR).addScaledVector(gdir,-hOff):_dc.copy(J.haR);
     const hrL=twoHand?_dd.copy(J.haL).addScaledVector(gdir,-hOff):_dd.copy(J.haL);
-    if(M._geR){ if(gdir)hrR.add(M._geR); else M._geR.multiplyScalar(.8); }
-    if(M._geL){ if(twoHand)hrL.add(M._geL); else M._geL.multiplyScalar(.8); }
     /* clavicles stay in BIND pose: aiming them at the sim's shoulder
        points twists the deltoid where the arm joins the torso. The arm
        IK reaches from the rig's own natural socket instead. */
@@ -2901,7 +2925,11 @@ const MODELPIPE=(()=>{
        only as the bend-direction hint */
     const solveArm=(side,tgt,hint)=>{
       const A=M.bones[side+'Arm'];
-      const L=(M.armL&&M.armL[side])||null;
+      const measured=(M.armL&&M.armL[side])||null;
+      // The visual limb must span the same reach as the physical anatomy.
+      // Positioning elbow/wrist also removes a 10–15 cm grip gap on short rigs.
+      const L=measured?[Math.max(measured[0],f.dims.upperArm),Math.max(measured[1],f.dims.foreArm)]:null;
+      if(f.severed[side==='Right'?'armR':'armL'])return;
       if(!A||!L){ aimDelta(side+'Arm',side==='Right'?J.shR:J.shL,hint);
         aimDelta(side+'ForeArm',hint,tgt); return; }
       A.getWorldPosition(_ea);
@@ -2920,7 +2948,10 @@ const MODELPIPE=(()=>{
       _ed.normalize();
       _da.copy(_ea).addScaledVector(_eb,a).addScaledVector(_ed,r);
       aimDelta(side+'Arm',_ea,_da);
+      const elbow=M.bones[side+'ForeArm'],wrist=M.bones[side+'Hand'];
+      if(elbow){elbow.position.copy(elbow.parent.worldToLocal(_da.clone()));elbow.updateMatrixWorld(true);}
       aimDelta(side+'ForeArm',_da,_ec);
+      if(wrist){wrist.position.copy(wrist.parent.worldToLocal(_ec.clone()));wrist.updateMatrixWorld(true);}
     };
     solveArm('Right',hrR,J.elR);
     solveArm('Left',hrL,J.elL);
@@ -2928,29 +2959,37 @@ const MODELPIPE=(()=>{
     if(gdir){
       _da.copy(hrR).add(gdir); aimDelta('RightHand',hrR,_da);
       if(twoHand){ _da.copy(hrL).add(gdir); aimDelta('LeftHand',hrL,_da); }
-      /* measure this frame's fist-to-anchor error for the next frame */
+      /* Constrain the curled fist to the physical grip in this frame. */
       for(const side of ['Right','Left']){
         if(side==='Left'&&!twoHand)continue;
         const gl=M.gripLoc&&M.gripLoc[side], hb=M.bones[side+'Hand'];
         if(!gl||!hb)continue;
         _da.copy(gl); hb.localToWorld(_da);
         _db.copy(side==='Right'?J.haR:J.haL).sub(_da);
-        const key=side==='Right'?'_geR':'_geL';
-        M[key]=M[key]||new THREE.Vector3();
-        M[key].addScaledVector(_db,.5).clampLength(0,.12);
+        if(f.severed[side==='Right'?'armR':'armL'])continue;
+        const wrist=hb.getWorldPosition(V3()).add(_db);
+        hb.position.copy(hb.parent.worldToLocal(wrist));hb.updateMatrixWorld(true);
       }
     }
-    aimDelta('RightUpLeg',J.hipR,J.knR);
-    aimDelta('RightLeg',J.knR,J.ankR);
-    aimDelta('LeftUpLeg',J.hipL,J.knL);
-    aimDelta('LeftLeg',J.knL,J.ankL);
-    /* feet: toes reach along our locked plant yaw */
+    // Match joint positions as well as orientations. Mixamo rigs differ
+    // in hip spacing and leg lengths; rotating alone left ankles ~20 cm
+    // away from the support contacts on the bundled samurai.
+    const placeJoint=(name,point)=>{
+      const bone=M.bones[name];if(!bone)return;
+      bone.parent.updateMatrixWorld(true);
+      bone.position.copy(point);bone.parent.worldToLocal(bone.position);
+      bone.updateMatrixWorld(true);
+    };
     for(const side of ['R','L']){
-      const ft=f.feet[side];
-      const a=side==='R'?J.ankR:J.ankL;
-      _da.copy(a).addScaledVector(DIRY(ft.yaw||f.bodyYaw),.16);
-      _da.y=a.y-.03;
-      aimDelta(side==='R'?'RightFoot':'LeftFoot',a,_da);
+      const prefix=side==='R'?'Right':'Left';
+      const hip=J['hip'+side],knee=J['kn'+side],ankle=J['ank'+side];
+      placeJoint(prefix+'UpLeg',hip);aimDelta(prefix+'UpLeg',hip,knee);
+      placeJoint(prefix+'Leg',knee);aimDelta(prefix+'Leg',knee,ankle);
+      placeJoint(prefix+'Foot',ankle);
+      const ft=f.feet[side],yaw=ft.yaw===undefined?f.bodyYaw:ft.yaw;
+      _da.copy(ankle).addScaledVector(DIRY(yaw),.16);
+      _da.y=ankle.y-.03-Math.sin(ft.roll||0)*.16;
+      aimDelta(prefix+'Foot',ankle,_da);
     }
     /* the cloth remembers the blood */
     if(f.kimonoMat&&M.root){
@@ -3050,7 +3089,7 @@ const MODELPIPE=(()=>{
   loadClip('dance3','models/anims/dance/dance3.fbx');
   loadClip('dance4','models/anims/dance/dance4.fbx');
   function playClip(f,name,fade){
-    const M=f.model; if(!M||!clips[name])return false;
+    const M=f.model; if(!M||!clips[name]||M.root.userData.intendedHeight)return false;
     try{
       if(!M.mixer)M.mixer=new THREE.AnimationMixer(M.root);
       /* retarget: rebind tracks whose bone names resolve on this rig */
@@ -3080,14 +3119,14 @@ const MODELPIPE=(()=>{
       const a=M.mixer.clipAction(M._clips[name]);
       a.setLoop(THREE.LoopOnce); a.clampWhenFinished=true;
       a.reset().fadeIn(fade||.15).play();
-      M.clipUntil=performance.now()+clips[name].duration*1000;
+      M.clipUntil=simNow()+clips[name].duration*1000;
       return true;
     }catch(e){ return false; }
   }
   function tickClips(f,dt){
     const M=f.model;
     if(M&&M.mixer&&M.clipUntil){
-      if(performance.now()<M.clipUntil){ M.mixer.update(dt); return true; }
+      if(simNow()<M.clipUntil){ M.mixer.update(dt); return true; }
       M.clipUntil=0; M.mixer.stopAllAction();
     }
     return false;
@@ -3122,7 +3161,7 @@ const MODELPIPE=(()=>{
       const a=P.mixer.clipAction(clips[name]);
       a.setLoop(THREE.LoopOnce); a.clampWhenFinished=true;
       a.reset().play();
-      f._pupPlay={P,until:performance.now()+clips[name].duration*1000,
+      f._pupPlay={P,until:simNow()+clips[name].duration*1000,
         origin:f.pos.clone(),yaw:f.bodyYaw||0};
       return true;
     }catch(e){ return false; }
@@ -3130,7 +3169,7 @@ const MODELPIPE=(()=>{
   /* advance the puppet and write its joints into a target set */
   function tickPuppet(f,dt,out){
     const pp=f._pupPlay; if(!pp)return false;
-    if(performance.now()>=pp.until){ f._pupPlay=null; return false; }
+    if(simNow()>=pp.until){ f._pupPlay=null; return false; }
     pp.P.mixer.update(dt);
     pp.P.rig.updateMatrixWorld(true);
     const cy=Math.cos(pp.yaw), sy=Math.sin(pp.yaw), k=pp.P.k;
@@ -3259,14 +3298,10 @@ const MODELSEV=(()=>{
     try{
       const pb=cutBone.parent;
       if(pb){
-        const cap=new THREE.Group();
-        const flesh=new THREE.Mesh(new THREE.SphereGeometry(.055,12,9),
-          stdMat(0x6e1216,{roughness:.5}));
-        flesh.scale.set(1,.55,1);
-        const bone=new THREE.Mesh(new THREE.CylinderGeometry(.012,.014,.07,7),
-          stdMat(0xe6dfc9,{roughness:.4}));
-        bone.position.y=.03;
-        cap.add(flesh,bone);
+        const radius=clamp((M.boneR&&M.boneR[boneName])||(/Head|Neck/.test(boneName)?.045:.045),.025,.085);
+        const cap=jaggedCap(radius);const direction=pivot.clone().sub(pb.getWorldPosition(V3())).normalize();
+        cap.quaternion.setFromUnitVectors(V3(0,0,1),direction);
+        const end=jaggedCap(radius);end.quaternion.setFromUnitVectors(V3(0,0,1),direction.clone().negate());piece.add(end);
         cap.position.copy(pivot);
         scene.add(cap); pb.attach(cap);
       }
@@ -3360,6 +3395,12 @@ const GSLOCO=(()=>{
     if(L.run){ L.run.weight=lerp(L.run.weight,wRun,k);
       L.run.timeScale=clamp(speed/3,.6,1.6); }
     L.mixer.update(dt);
+    const ft=f.feet;
+    const gaitPhase=ft.R.swing>0?ft.R.swing*.5:ft.L.swing>0?.5+ft.L.swing*.5:(L.phase||0);
+    L.phase=gaitPhase;
+    if(speed>.15)for(const a of [L.walk,L.run,L.wF,L.wB,L.wL,L.wR])
+      if(a)a.time=gaitPhase*a.getClip().duration;
+    L.mixer.update(0);
     L.rig.updateMatrixWorld(true);
     const B=L.bones;
     B.hips.getWorldPosition(_w).multiplyScalar(L.k);
@@ -3374,7 +3415,7 @@ const GSLOCO=(()=>{
        intent (a fast blade, a raised guard, a stagger) hands it back */
     const neu=clamp(1-(f.bladeSpeed||0)/3.5,0,1)
       *(f.guarding?.4:1)*(f.stun>0?0:1);
-    const cl=.08+.10*neu, cy=.3+.32*neu;
+    const cl=.012+.009*neu, cy=.055+.035*neu;
     out.bob=clamp(_w.y-L.avgY,-cl,cl);
     out.sway=clamp(_w.x-L.avgX,-cl,cl);
     out.push=clamp(_w.z-L.avgZ,-cl,cl);
@@ -3382,14 +3423,14 @@ const GSLOCO=(()=>{
     if(B.thR&&B.thL){
       B.thR.getWorldPosition(_w2); B.thL.getWorldPosition(_w3);
       const hy=Math.atan2(-(_w2.z-_w3.z),(_w2.x-_w3.x)||1e-6);
-      L.avgHY=lerp(L.avgHY,hy,clamp(dt*.8,0,1));
-      out.hipYaw=clamp(hy-L.avgHY,-(L._cy||.3),(L._cy||.3));
+      L.avgHY=lerpAngle(L.avgHY,hy,damp(.8,dt));
+      out.hipYaw=clamp(angDiff(hy,L.avgHY),-(L._cy||.3),(L._cy||.3));
     }
     if(B.shR&&B.shL){
       B.shR.getWorldPosition(_w2); B.shL.getWorldPosition(_w3);
       const cy=Math.atan2(-(_w2.z-_w3.z),(_w2.x-_w3.x)||1e-6);
-      L.avgCY=lerp(L.avgCY,cy,clamp(dt*.8,0,1));
-      out.chestYaw=clamp(cy-L.avgCY,-(L._cy||.3),(L._cy||.3));
+      L.avgCY=lerpAngle(L.avgCY,cy,damp(.8,dt));
+      out.chestYaw=clamp(angDiff(cy,L.avgCY),-(L._cy||.3),(L._cy||.3));
     }
     return out;
   }
@@ -3553,7 +3594,7 @@ Fighter.prototype.buildPhys=function(kin){
   cap('elR',B.faR,K.elR); cap('elL',B.faL,K.elL);
   cap('knR',B.shR,K.knR); cap('knL',B.shL,K.knL);
   { const bm=(this.build&&this.build.mass)||1;
-    if(bm!==1)for(const k in B)if(k!=='sword'&&B[k].invMass>0)B[k].invMass/=bm; }
+    if(bm!==1)for(const k in B)if(k!=='sword'&&B[k].invMass>0){B[k].invMass/=bm;B[k].invI.divideScalar(bm);} }
   this.phys={B,M,A,L};
 };
 const _com=V3(), _cv=V3(), _be=V3(), _bq=new THREE.Quaternion();
@@ -3931,8 +3972,8 @@ Fighter.prototype.stepFoot=function(f,target,dt,otherPlanted,disabled,speed2d,ur
       groundMark.drag(f.from.x,f.from.z,f.p.x,f.p.z);
     if(f.swing>=1){ f.swing=0; f.lift=0; f.settle=.09;
       /* the body SETTLES onto the landed foot — weight, not gliding */
-      this.softHit&&this.softHit('chestB',V3(0,-1,0),.22+speed2d*.18);
-      Sound.step&&Sound.step(speed2d);
+      this.softHit&&this.softHit('chestB',V3(0,-1,0),.035+speed2d*.025);
+      Sound.step&&Sound.step(speed2d,f.p);
       if(!disabled&&groundMark&&!onIce(f.p))groundMark.foot(f.p.x,f.p.z,f.yaw); }
   } else {
     f.lift=0;
@@ -3943,6 +3984,9 @@ Fighter.prototype.stepFoot=function(f,target,dt,otherPlanted,disabled,speed2d,ur
     if(otherPlanted && need){
       f.swing=1e-4; f.from=f.p.clone(); f.yawFrom=f.yaw;
       f.to=target.clone(); f.to.y=0;
+      // Keep the landing under the reachable support envelope.
+      const reach=f.to.clone().sub(this.pos).setY(0);
+      if(reach.length()>.5)f.to.copy(this.pos).add(reach.setLength(.5)).setY(0);
       const hurt=1+dmg*.8+(disabled?1.2:0)+(this.snowDepth||0)*1.6;
       f.dur=clamp((urgent?.17:.3)-speed2d*.028,.15,.3)*hurt/Math.max(this.mobility,.35);
     }
@@ -4031,9 +4075,9 @@ Fighter.prototype.updateAlive=function(dt,opponent){
   const fwd=DIRY(this.bodyYaw), right=V3(fwd.z,0,-fwd.x);
 
   /* guard freshness: a block raised in the last instant is a PARRY */
-  if(this.guarding&&!this._wasGuard)this.guardStart=performance.now();
+  if(this.guarding&&!this._wasGuard)this.guardStart=simNow();
   this._wasGuard=this.guarding;
-  this.guardFresh=this.guarding&&(performance.now()-this.guardStart)
+  this.guardFresh=this.guarding&&(simNow()-this.guardStart)
     <185*((this.weapon&&this.weapon.parryWin)||1);
 
   /* hip drive: lateral sword momentum rotates the trunk */
@@ -4082,8 +4126,8 @@ Fighter.prototype.updateAlive=function(dt,opponent){
   TMP3.clampLength(0,14).multiplyScalar(.004).addScaledVector(this.vel,.009);
   this.leanV.lerp(TMP3,clamp(dt*5,0,1)); this.leanV.y=0;
   /* inverted-pendulum catch point ~0.26s ahead */
-  const catchPt=TMP4.copy(this.pos).addScaledVector(this.vel,.26);
-  const stride=clamp(speed2d*.21,0,.36);
+  const catchPt=TMP4.copy(this.pos).addScaledVector(this.vel,.14);
+  const stride=clamp(speed2d*.065,0,.12);
   const vdir=speed2d>.3?TMP3.copy(this.vel).setY(0).normalize():fwd;
   const tgtR=catchPt.clone().addScaledVector(right,.17).addScaledVector(fwd,.16)
     .addScaledVector(vdir,stride*(1-this.legDamage.R*.5));
@@ -4111,8 +4155,19 @@ Fighter.prototype.updateAlive=function(dt,opponent){
       if(TMP3.dot(right)>0)urgR=true; else urgL=true;
     }
   } else this.balanceErr=(this.balanceErr||0)*.9;
-  this.stepFoot(ft.R,tgtR,dt,ft.L.swing===0,this.disabled.legR,speed2d,urgR);
-  this.stepFoot(ft.L,tgtL,dt,ft.R.swing===0,this.disabled.legL,speed2d,urgL);
+  // Both feet must get support time. Choose the most displaced foot,
+  // then alternate; never give the right foot first refusal every frame.
+  const airborneR=ft.R.swing>0, airborneL=ft.L.swing>0;
+  let lead=null;
+  if(!airborneR&&!airborneL){
+    const er=ft.R.p.distanceToSquared(tgtR)+(urgR?.2:0);
+    const el=ft.L.p.distanceToSquared(tgtL)+(urgL?.2:0);
+    lead=this._lastStep==='R'?'L':this._lastStep==='L'?'R':er>el?'R':'L';
+  }
+  this.stepFoot(ft.R,tgtR,dt,lead==='R',this.disabled.legR,speed2d,urgR);
+  this.stepFoot(ft.L,tgtL,dt,lead==='L',this.disabled.legL,speed2d,urgL);
+  if(!airborneR&&ft.R.swing>0)this._lastStep='R';
+  if(!airborneL&&ft.L.swing>0)this._lastStep='L';
   const stepping=ft.R.swing>0||ft.L.swing>0;
 
   /* pelvis rides between the feet — visible weight transfer */
@@ -4129,7 +4184,7 @@ Fighter.prototype.updateAlive=function(dt,opponent){
   this.idleT=idle?(this.idleT||0)+dt:0;
   const swayT=idle?Math.sin(this.breath*.55)*.02+Math.sin(this.breath*.19)*.013:0;
   this._sway=lerp(this._sway||0,swayT,clamp(dt*1.5,0,1));
-  if(this.idleT>(this._nextShift||5)){       // an honest little repositioning step
+  if(false){ // no random movement impulses while standing still       // an honest little repositioning step
     this._nextShift=this.idleT+4+Math.random()*3.5;
     this.vel.x+=rand(-.3,.3); this.vel.z+=rand(-.22,.22);
   }
@@ -4149,10 +4204,20 @@ Fighter.prototype.updateAlive=function(dt,opponent){
      the faster the body moves, the more the clip owns the rhythm */
   const ML=(this.alive&&!(this.kneel>0)&&!this.begging&&typeof GSLOCO!=='undefined')
     ?GSLOCO.tick(this,dt,speed2d):null;
-  const mk=ML?1+clamp(speed2d/1.4,0,1)*.45:0;
-  const pelvisY=D.pelvisY-hurtSag-stepDip*(ML?.012:.024)-(stepping?.008:0)
+  const mk=ML?.4:0;
+  let pelvisY=D.pelvisY-hurtSag-stepDip*.012
     +Math.sin(this.breath*1.6)*.007+(this.previewBob||0)+(ML?ML.bob*1.05*mk:0);
-  const pelvis=V3(lerp(feetMid.x,this.pos.x,.55),pelvisY,lerp(feetMid.z,this.pos.z,.55));
+  const pelvis=V3(lerp(feetMid.x,this.pos.x,.82),pelvisY,lerp(feetMid.z,this.pos.z,.82));
+  // Lower the hips to reach a planted ankle, rather than sliding that ankle.
+  const legReach=(D.thigh+D.shin)*.985;
+  let supportHeight=D.pelvisY;
+  for(const [foot,side] of [[ft.R,1],[ft.L,-1]])if(foot.swing===0){
+    const hx=pelvis.x+right.x*.10*side, hz=pelvis.z+right.z*.10*side;
+    const dx=foot.p.x-hx,dz=foot.p.z-hz;
+    supportHeight=Math.min(supportHeight,.065+Math.sqrt(Math.max(.1,legReach*legReach-dx*dx-dz*dz)));
+  }
+  this._supportY=lerp(this._supportY===undefined?supportHeight:this._supportY,supportHeight,damp(18,dt));
+  pelvisY=Math.min(pelvisY,this._supportY);pelvis.y=pelvisY;
   const pelvisYawA=this.bodyYaw+this.twist*.3-this._ctr*.7+(ML?ML.hipYaw*.62*mk:0);
   const fwdP=DIRY(pelvisYawA), rightP=V3(fwdP.z,0,-fwdP.x);
   pelvis.addScaledVector(rightP,(this._sway||0)+this._wshift+(ML?ML.sway*.92*mk:0));
@@ -4352,8 +4417,8 @@ Fighter.prototype.updateAlive=function(dt,opponent){
       this._lastSwingDir.lerp(TMP1,clamp(dt*8,0,1)).normalize();
     } else { this.alignment=lerp(this.alignment,1,dt*2); this._lastSwingDir=null; }
 
-    if(this.bladeSpeed>6.5 && performance.now()-this.lastWhoosh>260){
-      Sound.whoosh(this.bladeSpeed); this.lastWhoosh=performance.now(); }
+    if(this.bladeSpeed>6.5 && simNow()-this.lastWhoosh>260){
+      Sound.whoosh(this.bladeSpeed,this.tip); this.lastWhoosh=simNow(); }
 
     /* TWO-HANDED GRIP: the hands sweep a compressed arc anchored at the
        solar plexus; the WRISTS articulate the blade through the full arc.
@@ -4641,9 +4706,10 @@ addEventListener('mousemove',e=>{
     input.my=-(e.clientY/innerHeight*2-1);
   }
 });
-function grabPointer(){
-  try{ if(!document.pointerLockElement&&game.state==='fight')
-    renderer.domElement.requestPointerLock(); }catch(e){}
+function grabPointer(e){
+  if(e&&e.target&&e.target.closest&&e.target.closest('button,a,input,select'))return;
+  try{ if(!document.pointerLockElement&&game.state==='fight'){
+    const lock=renderer.domElement.requestPointerLock();if(lock&&lock.catch)lock.catch(()=>{}); } }catch(e){}
 }
 if(!IS_TOUCH)addEventListener('mousedown',grabPointer);
 document.addEventListener('pointerlockchange',()=>{
@@ -4813,7 +4879,7 @@ class AI{
         else if(dist<maai-.25)move.sub(fwd);
         move.addScaledVector(right,this.strafe*.6);
         if(this.sig==='weave'){
-          move.addScaledVector(right,Math.sin(performance.now()*.0042+(f.ph||0))*1.2);
+          move.addScaledVector(right,Math.sin(simNow()*.0042+(f.ph||0))*1.2);
           if(!this._sigSaid&&dist<2.6){ this._sigSaid=true;
             log(f.name+' bobs and weaves — never where he was',false); } }
         /* never let the rope pin you */
@@ -5030,7 +5096,7 @@ function bladeVsBlade(a,b){
 
     /* PARRY: a fresh guard against a committed cut turns it aside hard
        and opens the attacker for a beat */
-    const now=performance.now();
+    const now=simNow();
     const tryParry=(def,att)=>{
       if(!def.guardFresh||def.parryEnabled===false)return false;
       if(att.bladeSpeed*att.swordControl<6.5)return false;
@@ -5049,7 +5115,7 @@ function bladeVsBlade(a,b){
       def.stamina=Math.max(0,def.stamina-6*mAtt);
       att.stagger=(att.stagger||0)+.6/mAtt;
       if(att===enemy&&typeof enemyAI!=='undefined'){ enemyAI.state='recover'; enemyAI.t=1.0; enemyAI.plan=null; att.telegraph=false; }
-      Sound.parry(); sparks(hitTmpA,14);
+      Sound.parry(hitTmpA); sparks(hitTmpA,14);
       game.timeScale=.4; game.slowT=.28;
       log(def.isPlayer?'parried — his blade flies wide. an opening!'
                       :'he reads your cut — turned aside!',false);
@@ -5089,7 +5155,7 @@ function bladeVsBlade(a,b){
       a.stamina=Math.max(0,a.stamina-Jm*.55);
       b.stamina=Math.max(0,b.stamina-Jm*.55);
       const hard=Jm>5.2;
-      Sound.clang(hard);
+      Sound.clang(hard,hitTmpA);
       sparks(hitTmpA,Math.floor(clamp(Jm*1.5,3,14)));
       if(hard){ /* momentum decides who staggers, not symmetry */
         const pA=mA*a.tipVel.length(), pB=mB*b.tipVel.length();
@@ -5097,7 +5163,7 @@ function bladeVsBlade(a,b){
         w.stun=Math.max(w.stun,clamp(Jm*.02,.06,.25));
         w.stagger=(w.stagger||0)+clamp(Jm*.035,0,.45);
       }
-    } else { Sound.clang(false); sparks(hitTmpA,3); }
+    } else { Sound.clang(false,hitTmpA); sparks(hitTmpA,3); }
 
   }
 }
@@ -5221,7 +5287,7 @@ function updateLoose(f,dt){
   }
   /* torn cloth breathes and swings */
   if(f._flaps&&f._flaps.length){
-    const t=performance.now()*.003,
+    const t=simNow()*.003,
           sway=1+Math.hypot(f.vel.x,f.vel.z)*1.5;
     for(const fl of f._flaps){
       const u=fl.userData;
@@ -5432,38 +5498,38 @@ function updateFlares(dt){
    Severing leaves a JAGGED STUMP — torn flesh ring, protruding bone —
    on both the body and the flying piece, which trails blood as it
    tumbles. Severe cuts leave gash decals stuck to the body part. */
-function jaggedCap(r){
-  const g=new THREE.Group();
-  try{
-    const N=12, pos=[0,0,0], idx=[];
-    for(let i=0;i<=N;i++){
-      const a=i/N*Math.PI*2, rr=r*(0.62+Math.random()*.55);
-      pos.push(Math.cos(a)*rr, Math.sin(a)*rr, (Math.random()-.5)*r*.35);
+function jaggedCap(r,withBone=true){
+  const g=new THREE.Group(),N=24;
+  // Ragged skin/fascia boundary around dark, moist muscle bundles.
+  const points=[0,0,-r*.08],indices=[];
+  for(let i=0;i<=N;i++){const a=i/N*Math.PI*2,rr=r*(.93+.055*Math.sin(i*2.7));points.push(Math.cos(a)*rr,Math.sin(a)*rr,rand(-.08,.04)*r);}
+  for(let i=1;i<=N;i++)indices.push(0,i,i+1);
+  const geo=new THREE.BufferGeometry();geo.setAttribute('position',new THREE.Float32BufferAttribute(points,3));geo.setIndex(indices);geo.computeVertexNormals();
+  g.add(new THREE.Mesh(geo,stdMat(0x33080c,{roughness:.3,side:THREE.DoubleSide})));
+  const fascia=stdMat(0x8f6860,{roughness:.43}),muscle=stdMat(0x6c1b22,{roughness:.27});
+  for(let i=0;i<8;i++){
+    const a=i/8*Math.PI*2;
+    const lobe=new THREE.Mesh(new THREE.SphereGeometry(1,8,6),muscle);
+    lobe.scale.set(r*.26,r*.34,r*.1);lobe.position.set(Math.cos(a)*r*.61,Math.sin(a)*r*.61,0);lobe.rotation.z=a;g.add(lobe);
+    const strand=new THREE.Mesh(new THREE.CylinderGeometry(r*.015,r*.009,r*.24,5),fascia);
+    strand.position.set(Math.cos(a)*r*.83,Math.sin(a)*r*.83,r*.025);strand.rotation.set(.35,a,a);g.add(strand);
+  }
+  if(withBone){
+    // Hollow cortical wall with an irregular fracture edge and recessed marrow.
+    const pos=[],idx=[],br=r*.24,len=r*.65;
+    for(let ring=0;ring<4;ring++)for(let i=0;i<=N;i++){
+      const a=i/N*Math.PI*2,inner=ring>1,rad=br*(inner?.62:1);
+      const z=(ring===1||ring===2)?len*(.82+.18*Math.sin(i*1.8)):-r*.08;
+      pos.push(Math.cos(a)*rad,Math.sin(a)*rad,z);
     }
-    for(let i=1;i<=N;i++)idx.push(0,i,i+1);
-    const geo=new THREE.BufferGeometry();
-    geo.setAttribute('position',new THREE.Float32BufferAttribute(pos,3));
-    geo.setIndex(idx); geo.computeVertexNormals();
-    const meat=new THREE.Mesh(geo,stdMat(0x5e0f0f,{roughness:.55,side:THREE.DoubleSide}));
-    const meat2=new THREE.Mesh(geo,stdMat(0x7e1b16,{roughness:.7,side:THREE.DoubleSide}));
-    meat2.scale.setScalar(.72); meat2.position.z=r*.06;
-    /* the BONE: pale, snapped, unmistakably jutting from the meat */
-    const boneM=stdMat(0xece5d2,{roughness:.4});
-    const bone=new THREE.Mesh(new THREE.CylinderGeometry(r*.3,r*.36,r*2.0,10),boneM);
-    bone.rotation.x=Math.PI/2; bone.position.z=r*.7;
-    const tip=new THREE.Mesh(new THREE.ConeGeometry(r*.3,r*.55,9),boneM);
-    tip.rotation.x=Math.PI/2; tip.rotation.z=.25; tip.position.z=r*1.92;
-    const splinter=new THREE.Mesh(new THREE.ConeGeometry(r*.13,r*.9,7),boneM);
-    splinter.rotation.x=Math.PI/2+.28; splinter.rotation.y=.3;
-    splinter.position.set(r*.3,r*.12,r*1.05);
-    const marrow=new THREE.Mesh(new THREE.CylinderGeometry(r*.15,r*.15,r*.05,8),
-      stdMat(0x6e1c1c,{roughness:.85}));
-    marrow.rotation.x=Math.PI/2; marrow.position.z=r*1.71;
-    g.add(meat,meat2,bone,tip,splinter,marrow);
-    g.traverse(o=>{ if(o.isMesh)o.castShadow=true; });
-  }catch(e){}
-  return g;
+    for(let ring=0;ring<3;ring++)for(let i=0;i<N;i++){const a=ring*(N+1)+i,b=a+N+1;idx.push(a,b,a+1,a+1,b,b+1);}
+    const bg=new THREE.BufferGeometry();bg.setAttribute('position',new THREE.Float32BufferAttribute(pos,3));bg.setIndex(idx);bg.computeVertexNormals();
+    g.add(new THREE.Mesh(bg,stdMat(0xc6b89b,{roughness:.46,side:THREE.DoubleSide})));
+    const marrow=new THREE.Mesh(new THREE.CircleGeometry(br*.61,16),stdMat(0x542127,{roughness:.36,side:THREE.DoubleSide}));marrow.position.z=len*.3;g.add(marrow);
+  }
+  g.traverse(o=>{if(o.isMesh)o.castShadow=true;});return g;
 }
+
 function attachStump(part,atY,r){
   const s=jaggedCap(r);
   s.rotation.x=Math.PI/2; s.position.y=atY;
@@ -5767,20 +5833,19 @@ const bruiseTex=canTex(64,64,(x,w,h)=>{
   g.addColorStop(1,'rgba(80,10,28,0)');
   x.fillStyle=g; x.fillRect(0,0,w,h);
 });
-/* bright arcade marks: a saturated slash on skin, a splatter on cloth,
-   a bruise bloom from fists — unlit so the night can't mute them */
+/* Layered wound interior, torn edges and secondary contact droplets. */
 const brightGashTex=canTex(128,64,(x,w,h)=>{
   x.clearRect(0,0,w,h);
   x.lineCap='round';
-  x.strokeStyle='#c60d16'; x.lineWidth=11;
+  x.strokeStyle='#4e1117'; x.lineWidth=11;
   x.beginPath(); x.moveTo(10,h*.5);
   for(let px=10;px<=w-10;px+=8)x.lineTo(px,h*.5+(Math.random()-.5)*h*.5);
   x.stroke();
-  x.strokeStyle='#ff3540'; x.lineWidth=4;
+  x.strokeStyle='#9d423c'; x.lineWidth=4;
   x.beginPath(); x.moveTo(12,h*.5);
   for(let px=12;px<=w-12;px+=8)x.lineTo(px,h*.5+(Math.random()-.5)*h*.36);
   x.stroke();
-  x.fillStyle='#d81420';
+  x.fillStyle='#68121c';
   for(let i=0;i<10;i++)
     x.fillRect(Math.random()*w,h*.5+(Math.random()-.5)*h*.8,2.5,2.5);
 });
@@ -5811,8 +5876,10 @@ Fighter.prototype._mountWoundPatch=function(partKey,worldPt,w,h,mat,hitDir){
       MODELSEV.PART2BONE[partKey]||'Spine1');
     if(!anchor)return null;
     anchor.updateMatrixWorld(true);
-    axis=new THREE.Vector3(0,1,0)
-      .applyQuaternion(anchor.getWorldQuaternion(new THREE.Quaternion()));
+    const boneName=MODELSEV.PART2BONE[partKey]||'Spine1';
+    const child=this.model.aim[boneName];
+    axis=child?child.getWorldPosition(V3()).sub(anchor.getWorldPosition(V3())).normalize()
+      :new THREE.Vector3(0,1,0).applyQuaternion(anchor.getWorldQuaternion(new THREE.Quaternion()));
   }else{
     anchor=this.parts[partKey]; if(!anchor)return null;
     anchor.updateMatrixWorld(true);
@@ -5866,7 +5933,8 @@ Fighter.prototype.addHitMark=function(partKey,worldPt,hitDir,severity,blunt){
     const onCloth=!this.build.bare&&CLOTHED.test(partKey)&&!this.model;
     const size=(severity==='mortal'?.46:severity==='severe'?.34:.24);
     const tex=blunt?bruiseTex:(onCloth?splatTex:brightGashTex);
-    const mat=new THREE.MeshBasicMaterial({
+    const mat=new THREE.MeshStandardMaterial({
+      roughness:blunt?.8:.3,
       map:tex||null,transparent:true,depthWrite:false,
       color:blunt?0xb03048:0xffffff,
       opacity:blunt?.85:1,
@@ -5879,7 +5947,7 @@ Fighter.prototype.addHitMark=function(partKey,worldPt,hitDir,severity,blunt){
     /* the exit spray: satellites thrown ALONG the cut's travel */
     if(!blunt&&hitDir&&severity!=='minor'){
       for(let k=1;k<=2;k++){
-        const smat=new THREE.MeshBasicMaterial({map:splatTex||null,
+        const smat=new THREE.MeshStandardMaterial({roughness:.34,map:splatTex||null,
           transparent:true,depthWrite:false,polygonOffset:true,
           polygonOffsetFactor:-5,opacity:.9});
         const wp=worldPt.clone().addScaledVector(hitDir,.1*k)
@@ -5901,7 +5969,7 @@ Fighter.prototype.addOpenWound=function(partKey,worldPt,severity){
     const clothed=CLOTHED.test(partKey);
     /* torn cloth rim, in this fighter's own cloth color */
     if(clothed&&this.palette){
-      const rim=jaggedCap(.052*big);
+      const rim=jaggedCap(.052*big,false);
       rim.traverse(o=>{ if(o.isMesh&&o.material){
         o.material=stdMat(partKey==='chest'||/upperArm/.test(partKey)?
           this.palette.kimono:this.palette.hakama,{roughness:.92,
@@ -5988,8 +6056,11 @@ function addSquirt(f,partKey,worldPt,dur,power){
   const part=f.parts[partKey]||f.parts.chest;
   try{
     part.updateMatrixWorld(true);
-    SQUIRTS.push({f,part,local:part.worldToLocal(worldPt.clone()),
-      t:dur,power,pulse:0});
+    const existing=SQUIRTS.find(s=>s.f===f&&s.part===part);
+    if(existing){existing.t=Math.max(existing.t,dur);existing.power=Math.max(existing.power,power);return;}
+    const local=part.worldToLocal(worldPt.clone());
+    const direction=local.clone().normalize();if(direction.lengthSq()<.001)direction.set(0,-1,0);
+    SQUIRTS.push({f,part,local,direction,t:dur,power,pulse:0});
   }catch(e){}
 }
 const _sq=V3(), _sd=V3();
@@ -5997,15 +6068,17 @@ function updateSquirts(dt){
   for(let i=SQUIRTS.length-1;i>=0;i--){
     const s=SQUIRTS[i];
     s.t-=dt;
-    if(s.t<=0||!s.f.parts){ SQUIRTS.splice(i,1); continue; }
+    if(s.f.dead)s.deadTime=(s.deadTime||0)+dt;
+    if(s.t<=0||!s.f.parts||s.f._disposed||(s.deadTime||0)>2){ SQUIRTS.splice(i,1); continue; }
     s.pulse-=dt;
     if(s.pulse<=0){
-      s.pulse=.11+Math.random()*.09;              // heart-paced spurts
+      s.pulse=60/(78+(1-s.f.bloodFrac)*45)+rand(-.025,.025);
       s.part.updateMatrixWorld(true);
       _sq.copy(s.local).applyMatrix4(s.part.matrixWorld);
-      _sd.set(rand(-.6,.6),rand(.7,1.4),rand(-.6,.6)).normalize();
-      emitBlood(_sq,_sd,(3+Math.random()*3)*s.power,
-        Math.floor((7+Math.random()*7)*s.power));
+      _sd.copy(s.direction).transformDirection(s.part.matrixWorld);
+      const pressure=clamp(s.f.bloodFrac,.03,1)*(s.f.dead?Math.exp(-(s.deadTime||0)*3)*.2:1);
+      emitBlood(_sq,_sd,clamp(s.power*1.7,.25,3.5)*pressure,
+        Math.ceil(clamp(s.power*7,2,18)*pressure));
     }
   }
 }
@@ -6373,7 +6446,7 @@ if(hakamaNrm)hakamaNrm.repeat.set(4,1.6);
    90s arcade readability: every fighter wears a dark inverted-hull
    OUTLINE (normal-displaced so it deforms with the skin) and a cool
    fresnel RIM so the silhouette pops off the night. O toggles outlines. */
-const OUTLINE={on:true,meshes:[]};
+const OUTLINE={on:false,meshes:[]};
 function addOutline(mesh,thick){
   try{
     if(!mesh.geometry||!mesh.geometry.attributes.position)return;
@@ -6396,15 +6469,11 @@ function addOutline(mesh,thick){
       o.bind(mesh.skeleton,mesh.bindMatrix); }
     else o=new THREE.Mesh(mesh.geometry,mat);
     o.frustumCulled=false; o.castShadow=false; o.userData.outline=true;
-    mesh.add(o); OUTLINE.meshes.push(o);
+    o.visible=OUTLINE.on; mesh.add(o); OUTLINE.meshes.push(o);
   }catch(e){}
 }
-function rimify(m,r,g,b,power,strength){
-  m.onBeforeCompile=s=>{ s.fragmentShader=s.fragmentShader.replace(
-    '#include <emissivemap_fragment>',
-    '#include <emissivemap_fragment>\n'+
-    '{ float f=pow(1.0-clamp(dot(normalize(vNormal),normalize(vViewPosition)),0.0,1.0),'+power.toFixed(1)+');\n'+
-    '  totalEmissiveRadiance += vec3('+r+','+g+','+b+')*f*'+strength+'; }'); };
+function rimify(m){
+  // Material response and actual lights define edges, without emissive halos.
   return m;
 }
 /* SKIN LIGHT: wrap-diffuse subsurface — light soaks a little past the
@@ -6626,7 +6695,7 @@ Fighter.prototype.tickHair=function(dt){
     q.pp.copy(q.p); q.p.add(TMP2);
     q.p.y-=8.5*dt*dt;
     q.p.addScaledVector(this.vel,-dt*.15);
-    q.p.x+=Math.sin(performance.now()*.0011+i*1.7)*.0004;  // the wind in it
+    q.p.x+=Math.sin(simNow()*.0011+i*1.7)*.0004;  // the wind in it
   }
   for(let it=0;it<3;it++){
     for(const [a,b,rest] of P.cons){
@@ -6722,7 +6791,7 @@ Fighter.prototype.tickCloth=function(dt,J){
   if(!this.cloth)return;
   dt=Math.min(dt,.033);
   const yaw=this.bodyYaw||0, fwd=DIRY(yaw), right=V3(fwd.z,0,-fwd.x);
-  const now=performance.now()*.001;
+  const now=simNow()*.001;
   /* the waistband TILTS with the trunk — a horizontal pin ring under a
      leaning body cuts a triangular notch across the obi */
   _pq.setFromUnitVectors(UPY,TMP3.subVectors(J.chestB,J.pelvis).normalize());
@@ -6875,26 +6944,21 @@ function genDuelist(stage){
 /* THE ROAD CHANGES: each stage of the ladder is a different night.
    Sky, moonlight, snow tone, lantern warmth — the world keeps score. */
 const AMBIENCES=[
- {sky:['#04060c','#080d18','#0e1626','#18222f'],           // first snow (blue night)
-  moon:0xbdd0ec,moonI:1.15,kick:0x8fb0e8,hemi:0x2c3a4e,
-  ground:0xffffff,snow:['#bcc3ca','#c4cbd1','#ccd3d9'],lantern:0xffb168},
- {sky:['#030809','#071412','#0c241e','#16342b'],           // aurora green
-  moon:0xc6e4d6,moonI:1.05,kick:0x7fd8b0,hemi:0x204036,
-  ground:0xf2fff6,snow:['#b6c8c1','#bed0c9','#c6d8d1'],lantern:0xffc078},
- {sky:['#080614','#130a24','#1f1336','#2e2046'],           // the violet hour
-  moon:0xd2c4f0,moonI:1.1,kick:0xa08fe8,hemi:0x362e50,
-  ground:0xf8f2ff,snow:['#c2bccd','#cac4d5','#d2ccdd'],lantern:0xff9a58},
- {sky:['#0d0508','#200a10','#3a141a','#5e2c24'],           // blood dawn
-  moon:0xeec8b4,moonI:1.0,kick:0xe89a7f,hemi:0x503430,
-  ground:0xfff4ee,snow:['#cfc0bb','#d7c8c3','#dfd0cb'],lantern:0xffae62},
- {sky:['#07080a','#101316','#1a1f24','#2c323a'],           // iron gray
-  moon:0xccd6e0,moonI:.92,kick:0x9fb2c2,hemi:0x333c46,
-  ground:0xf4f6f8,snow:['#bfc5ca','#c7cdd2','#cfd5da'],lantern:0xffb872},
+ {sky:['#263950','#4b6579','#8f9da7','#d0c7b9'],moon:0xffe8cf,moonI:2.6,kick:0xb9cfe1,hemi:0xa9bdcf,
+  ground:0xffffff,snow:['#d8dcdf','#dce0e2','#e2e5e6'],lantern:0xffb168},
+ {sky:['#283c49','#506d75','#93aaa8','#cbd0c0'],moon:0xe3ece1,moonI:2.3,kick:0xb4cbd7,hemi:0xb0c5cc,
+  ground:0xffffff,snow:['#d4dddb','#dbe3e0','#e2e7e4'],lantern:0xffbc7a},
+ {sky:['#343c54','#676d86','#a1a1b2','#d4c6c0'],moon:0xe7ddec,moonI:2.4,kick:0xb8c5e0,hemi:0xb9bfd3,
+  ground:0xffffff,snow:['#d8d8df','#dfdfe5','#e5e5ea'],lantern:0xffae6b},
+ {sky:['#333e52','#716c7b','#b39e99','#e4c7ae'],moon:0xffdbb8,moonI:2.8,kick:0xaebed6,hemi:0xb6c1d0,
+  ground:0xffffff,snow:['#ded9d3','#e4dfd9','#e9e5df'],lantern:0xffb77c},
+ {sky:['#303d48','#667783','#a1adb2','#d2d7d5'],moon:0xe3e9ec,moonI:2.1,kick:0xbbcdd9,hemi:0xb4c5d1,
+  ground:0xffffff,snow:['#d3dade','#dbe1e4','#e2e7e9'],lantern:0xffb872}
 ];
 function applyAmbience(stage){
   const A=AMBIENCES[stage%AMBIENCES.length];
   try{
-    moon.color.copy(SRGB(A.moon)); moon.intensity=A.moonI;
+    moon.color.copy(SRGB(A.moon)); moon.intensity=A.moonI*.6;
     kickL.color.copy(SRGB(A.kick));
     hemiL.color.copy(SRGB(A.hemi));
     groundMat.color.copy(SRGB(A.ground));
@@ -6911,10 +6975,28 @@ function applyAmbience(stage){
     }
   }catch(e){}
 }
+// Existing rigged assets keep their appearance; the simulation owns the
+// joints and damage. A load arriving after a restart cannot dress an old actor.
+const CHARACTER_ASSETS={musashi:'models/ronin.glb',yoroi:'models/ronin.glb',
+  onna:'models/ronin.glb',okina:'models/Old Man.fbx'};
+function dressFighter(f,slot){
+  if(!MODELPIPE.enabled)return;
+  if(slot&&MODELPIPE.current[slot]){f.setModel(MODELPIPE.current[slot]);return;}
+  const buildKey=Object.keys(BUILDS).find(k=>BUILDS[k]===f.build);
+  const src=CHARACTER_ASSETS[buildKey];if(!src)return;
+  const version=f._appearanceVersion=(f._appearanceVersion||0)+1;
+  MODELPIPE.load(src,g=>{
+    if(!g||f._disposed||f._appearanceVersion!==version||f.model)return;
+    f.setModel(g);
+  });
+}
 function setup(){
   if(player){ disposeFighter(player); disposeFighter(enemy); }
   if(enemy2){ disposeFighter(enemy2); enemy2=null; enemyAI2=null; }
-  for(const p of bloodStains)scene.remove(p.mesh); bloodStains.length=0;
+  SQUIRTS.length=0;sprayLife.fill(0);sprayDummy.scale.setScalar(0);sprayDummy.updateMatrix();
+  for(let i=0;i<SPRAY_N;i++)sprayPts.setMatrixAt(i,sprayDummy.matrix);
+  sprayPts.instanceMatrix.needsUpdate=true;
+  for(const p of bloodStains){scene.remove(p.mesh);p.mesh.geometry.dispose();p.mesh.material.dispose();}bloodStains.length=0;
   for(const m of allStains)scene.remove(m); allStains.length=0; stainCount=0;
   /* thin snowfall between duels: yesterday's blood survives as an old
      brown shadow. A brand-new run starts on unmarked snow. */
@@ -6992,10 +7074,12 @@ function setup(){
   game.fatality=null; game._fatalMark=null; game._fatalDone=null;
   game._verdictPend=null; game._verdictShown=false; game._lastVictor=null;
   ritualL.intensity=0; ritualAmb.intensity=0;
+  dressFighter(player,'P');dressFighter(enemy,'E');if(enemy2)dressFighter(enemy2);
   applyAmbience(game.stage);    // a new night for a new opponent
   logEl.innerHTML='';
 }
 function disposeFighter(f){
+  if(!f)return;f._disposed=true;
   if(f.cloth)for(const P of f.cloth)scene.remove(P.mesh);
   if(f.sleeves)for(const P of f.sleeves)scene.remove(P.mesh);
   if(f.hairCloth)scene.remove(f.hairCloth.mesh);
@@ -7058,7 +7142,7 @@ function restart(){
       if(MODELPIPE.playPuppet(f,cn)){
         let d=1.55;
         if(bare||axe){ d=Math.min(MODELPIPE.clips[cn].duration,3.0);
-          if(f._pupPlay)f._pupPlay.until=performance.now()+d*1000; }
+          if(f._pupPlay)f._pupPlay.until=simNow()+d*1000; }
         hold=Math.max(hold,d);
       } }
     if(hold)game.introT=hold;
@@ -7176,7 +7260,7 @@ function endDuel(){
   ;
   /* the verdict waits: first the lit ritual — the taking, the throw,
      the dance if it is earned — then the menu on the darkened field */
-  game._verdictPend=performance.now(); game._verdictShown=false;
+  game._verdictPend=simNow(); game._verdictShown=false;
   game._lastVictor=won?player:livingFoe();
   try{ document.exitPointerLock&&document.exitPointerLock(); }catch(e){}
   beginKillCam(won?lastFoe:player, won?player:livingFoe());
@@ -7321,7 +7405,7 @@ pickdbg('picker ready \u00b7 click the arrows');
    bodywork: a kick, a shove, a pommel butt — or, against a stumbling,
    winded man, the hip throw. Context picks the tool. */
 function clinchAction(att,def,log){
-  const now=performance.now();
+  const now=simNow();
   if(game._clinchAt&&now-game._clinchAt<2000)return false;
   if(!att.alive||!def.alive||att.stun>.2)return false;
   game._clinchAt=now;
@@ -7547,7 +7631,7 @@ function updateFatality(dt){
       log(bare?'the head is TORN from the shoulders':'one blow — the head leaves the body',true);
       game.timeScale=.25; game.slowT=.6; game.shake=Math.max(game.shake||0,1);
       game.adrenaline=Math.max(game.adrenaline||0,1);
-      game._fatalDone=performance.now();   // let the head fly LIVE first
+      game._fatalDone=simNow();   // let the head fly LIVE first
       game.fatality=null; p._ritualGrabL=null; p._ritualGrabR=null;
       return;
     }
@@ -7712,7 +7796,7 @@ function updateKillRitual(dt){
         .filter(n=>MODELPIPE.clips[n]);
       const pick=dn[Math.floor(rand(0,dn.length))%dn.length];
       if(MODELPIPE.playPuppet(vt,pick)&&vt._pupPlay)
-        vt._pupPlay.until=performance.now()
+        vt._pupPlay.until=simNow()
           +Math.min(MODELPIPE.clips[pick].duration,12)*1000;
       log('untouched — the victor DANCES',false);
     }
@@ -7813,15 +7897,12 @@ function updateCamera(dt){
   /* side-on duel framing that drifts with the player's flank */
   const axis=TMP2.subVectors(enemy.pos,player.pos).setY(0).normalize();
   const side=TMP3.set(axis.z,0,-axis.x);
-  const dist=clamp(3.2+span*.75,4,7.5)-(game.bind?0.9:0)
-    +Math.min((game.calmT||0)*.3,1.1);
-  const desired=TMP4.copy(mid).addScaledVector(side,dist).setY(1.75+span*.12);
-  desired.x+=Math.sin(performance.now()*.00013)*.25;
-  desired.y+=Math.sin(performance.now()*.00021)*.1;
-  if(game.snapCut&&game.state==='fight'){ game.snapCut=false;
-    camera.position.copy(desired).addScaledVector(side,-dist*1.9); // hard cut: reverse angle
-    camera.position.y=1.3+Math.random()*.7;
-  } else camera.position.lerp(desired,clamp(dt*(game.calmT>1.5?.9:2.2),0,1));
+  const halfFov=Math.tan(camera.fov*Math.PI/360);
+  const dist=clamp(Math.max(3.6,(span+2.1)/(2*halfFov*camera.aspect)),3.6,11)-(game.bind?.15:0);
+  const desired=TMP4.copy(mid).addScaledVector(side,dist).setY(1.65+span*.08);
+  // The fight is readable through a stable shoulder-height lens.
+  game.snapCut=false;
+  camera.position.lerp(desired,damp(game.calmT>1.5?.9:2.2,dt));
   if(game.shake>0){
     camera.position.x+=rand(-1,1)*game.shake*.05;
     camera.position.y+=rand(-1,1)*game.shake*.05;
@@ -8050,13 +8131,24 @@ const REPLAY=(()=>{
 
 /* =============================== LOOP ================================== */
 let last=performance.now(), dt_g=0, uiT=0;
+const fixedClock=new ZMotion.FixedClock(1/60,8), renderPoses=new ZMotion.PoseBuffer();
+function actorRenderObjects(){
+  const objects=new Set();
+  const add=o=>{if(!o||objects.has(o))return;objects.add(o);for(const c of o.children)add(c);};
+  for(const f of [player,enemy,enemy2])if(f){
+    add(f.root);add(f.katana);if(f.skin)add(f.skin.mesh);if(f.model)add(f.model.root);
+    for(const p of Object.values(f.parts))add(p);
+  }
+  return objects;
+}
+addEventListener('visibilitychange',()=>{
+  last=performance.now();fixedClock.reset();
+  if(document.hidden){input.keys={};input.rmb=false;input.shift=false;}
+});
 game.duelTime=0;
-function frame(now){
-  requestAnimationFrame(frame);
-  let dt=Math.min((now-last)/1000,.05); last=now;
-  if(game.slowT>0){ game.slowT-=dt; if(game.slowT<=0)game.timeScale=1; }
-  dt*=game.timeScale; dt_g=dt;
-
+function simulate(dt){
+  simulationTime+=dt;
+  const now=simNow();dt_g=dt;
   /* atmosphere is never paused */
   for(const S of SNOWS){
     const pos=S.geo.attributes.position.array;
@@ -8084,10 +8176,10 @@ function frame(now){
     /* RESPONSIVE TABLEAU: marks derive from the camera frustum, and the
        fighters WALK to them — resize the window and they stroll to their
        new spots, spreading on wide screens, drawing in on narrow ones. */
-    const viewD=Math.max(camera.position.z-3.0,1.2);
+    const viewD=Math.max(camera.position.z-1.0,1.2);
     const halfW=Math.tan((camera.fov||50)*Math.PI/360)*viewD*(camera.aspect||1.6);
-    const lat=clamp(halfW*.62,.95,2.7);
-    const depth=3.0-clamp(1.25-lat,0,1)*1.5;   // recede when squeezed
+    const lat=clamp(halfW*.25,.6,1.1);
+    const depth=1.0;   // recede when squeezed
     for(const f of [player,enemy]){
       try{
         const spot=TMP3.set(f.isPlayer?-lat:lat,0,depth);
@@ -8121,8 +8213,7 @@ function frame(now){
           f.yaw=f.bodyYaw;
         }
         f.previewT=(f.previewT||0)+dt;
-        const still=clamp(1-Math.hypot(f.vel.x,f.vel.z)*1.6,0,1);
-        f.previewBob=Math.abs(Math.sin(f.previewT*2.6+(f.isPlayer?0:1.35)))*.05*still;
+        f.previewBob=0;
         if(f.tipTarget)f.tipTarget.copy(f.pos)
           .addScaledVector(DIRY(f.bodyYaw),.95)
           .setY(1.15+Math.sin(f.previewT*1.5+(f.isPlayer?0:.8))*.1);
@@ -8154,7 +8245,7 @@ function frame(now){
         ritualL.target.position.set((vt.pos.x+vm.x)/2,.6,(vt.pos.z+vm.z)/2);
       }
       if(game.state==='over'&&game._verdictPend&&!game._verdictShown){
-        const waited=(performance.now()-game._verdictPend)/1000;
+        const waited=(simNow()-game._verdictPend)/1000;
         if((!busy&&waited>2.2)||waited>22){
           game._verdictShown=true;
           document.getElementById('verdict').classList.remove('hidden');
@@ -8191,7 +8282,7 @@ function frame(now){
       else if(f.ragdoll)f.updateRagdoll(dt);
       else{ f.updateAlive(dt,f===player?livingFoe():player); f.updatePhysiology(dt,log); }
       updateLoose(f,dt);
-      if(!f.dead&&(f.arterialWound||f.bleedRate>20)){
+      if(!f.dead&&!(f.arterialWound&&f.arterialWound.anchored)&&(f.arterialWound||f.bleedRate>20)){
         if(f.pulseT>60/(100+(1-f.bloodFrac)*80)){ f.pulseT=0;
           const part=(f.arterialWound&&f.arterialWound.part)||f._lastWoundPart||'chest';
           const c=f.capsules[part];
@@ -8214,7 +8305,7 @@ function frame(now){
         }
       }
       if(!f.dead&&f.pool){ f.pool.r=Math.min(2.4,f.pool.r+f.bleedRate*dt*.0026);
-        f.pool.mesh.position.set(f.pos.x,.007,f.pos.z); }
+         }
     }
 
     if(game.state==='fight')REPLAY.record(dt);
@@ -8235,7 +8326,7 @@ function frame(now){
       if((player.dead||allDead)&&!game.fatality){
         /* after a fatality the moment plays out LIVE — the head flies,
            the body drops — before time walks back */
-        if(game._fatalDone&&performance.now()-game._fatalDone<2400){
+        if(game._fatalDone&&simNow()-game._fatalDone<2400){
           /* recording continues; the breather goes on the tape too */
         } else {
           const victim=player.dead?player:(game._lastKilled||enemy);
@@ -8247,7 +8338,7 @@ function frame(now){
   }
 
   if(game.state==='replay')REPLAY.tick(dt);
-  if(PHYS.enabled&&game.state!=='replay'&&player&&player.phys)PHYS.engine.step(Math.min(dt,.033));
+  if(PHYS.enabled&&game.state!=='replay'&&player&&player.phys)PHYS.engine.step(dt);
   for(const f of [player,enemy]){
     if(!f)continue;
     /* the face lives: blinks on its own clock, grimaces with pain,
@@ -8280,7 +8371,7 @@ function frame(now){
     const tgt=up?(f.telegraph?.95:.45):0;
     f.glint.material.opacity=lerp(f.glint.material.opacity,tgt,dt*8);
     if(f.bladeA&&f.bladeB)f.glint.position.lerpVectors(f.bladeA,f.bladeB,.72);
-    const gs=.3+f.glint.material.opacity*.5+Math.sin(performance.now()*.02)*.04;
+    const gs=.3+f.glint.material.opacity*.5+Math.sin(simNow()*.02)*.04;
     f.glint.scale.set(gs,gs,1);
     /* breath: faster when spent; the dead do not breathe */
     if(f.alive){
@@ -8302,7 +8393,7 @@ function frame(now){
     const bf=clamp(player.bloodFrac,0,1), cs=clamp(player.consciousness/100,0,1);
     const fade=clamp((0.86-bf)*2.4,0,1)*(player.dead?1.4:1);
     const U=POST.comp.uniforms;
-    U.uTime.value=(performance.now()%1000)*.001;
+    U.uTime.value=(simNow()%1000)*.001;
     U.uDesat.value=lerp(U.uDesat.value,clamp(fade*.75+(1-cs)*.4,0,.92),dt*2);
     U.uVig.value=lerp(U.uVig.value,clamp(fade*.8+(1-cs)*.5,0,1),dt*2);
     game.adrenaline=Math.max(0,(game.adrenaline||0)-dt);
@@ -8316,7 +8407,7 @@ function frame(now){
     :game.state==='over'?.75:.25);
   if(player&&!player.dead&&game.state==='fight')
     Sound.tickHeart(dt,clamp((0.8-player.bloodFrac)*2.2,0,1));
-  updateBloodFX(dt); updateSparks(dt); updateCamera(dt);
+  updateBloodFX(dt); updateSparks(dt);
 
   uiT+=dt;
   if(uiT>.1&&player){ uiT=0;
@@ -8334,8 +8425,39 @@ function frame(now){
     updateDiagram(document.getElementById('diagram-player'),player);
     updateDiagram(document.getElementById('diagram-enemy'),enemy);
   }
-  if(POST){ try{ POST.render(); }catch(e){ renderer.render(scene,camera); } }
-  else renderer.render(scene,camera);
+}
+let postFailed=false;
+function frame(now){
+  requestAnimationFrame(frame);
+  const elapsed=Math.max(0,(now-last)/1000);last=now;
+  if(document.hidden)return;
+  const realDt=Math.min(elapsed,.1);
+  if(game.slowT>0){game.slowT-=realDt;if(game.slowT<=0)game.timeScale=1;}
+  // Restore before stepping AND immediately after drawing. Browser events and
+  // asynchronous model loads always see authoritative poses as well.
+  renderPoses.restore();
+  const alpha=fixedClock.advance(elapsed,game.timeScale,dt=>{
+    simulate(dt);renderPoses.capture(actorRenderObjects());
+  });
+  updateCamera(realDt*game.timeScale);
+  renderPoses.interpolate(alpha);
+  renderer.info.reset();
+  try{
+    if(POST&&!postFailed)POST.render();
+    else{
+      renderer.setRenderTarget(null);renderer.outputColorSpace=THREE.SRGBColorSpace;
+      renderer.toneMapping=THREE.ACESFilmicToneMapping;renderer.render(scene,camera);
+    }
+  }catch(e){
+    postFailed=true;renderer.setRenderTarget(null);
+    console.error('Post-processing disabled:',e);
+  }finally{renderPoses.restore();}
 }
 setup();
+loadWinterMaterials();
 requestAnimationFrame(frame);
+
+const soundButton=document.getElementById('sound-toggle');
+if(soundButton)soundButton.addEventListener('click',()=>{
+ const muted=Sound.toggleMute();soundButton.textContent=muted?'SOUND OFF':'SOUND ON';soundButton.setAttribute('aria-pressed',String(muted));
+});

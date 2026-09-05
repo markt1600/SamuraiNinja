@@ -1,5 +1,72 @@
 # 斬 ZAN — a duel in the snow
 
+## Winter Dawn — graphics and movement overhaul (v61)
+
+The combat simulation still owns the sword, swept contact tests, edge alignment,
+energy transfer, parries, binds, layered anatomy, hemorrhage, and impairment.
+
+- **Motion:** fixed 60 Hz simulation shared by combat, cloth and articulated
+  physics; render-only pose interpolation for other display refresh rates.
+  Catch-up work is bounded and a hidden tab does not accumulate simulation debt.
+- **Footwork:** alternating support steps, bounded landing targets, hip height
+  adjusted to leg reach, quieter weight transfer, and phase-synchronized trunk
+  animation. Imported skeletons match the simulated ankles and knees in position
+  as well as orientation. Lower-body mocap no longer fights those contacts.
+- **Physics:** corrected inverse-inertia weighting in angular limits and
+  mass-independent contact friction including rotational slip. Capsule broad
+  phase skips clearly separated pairs. Heavy builds scale rotational inertia
+  with mass.
+- **Rendering:** local CC0 HDR winter lighting, photographed snow albedo/normal/
+  roughness maps, instanced branching conifers, snow drifts and boulders. The
+  live footprint and blood canvas remains underneath the snow detail. Reduced
+  bloom and grain, accurate sRGB output, MSAA, and fewer full-screen passes.
+- **Characters:** Thomas Walker's fully textured Samurai Inspired Character
+  replaces the incomplete samurai for the ronin, armored general and onna-musha.
+  The supplied static GLB is adapted with a 53-joint humanoid skeleton,
+  normalized skin weights, up to 4K albedo and 2K PBR detail maps, rigid helmet/cuirass regions and
+  simulation-driven arm/leg contacts. The authored face is covered by a mask.
+  The old master and optional legacy character entries retain their existing
+  imported assets; other specialist builds retain their procedural bodies.
+  Artist credit and the CC BY 4.0 license are linked from the game.
+- **Sound:** 44 local recordings of steel impacts, snow steps, leather movement,
+  swishes, scrapes, vocal effort and wet/body impacts. Non-repeating variants,
+  stereo positioning for footsteps/blade contacts, bounded voices, a compressed
+  master bus and mute control. The original feedback loop is fixed. Synthesis
+  remains a loading/failure fallback and supplies the ambient score.
+- **Wounds and gore:** lit, differently sized droplets follow gravity and drag,
+  stretch in flight and stain the snow. Expired particles disappear. Blood pools
+  remain fixed on the ground and lose their wet sheen with age. Pulsed emitters
+  stay attached to wounds and weaken with blood loss. Skinned severance keeps
+  the actual textured limb, with layered muscle/fascia, fractured hollow cortical
+  bone and recessed marrow on both cut surfaces. Wound patches follow each
+  imported bone's actual anatomical axis.
+- **Camera and menu:** steadier duel framing, no random camera drift or sudden
+  reversal during an exchange, and a responsive menu with readable controls.
+
+### Run and validate
+
+Serve this directory with a local HTTP server, for example
+`python3 -m http.server 8765`, then open `http://localhost:8765`.
+There is no build step or runtime CDN dependency for models or environment assets.
+
+`npm test` runs deterministic regression checks with Node 18+ and the vendored
+Three.js math library. No npm installation is needed. The headless harness stubs
+DOM/GPU/audio only; movement, contacts and physiology run as game code.
+`npm run check` checks JavaScript syntax.
+
+For opt-in browser diagnostics, open `/?qa=1`. The movement sweep reports frame
+pacing, rendered workload and actual imported ankle-to-contact error. **Live
+fight** restores normal AI. These controls are absent during normal play.
+Visual quality and frame rate still depend on the GPU and source character assets;
+this is a browser renderer, not a claim of photoreal motion capture throughout.
+
+Asset sources and licenses: [in-game credits](credits.html), [character](models/credits/ronin.md), [sound](audio/ATTRIBUTION.md), and [environment](textures/ATTRIBUTION.md).
+
+---
+
+The notes below describe the game's previous iterations.
+
+
 A samurai duel where **the simulation is the game**. No health bars, no attack
 button, no hit points. Your mouse *is* the sword: a spring-mass blade with
 mass, momentum and edge alignment, cutting into layered anatomy. One clean
@@ -539,3 +606,14 @@ stripped to the waist and painted red — every wound visible.
 Verifies: wound/bleed/death pipeline, fair-duel integrity, ladder
 progression, parry mechanics (deterministic), kill-cam trigger, skinned-bone
 finiteness, ring containment, restart reset, no NaN anywhere.
+
+### Character adaptation notes
+
+The new skin weights are generated from authored anatomical landmarks, not
+artist-painted or motion-captured deformation. The original model has no rig;
+`scripts/rig-character.py` reproduces the adaptation from the source GLB with
+NumPy and Pillow. Its local bone axes differ from Mixamo, so direct Mixamo
+quaternion playback is disabled for this rig. Combat and death use the existing
+simulation; locomotion timing still informs the simulated trunk movement.
+The game remains a browser renderer, and the specialist roster has not been
+replaced with a full collection of individually scanned humans.

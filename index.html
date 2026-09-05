@@ -194,6 +194,7 @@
   body.touch #btn-fatality.show{display:flex}
   body.touch #hint{display:none}
 </style>
+<link rel="stylesheet" href="presentation.css?v=v61">
 </head>
 <body>
 <div id="rotate"><div class="rk">斬</div>
@@ -286,7 +287,7 @@
     </div>
   </div>
   <button class="begin" id="btn-begin">BEGIN</button>
-  <div class="buildtag" style="margin-top:12px;font-size:10px;color:var(--dim);letter-spacing:.25em">BUILD V60</div>
+  <div class="buildtag" style="margin-top:12px;font-size:10px;color:var(--dim);letter-spacing:.25em">WINTER DAWN</div>
   <div id="pickdbg" style="margin-top:4px;font-size:10px;color:var(--dim);letter-spacing:.1em"></div>
   <div class="warn">no health bar · anatomy is the health bar · a severed artery ends the duel</div>
 </div>
@@ -307,8 +308,10 @@
   <div id="ladder-foot">YOU CLIMB</div>
 </div>
 
+<a id="credits-link" href="credits.html" target="_blank" rel="noopener">ASSET CREDITS</a>
+<button id="sound-toggle" aria-label="Mute sound" aria-pressed="false">SOUND ON</button>
 <script type="importmap">
-{ "imports": { "three": "./vendor/three.module.js?v=v60",
+{ "imports": { "three": "./vendor/three.module.js?v=v61",
                "three/addons/": "./vendor/addons/" } }
 </script>
 <script type="module">
@@ -317,18 +320,22 @@
    then load physics + game in order. */
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { RGBELoader } from 'three/addons/loaders/RGBELoader.js';
 import { FBXLoader } from 'three/addons/loaders/FBXLoader.js';
 import * as SkeletonUtils from 'three/addons/utils/SkeletonUtils.js';
 /* the game manages color spaces by hand (its own linear pipeline + sRGB
    composite); keep r128-era color semantics */
 THREE.ColorManagement.enabled = false;
-window.THREE = Object.assign({}, THREE, { GLTFLoader, FBXLoader, SkeletonUtils });
-for (const src of ['physics.js?v=v60', 'game.js?v=v60'])
+window.THREE = Object.assign({}, THREE, { GLTFLoader, FBXLoader, RGBELoader, SkeletonUtils });
+for (const src of ['audio.js?v=v61', 'motion.js?v=v61', 'physics.js?v=v61', 'world.js?v=v61', 'game.js?v=v61'])
   await new Promise((ok, fail) => {
     const s = document.createElement('script');
     s.src = src; s.onload = ok; s.onerror = fail;
     document.body.appendChild(s);
   });
+if(new URLSearchParams(location.search).has('qa')){
+  const qa=document.createElement('script');qa.src='tests/browser-qa.js';document.body.appendChild(qa);
+}
 </script>
 </body>
 </html>
