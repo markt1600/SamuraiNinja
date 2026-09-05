@@ -971,7 +971,7 @@ function addPool(x,z){
 }
 
 /* Lit droplets: varying radii, ballistic travel, air drag and wet impact. */
-const SPRAY_N=1000;
+const SPRAY_N=1600;
 const sprayGeo=new THREE.SphereGeometry(1,6,4);
 const sprayMat=stdMat(0x50080c,{roughness:.22,metalness:0});
 const sprayPts=new THREE.InstancedMesh(sprayGeo,sprayMat,SPRAY_N);
@@ -985,13 +985,13 @@ for(let i=0;i<SPRAY_N;i++)sprayPts.setMatrixAt(i,sprayDummy.matrix);
 let sprayHead=0;
 function emitBlood(p,dir,speed,n){
   sprayDirection.copy(dir).normalize();speed=clamp(speed,0,5);
-  for(let i=0;i<Math.min(n,SPRAY_N);i++){
+  for(let i=0;i<Math.min(Math.ceil(n*1.8),SPRAY_N);i++){
     const k=sprayHead=(sprayHead+1)%SPRAY_N,momentum=rand(.5,1);
     sprayPos[k*3]=p.x;sprayPos[k*3+1]=p.y;sprayPos[k*3+2]=p.z;
     sprayVel[k*3]=sprayDirection.x*speed*momentum+rand(-.3,.3);
     sprayVel[k*3+1]=sprayDirection.y*speed*momentum+rand(-.12,.35);
     sprayVel[k*3+2]=sprayDirection.z*speed*momentum+rand(-.3,.3);
-    sprayRadius[k]=rand(.002,.007);sprayLife[k]=2.2;
+    sprayRadius[k]=rand(.002,.009);sprayLife[k]=2.2;
   }
 }
 function updateBloodFX(dt){
@@ -1003,7 +1003,7 @@ function updateBloodFX(dt){
     sprayVel[k*3+1]=sprayVel[k*3+1]*drag-9.81*dt;
     for(let a=0;a<3;a++)sprayPos[k*3+a]+=sprayVel[k*3+a]*dt;
     if(sprayPos[k*3+1]<=.012){
-      addStain(sprayPos[k*3],sprayPos[k*3+2],sprayRadius[k]*rand(2.5,6));
+      addStain(sprayPos[k*3],sprayPos[k*3+2],sprayRadius[k]*rand(3.5,7.5));
       sprayLife[k]=0;
     }
     if(sprayLife[k]<=0)sprayDummy.scale.setScalar(0);
@@ -2123,6 +2123,7 @@ class Fighter{
     /* flat-of-blade / weak hit → blunt trauma only */
     if(depth<A.layers[0].at){
       if(energy>26){
+        this.bodyImpact(hitDir,energy);
         this.pain+=10; this.stun=Math.max(this.stun,.15);
         if(!this.dead)Sound.grunt(.2,this._vp||(this._vp=rand(.8,1.25)));
         log('a flat blow glances off '+this.name+"'s "+A.label,false);
@@ -2146,6 +2147,7 @@ class Fighter{
       }
     }
     if(deepest){
+      this.bodyImpact(hitDir,energy);
       Sound.cut(depth,hitPoint);
       emitBlood(hitPoint,hitDir,clamp(energy/40,1,4),Math.floor(clamp(depth*4,4,26)));
       this.pain+=depth*4;
@@ -2362,7 +2364,7 @@ const PHYS=(typeof ZPhys!=='undefined')?{
 if(PHYS.enabled){ PHYS.engine.g.set(0,-9.81,0); PHYS.engine.substeps=6; PHYS.engine.iters=3; }
 
 
-const ZAN_VERSION='v61';
+const ZAN_VERSION='v62';
 console.log('%c斬 ZAN '+ZAN_VERSION,'font-size:16px');
 
 /* =========================================================================
@@ -2780,7 +2782,19 @@ const MODELPIPE=(()=>{
         armL[s2]=[l1,_db.distanceTo(_da)]; }
     }
     const hipForward=V3(0,0,1).applyQuaternion(bones.Hips.getWorldQuaternion(new THREE.Quaternion()).invert());
-    return {root,bones,aim,hLen,hipForward,gripLoc,armL,boneR,scale:s,worldQ:{},anims};
+    // Capture immutable bind directions BEFORE IK changes child translations.
+    const bindAim={},gripQ={};
+    for(const name of Object.keys(aim)){
+      const b=bones[name];if(!b||!aim[name])continue;
+      bindAim[name]=b.worldToLocal(aim[name].getWorldPosition(V3())).normalize();
+    }
+    for(const side of ['Right','Left']){
+      const b=bones[side+'Hand'],axis=bindAim[side+'Hand'];if(!b||!axis)continue;
+      const q=b.getWorldQuaternion(new THREE.Quaternion());
+      const swing=new THREE.Quaternion().setFromUnitVectors(axis.clone().applyQuaternion(q),UPY);
+      gripQ[side]=swing.multiply(q);
+    }
+    return {root,bones,aim,bindAim,gripQ,hLen,hipForward,gripLoc,armL,boneR,scale:s,worldQ:{},anims};
   }
   /* ---- locomotion: the model's own mocap breathes under the sim ----
      Idle/Walk/Run clips (bundled Xbot/Soldier ship them) crossfade by
@@ -2857,7 +2871,7 @@ const MODELPIPE=(()=>{
       _qs.copy(b.quaternion);
       b.quaternion.copy(b.userData._q0);       // rest local
       b.updateMatrixWorld(true);
-      b.getWorldPosition(_x); child.getWorldPosition(_y); _y.sub(_x);
+      _y.copy(M.bindAim[name]).applyQuaternion(b.getWorldQuaternion(_qw));
       _z.subVectors(toV,fromV);
       if(_y.lengthSq()>1e-10&&_z.lengthSq()>1e-10){
         _qw.setFromUnitVectors(_y.normalize(),_z.normalize());
@@ -2906,17 +2920,19 @@ const MODELPIPE=(()=>{
     /* the head rides the neck in its own bind pose — never re-based */
     /* the PALM holds the steel, not the wrist: pull each wrist short of
        its grip anchor by the hand's own length along the blade */
-    const armed=f.katana&&f.hasSword&&f.tip;
-    let gdir=null;
-    if(armed){ _db.subVectors(f.tip,J.haR);
-      if(_db.lengthSq()>1e-8)gdir=_db.normalize(); }
-    const hOff=(M.hLen||.07)*.55;   // handle in the FINGERS, not the heel
-    /* a hand only gets grip treatment while it is ON the weapon: the
-       sim frees the off-hand for balance and damage, and a stale grip
-       correction would drag that free arm across the torso */
-    const twoHand=!!gdir&&J.haL.distanceTo(J.haR)<.32;
-    const hrR=gdir?_dc.copy(J.haR).addScaledVector(gdir,-hOff):_dc.copy(J.haR);
-    const hrL=twoHand?_dd.copy(J.haL).addScaledVector(gdir,-hOff):_dd.copy(J.haL);
+    const armed=f.katana&&f.hasSword&&!f._ritualGrabR;
+    const twoHand=armed&&!f.weapon.blunt&&!f.disabled.armL&&!f.severed.armL&&!f._ritualGrabL;
+    // A fist is a rigid grip: its orientation and contact point both belong
+    // to the weapon. Solve the elbow around that wrist, not the reverse.
+    const wristTarget=(side,point,gripping)=>{
+      const gl=M.gripLoc[side],q=M.gripQ[side];
+      if(!gripping||!gl||!q)return point.clone();
+      const worldQ=f.katana.quaternion.clone().multiply(q);
+      const scale=M.bones[side+'Hand'].getWorldScale(V3());
+      return point.clone().sub(gl.clone().multiply(scale).applyQuaternion(worldQ));
+    };
+    const hrR=wristTarget('Right',J.haR,armed);
+    const hrL=wristTarget('Left',J.haL,twoHand);
     /* clavicles stay in BIND pose: aiming them at the sim's shoulder
        points twists the deltoid where the arm joins the torso. The arm
        IK reaches from the rig's own natural socket instead. */
@@ -2955,21 +2971,12 @@ const MODELPIPE=(()=>{
     };
     solveArm('Right',hrR,J.elR);
     solveArm('Left',hrL,J.elL);
-    /* fingers reach along the grip toward the steel */
-    if(gdir){
-      _da.copy(hrR).add(gdir); aimDelta('RightHand',hrR,_da);
-      if(twoHand){ _da.copy(hrL).add(gdir); aimDelta('LeftHand',hrL,_da); }
-      /* Constrain the curled fist to the physical grip in this frame. */
-      for(const side of ['Right','Left']){
-        if(side==='Left'&&!twoHand)continue;
-        const gl=M.gripLoc&&M.gripLoc[side], hb=M.bones[side+'Hand'];
-        if(!gl||!hb)continue;
-        _da.copy(gl); hb.localToWorld(_da);
-        _db.copy(side==='Right'?J.haR:J.haL).sub(_da);
-        if(f.severed[side==='Right'?'armR':'armL'])continue;
-        const wrist=hb.getWorldPosition(V3()).add(_db);
-        hb.position.copy(hb.parent.worldToLocal(wrist));hb.updateMatrixWorld(true);
-      }
+    for(const side of ['Right','Left']){
+      if(!(side==='Right'?armed:twoHand)||f.severed[side==='Right'?'armR':'armL'])continue;
+      const hb=M.bones[side+'Hand'],q=M.gripQ[side];if(!hb||!q)continue;
+      setW(side+'Hand',f.katana.quaternion.clone().multiply(q));
+      hb.position.copy(hb.parent.worldToLocal((side==='Right'?hrR:hrL).clone()));
+      hb.updateMatrixWorld(true);
     }
     // Match joint positions as well as orientations. Mixamo rigs differ
     // in hip spacing and leg lengths; rotating alone left ankles ~20 cm
@@ -3641,7 +3648,7 @@ Fighter.prototype.physTargets=function(K,dt){
   mkTargetQ(K.elR,K.haR,M.faR.target); mkTargetQ(K.elL,K.haL,M.faL.target);
   mkTargetQ(K.hipR,K.knR,M.thR.target); mkTargetQ(K.hipL,K.knL,M.thL.target);
   mkTargetQ(K.knR,K.ankR,M.shR.target); mkTargetQ(K.knL,K.ankL,M.shL.target);
-  if(M.sword&&this.hasSword&&this.tip)mkTargetQ(this.tip,K.haR,M.sword.target);
+  if(M.sword&&this.hasSword&&this.bladeB)mkTargetQ(this.bladeB,K.haR,M.sword.target);
   A.target.copy(K.pelvis);
 };
 Fighter.prototype.disposeSwordPhys=function(){
@@ -3993,10 +4000,31 @@ Fighter.prototype.stepFoot=function(f,target,dt,otherPlanted,disabled,speed2d,ur
   }
 };
 
+// Muscle force builds and releases over time; knockback stays in velocity.
+// The same drive applies to player and AI, including impaired mobility.
+Fighter.prototype.bodyImpact=function(direction,energy){
+  const impulse=clamp(Math.sqrt(Math.max(0,energy))*.025/Math.sqrt(this.build.mass||1),.06,.65);
+  this.flinchV.addScaledVector(direction,impulse).clampLength(0,.85);
+  this._bodyBounceV=Math.max(-.18,(this._bodyBounceV||0)-impulse*.15);
+};
+Fighter.prototype.driveFootwork=function(direction,magnitude,acc,maxSpeed,dt){
+  if(!this._moveForce)this._moveForce=V3();
+  const desired=direction.clone().multiplyScalar(acc*magnitude);
+  this._moveForce.lerp(desired,1-Math.exp(-12*dt));
+  this.vel.addScaledVector(this._moveForce,dt);
+  // Limit only voluntary acceleration; do not erase a collision impulse.
+  const speed=Math.hypot(this.vel.x,this.vel.z);
+  if(speed>maxSpeed&&this._moveForce.dot(this.vel)>0){
+    const excess=Math.min(speed-maxSpeed,this._moveForce.length()*dt);
+    this.vel.x*=1-excess/speed;this.vel.z*=1-excess/speed;
+  }
+};
 const _headQ=new THREE.Quaternion();
 Fighter.prototype.updateAlive=function(dt,opponent){
   const D=this.dims,P=this.parts;
-  this.breath+=dt;
+  const effort=clamp((100-this.stamina)/100+this.pain/220,0,1);
+  this._breathRate=lerp(this._breathRate||1,1+effort*.65,damp(2,dt));
+  this.breath+=dt*this._breathRate;
 
   /* facing: the body turns with inertia, the eyes are instant.
      PIVOT WEIGHT: with both feet planted a man can only wind his hips so
@@ -4169,6 +4197,11 @@ Fighter.prototype.updateAlive=function(dt,opponent){
   if(!airborneR&&ft.R.swing>0)this._lastStep='R';
   if(!airborneL&&ft.L.swing>0)this._lastStep='L';
   const stepping=ft.R.swing>0||ft.L.swing>0;
+  // Landing compresses the supporting leg before it recovers its height.
+  if((airborneR&&ft.R.swing===0)||(airborneL&&ft.L.swing===0)){
+    const hurt=airborneR?this.legDamage.R:this.legDamage.L;
+    this._bodyBounceV=(this._bodyBounceV||0)-clamp(speed2d*.035*(1+hurt*.5),0,.10);
+  }
 
   /* pelvis rides between the feet — visible weight transfer */
   const feetMid=TMP2.addVectors(ft.R.p,ft.L.p).multiplyScalar(.5);
@@ -4205,8 +4238,11 @@ Fighter.prototype.updateAlive=function(dt,opponent){
   const ML=(this.alive&&!(this.kneel>0)&&!this.begging&&typeof GSLOCO!=='undefined')
     ?GSLOCO.tick(this,dt,speed2d):null;
   const mk=ML?.4:0;
-  let pelvisY=D.pelvisY-hurtSag-stepDip*.012
-    +Math.sin(this.breath*1.6)*.007+(this.previewBob||0)+(ML?ML.bob*1.05*mk:0);
+  const bounceTarget=-stepDip*(.009+clamp(speed2d,0,2)*.005);
+  this._bodyBounceV=((this._bodyBounceV||0)+120*(bounceTarget-(this._bodyBounce||0))*dt)/(1+19*dt);
+  this._bodyBounce=clamp((this._bodyBounce||0)+this._bodyBounceV*dt,-.035,.012);
+  let pelvisY=D.pelvisY-hurtSag+this._bodyBounce
+    +Math.sin(this.breath*1.6)*(.004+effort*.002)+(this.previewBob||0)+(ML?ML.bob*1.05*mk:0);
   const pelvis=V3(lerp(feetMid.x,this.pos.x,.82),pelvisY,lerp(feetMid.z,this.pos.z,.82));
   // Lower the hips to reach a planted ankle, rather than sliding that ankle.
   const legReach=(D.thigh+D.shin)*.985;
@@ -4224,7 +4260,7 @@ Fighter.prototype.updateAlive=function(dt,opponent){
   if(ML)pelvis.addScaledVector(fwdP,ML.push*.72*mk);
 
   /* flinch spring: hits ripple through the trunk */
-  this.flinchV.addScaledVector(this.flinch,-140*dt).addScaledVector(this.flinchV,-12*dt);
+  this.flinchV.addScaledVector(this.flinch,-140*dt).multiplyScalar(1/(1+20*dt));
   this.flinch.addScaledVector(this.flinchV,dt);
 
   /* spine: pelvis → abdomen → chest, distributing lean and twist */
@@ -4239,7 +4275,7 @@ Fighter.prototype.updateAlive=function(dt,opponent){
   this.soften('chestB',chestB,52,dt);
   const chestT=chestB.clone().addScaledVector(fwdC,lean).add(this.flinch)
     .add(this.leanV);
-  chestT.y=chestB.y+D.torso*.62;
+  chestT.y=chestB.y+D.torso*.62+Math.sin(this.breath*1.6)*(.003+effort*.002);
   this.soften('chestT',chestT,42,dt);
   const neckT=chestT.clone().addScaledVector(fwdC,.02); neckT.y=chestT.y+D.neck+.02;
   this.soften('neckT',neckT,34,dt);
@@ -4305,7 +4341,7 @@ Fighter.prototype.updateAlive=function(dt,opponent){
   if(this.hasSword){
     const W=this.weapon||WEAPONS.katana;
     let K=(this.thrust?150:110)*W.speed;
-    const DAMP=(this.thrust?16:10.5)*(1+(W.effMass-1)*.35);
+    const dampingRatio=this.thrust?1:.92;
     if(this.isPlayer){
       K*=lerp(.45,1,clamp(this.consciousness/100,0,1));  // dying hands are slow
       if(game.adrenaline>0&&this.bloodFrac>.6)K*=1.08;
@@ -4315,7 +4351,10 @@ Fighter.prototype.updateAlive=function(dt,opponent){
     const maxSpd=((this.thrust?11:14)*ctrl+2)*skill*W.maxSpd;
     TMP1.subVectors(this.tipTarget,this.tip);
     this.tipVel.addScaledVector(TMP1,K*dt*Math.max(ctrl,.15));
-    this.tipVel.multiplyScalar(Math.pow(1/(1+DAMP),dt*3));
+    // Implicit damped motor: near-critical response without guard ringing.
+    // Effective inertia slows heavy weapons while preserving contact impulses.
+    const damping=2*dampingRatio*Math.sqrt(K*Math.max(ctrl,.15));
+    this.tipVel.multiplyScalar(1/(1+damping*dt));
     if(this.tipVel.length()>maxSpd)this.tipVel.setLength(maxSpd);
     /* KATANA TECHNIQUE — the mouse supplies intent: which line, how much
        power, when to commit. The blade answers with a swordsman's stroke:
@@ -4405,7 +4444,9 @@ Fighter.prototype.updateAlive=function(dt,opponent){
     const reachMax=D.upperArm+D.foreArm+.87;
     TMP1.subVectors(this.tip,shR);
     if(TMP1.length()>reachMax){ this.tip.copy(shR).addScaledVector(TMP1.normalize(),reachMax);
-      this.tipVel.multiplyScalar(.5); }
+      // Cancel only outward speed at the reach constraint, preserving the cut arc.
+      const outward=this.tipVel.dot(TMP1);
+      if(outward>0)this.tipVel.addScaledVector(TMP1,-outward); }
     this.bladeSpeed=this.tipVel.length();
 
     /* edge alignment: how steadily the swing tracks one line */
@@ -4444,26 +4485,30 @@ Fighter.prototype.updateAlive=function(dt,opponent){
     if(bladeDir.lengthSq()<.04)bladeDir.copy(toTip); // degenerate guard
     bladeDir.normalize();
     clampBladeDir(bladeDir,fwdC,rightC);
-    /* the physical sword's momentum bends the rendered blade's line */
-    if(PHYS.enabled&&this.phys&&this.phys.B.sword){
-      const sw=this.phys.B.sword;
-      TMP3.set(0,sw.len/2,0); sw.toWorld(TMP3,TMP3);
-      TMP3.sub(handle).normalize();
-      if(TMP3.dot(bladeDir)>.2)bladeDir.lerp(TMP3,PHYS.swordBlend).normalize();
-    }
+    // One weapon pose drives the mesh, both fists and swept contacts.
+    // Do not blend in last tick's motor target: that formed a feedback loop.
+    const desiredQ=new THREE.Quaternion().setFromUnitVectors(UPY,bladeDir);
+    if(!this._bladeSwingQ)this._bladeSwingQ=desiredQ.clone();
+    this._bladeSwingQ.rotateTowards(desiredQ,dt*(this.thrust?8:11)*(this.weapon.speed||1));
+    bladeDir.copy(UPY).applyQuaternion(this._bladeSwingQ);
     this.katana.position.copy(handle);
-    this.katana.quaternion.setFromUnitVectors(UPY,bladeDir);
-    { /* hasuji: the edge leads the cut; at rest it settles forward-down */
+    this.katana.quaternion.copy(this._bladeSwingQ);
+    {
+      // Hold wrist roll in guard. During a committed cut, align gradually;
+      // reversing the stroke must not spin both wrists through 180 degrees.
       TMP3.copy(this.tipVel).addScaledVector(bladeDir,-this.tipVel.dot(bladeDir));
-      const sp=TMP3.length();
-      if(sp>1.4)TMP3.divideScalar(sp);
-      else TMP3.copy(fwdC).multiplyScalar(.5).setY(-.85).normalize();
-      _pv.set(1,0,0).applyQuaternion(this.katana.quaternion);   // current edge
-      const cx=_pv.dot(TMP3);
-      _pv2.crossVectors(_pv,TMP3);
-      const want=Math.atan2(_pv2.dot(bladeDir),cx);
-      if(this.katRoll===undefined)this.katRoll=want;
-      this.katRoll+=angDiff(want,this.katRoll)*clamp(dt*(sp>1.4?14:5),0,1);
+      const speed=TMP3.length();
+      if(this.katRoll===undefined)this.katRoll=0;
+      if(speed>2.5&&!this.guarding){
+        TMP3.divideScalar(speed);
+        _pv.set(1,0,0).applyQuaternion(this.katana.quaternion);
+        _pv2.crossVectors(_pv,TMP3);
+        const want=Math.atan2(_pv2.dot(bladeDir),_pv.dot(TMP3));
+        let delta=angDiff(want,this.katRoll);
+        if(delta>Math.PI/2)delta-=Math.PI;
+        if(delta<-Math.PI/2)delta+=Math.PI;
+        this.katRoll+=clamp(delta,-2.5*dt,2.5*dt);
+      }
       _pq.setFromAxisAngle(UPY,this.katRoll);
       this.katana.quaternion.multiply(_pq);
     }
@@ -4474,19 +4519,17 @@ Fighter.prototype.updateAlive=function(dt,opponent){
       (this.weapon&&this.weapon.cutFrom)||.12);
     this.bladeB=handle.clone().addScaledVector(bladeDir,
       (this.weapon&&this.weapon.len)||.93);
+    this.bladeVel=this.bladeVel||V3();
+    if(this.hadPrev)this.bladeVel.subVectors(this.bladeB,this.prevBladeB).divideScalar(dt);
+    else this.bladeVel.set(0,0,0);
+    this.bladeSpeed=this.bladeVel.length();
 
     /* arms: two-bone IK with anatomical elbow hints */
     const elR=V3(),elL=V3();
     let handR=handle.clone().addScaledVector(bladeDir,-.02);   // at the tsuba
     if(this._ritualGrabR)handR=this._ritualGrabR.clone();
-    /* on full extension the LEFT hand slides up the grip toward the
-       tsuba rather than tearing off the pommel — as real hands do */
-    let gripS=-.15;
-    { const maxL=(D.upperArm+D.foreArm)*.94;
-      while(gripS<-.03&&
-        TMP4.copy(handle).addScaledVector(bladeDir,gripS).distanceTo(shL)>maxL)
-        gripS+=.02; }
-    let handL=handle.clone().addScaledVector(bladeDir,gripS);
+    // Keep a stable two-hand spacing instead of jumping by 2 cm at reach limits.
+    let handL=handle.clone().addScaledVector(bladeDir,-.15);
     if(BL){ /* the rear fist guards the jaw — boxing, not prayer */
       handL=chestT.clone().addScaledVector(fwdC,.26)
         .addScaledVector(rightC,-.14);
@@ -4756,11 +4799,10 @@ function playerIntent(pl,en){
     if(input.keys.KeyD)move.add(CAMR); if(input.keys.KeyA)move.sub(CAMR);
   }
   if(!input.mv)input.mv=V3();
-  if(move.lengthSq()>0){ move.normalize(); input.mv.copy(move);
-    pl.vel.addScaledVector(move,acc* dt_g);
-    const vmax=2.6*m; const v2=Math.hypot(pl.vel.x,pl.vel.z);
-    if(v2>vmax){ pl.vel.x*=vmax/v2; pl.vel.z*=vmax/v2; } }
+  const magnitude=clamp(move.length(),0,1);
+  if(magnitude>0){move.normalize();input.mv.copy(move);}
   else input.mv.set(0,0,0);
+  pl.driveFootwork(move,magnitude,acc,2.6*m,dt_g);
 }
 
 /* ================================ AI =================================== */
@@ -4962,9 +5004,9 @@ class AI{
         else if(this.t<=0){ this.state='circle'; this.t=rand(.6,1.2); }
         break; }
     }
-    if(move.lengthSq()>0){ move.normalize(); f.vel.addScaledVector(move,acc*dt);
-      const vmax=2.3*m*((this.state==='charge'||this.state==='dash')?1.55:1), v2=Math.hypot(f.vel.x,f.vel.z);
-      if(v2>vmax){ f.vel.x*=vmax/v2; f.vel.z*=vmax/v2; } }
+    const magnitude=clamp(move.length(),0,1);
+    if(magnitude>0)move.normalize();
+    f.driveFootwork(move,magnitude,acc,2.3*m*((this.state==='charge'||this.state==='dash')?1.55:1),dt);
   }
   beginAttack(foe){
     const f=this.f;
@@ -5024,12 +5066,13 @@ function bladeVsBody(att,def,log){
     if(d<c.r+.015){
       /* energy re-read every contact: flesh drags the blade, the next
          part in the same swing sees a much slower edge */
-      const spd=att.tipVel.length()*att.swordControl;
+      const impactVelocity=att.bladeVel||att.tipVel;
+      const spd=impactVelocity.length()*att.swordControl;
       if(spd<2.2)break;
       const AW=att.weapon||WEAPONS.katana;
       const energy=.5*BLADE_EFF_MASS*AW.effMass*spd*spd*(att.chainMul||1)*AW.dmg;
       const align=AW.blunt?Math.min(att.alignment,.07):att.alignment;
-      const dir=TMP1.copy(att.tipVel).normalize();
+      const dir=TMP1.copy(impactVelocity).normalize();
       def.lastHitDir=dir.clone();
       const sevBefore=(def.severed.head?1:0)+(def.severed.armR?1:0)+(def.severed.armL?1:0);
       const res=def.applyCut(key,energy,align,att.thrust,hitTmpB.clone(),dir.clone(),log);
@@ -5062,6 +5105,7 @@ function bladeVsBody(att,def,log){
       if(res){
         /* blade loses energy in the body — realistic drag */
         att.tipVel.multiplyScalar(res==='blunt'?.55:.35);
+        if(att.bladeVel)att.bladeVel.multiplyScalar(res==='blunt'?.55:.35);
         /* knockback on heavy hits */
         def.vel.addScaledVector(dir,clamp(energy/160,0,1.2));
         shake(clamp(energy/500,0.05,.4));
@@ -5087,7 +5131,7 @@ function bladeVsBlade(a,b){
   const win=(a.guardFresh||b.guardFresh)?.13:.075;
   if(d<win){
     game.bladeContacts=(game.bladeContacts||0)+1;
-    const rel=TMP1.copy(a.tipVel).sub(b.tipVel).length();
+    const rel=TMP1.copy(a.bladeVel||a.tipVel).sub(b.bladeVel||b.tipVel).length();
     /* slow sustained steel-on-steel: the blades are BOUND */
     if(rel<2.4&&a.hasSword&&b.hasSword&&a.alive&&b.alive&&!game.bind){
       game._bindTouch=true; game._bindPt=(game._bindPt||V3()).copy(hitTmpA);
@@ -5511,12 +5555,12 @@ function jaggedCap(r,withBone=true){
     const a=i/8*Math.PI*2;
     const lobe=new THREE.Mesh(new THREE.SphereGeometry(1,8,6),muscle);
     lobe.scale.set(r*.26,r*.34,r*.1);lobe.position.set(Math.cos(a)*r*.61,Math.sin(a)*r*.61,0);lobe.rotation.z=a;g.add(lobe);
-    const strand=new THREE.Mesh(new THREE.CylinderGeometry(r*.015,r*.009,r*.24,5),fascia);
+    const strand=new THREE.Mesh(new THREE.CylinderGeometry(r*.015,r*.009,r*.42,5),fascia);
     strand.position.set(Math.cos(a)*r*.83,Math.sin(a)*r*.83,r*.025);strand.rotation.set(.35,a,a);g.add(strand);
   }
   if(withBone){
     // Hollow cortical wall with an irregular fracture edge and recessed marrow.
-    const pos=[],idx=[],br=r*.24,len=r*.65;
+    const pos=[],idx=[],br=r*.24,len=r*.92;
     for(let ring=0;ring<4;ring++)for(let i=0;i<=N;i++){
       const a=i/N*Math.PI*2,inner=ring>1,rad=br*(inner?.62:1);
       const z=(ring===1||ring===2)?len*(.82+.18*Math.sin(i*1.8)):-r*.08;
@@ -6070,13 +6114,19 @@ function updateSquirts(dt){
     s.t-=dt;
     if(s.f.dead)s.deadTime=(s.deadTime||0)+dt;
     if(s.t<=0||!s.f.parts||s.f._disposed||(s.deadTime||0)>2){ SQUIRTS.splice(i,1); continue; }
+    s.part.updateMatrixWorld(true);
+    _sq.copy(s.local).applyMatrix4(s.part.matrixWorld);
+    _sd.copy(s.direction).transformDirection(s.part.matrixWorld);
+    const pressure=clamp(s.f.bloodFrac,.03,1)*(s.f.dead?Math.exp(-(s.deadTime||0)*3)*.2:1);
+    // Gravity-fed drips bridge the pressure pulses, leaving a wound trail.
+    s.drip=(s.drip||0)+dt*14*pressure;
+    if(s.drip>=1){const n=Math.floor(s.drip);s.drip-=n;emitBlood(_sq,V3(0,-1,0),.25,n);}
     s.pulse-=dt;
     if(s.pulse<=0){
       s.pulse=60/(78+(1-s.f.bloodFrac)*45)+rand(-.025,.025);
       s.part.updateMatrixWorld(true);
       _sq.copy(s.local).applyMatrix4(s.part.matrixWorld);
       _sd.copy(s.direction).transformDirection(s.part.matrixWorld);
-      const pressure=clamp(s.f.bloodFrac,.03,1)*(s.f.dead?Math.exp(-(s.deadTime||0)*3)*.2:1);
       emitBlood(_sq,_sd,clamp(s.power*1.7,.25,3.5)*pressure,
         Math.ceil(clamp(s.power*7,2,18)*pressure));
     }

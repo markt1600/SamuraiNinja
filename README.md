@@ -1,5 +1,20 @@
 # 斬 ZAN — a duel in the snow
 
+## Movement, grip and wound response (v62)
+
+- Imported rigs use immutable bind directions. Both hands maintain weapon-local
+  position and orientation through cuts, thrusts, guard changes and reversals.
+- The sword motor has near-critical damping and bounded rotation; impact energy
+  follows the actual swept blade velocity. Anatomy and wound thresholds remain.
+- Footwork force ramps during direction changes and preserves knockback. Landing
+  compression, effort-dependent breathing and damped injury recoil move the torso
+  while the feet and sword grips remain constrained.
+- Denser blood spray, larger snow spatters, wound drips between arterial pulses,
+  and longer exposed fractured bone/fascia increase gore. Droplets remain pooled
+  and bounded; pressure declines with blood loss and after death.
+- `npm test` covers grip rotation, pose drift, swing speed, footwork, knockback,
+  injury response and particle lifetime. `?qa=1` adds a repeatable Sword drill.
+
 ## Winter Dawn — graphics and movement overhaul (v61)
 
 The combat simulation still owns the sword, swept contact tests, edge alignment,

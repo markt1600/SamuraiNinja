@@ -30,6 +30,21 @@ const {FixedClock,PoseBuffer}=require('../motion.js');
   o.position.x=10;p.capture([o]);p.interpolate(0);assert.equal(o.position.x,10);
   p.capture([]);assert.equal(p.entries.size,0);
  });
+ await test('footwork force ramps, reverses continuously, and preserves knockback',()=>{
+  const r=JSON.parse(run(`(()=>{
+   setup();const f=player;f.vel.set(0,0,0);f._moveForce=V3();
+   f.driveFootwork(V3(1,0,0),1,13,2.6,1/60);const first=f._moveForce.x;
+   for(let i=0;i<60;i++)f.driveFootwork(V3(1,0,0),1,13,2.6,1/60);
+   const running=f._moveForce.x;
+   f.driveFootwork(V3(-1,0,0),1,13,2.6,1/60);const reversal=f._moveForce.x;
+   for(let i=0;i<90;i++)f.driveFootwork(V3(),0,13,2.6,1/60);
+   const released=f._moveForce.length();f.vel.set(7,0,0);f._moveForce.set(0,0,0);
+   f.driveFootwork(V3(1,0,0),1,13,2.6,1/60);
+   return JSON.stringify({first,running,reversal,released,knockback:f.vel.x});})()`));
+  assert.ok(r.first>0&&r.first<4);assert.ok(r.running>12);
+  assert.ok(r.reversal>0&&r.reversal<r.running);assert.ok(r.released<1e-5);
+  assert.ok(Math.abs(r.knockback-7)<1e-8);
+ });
  await test('gravity and contact settling obey physical scale',()=>{
   const e=new physical.Engine();e.groundY=-100;
   const b=e.add(new physical.Body({pos:new THREE.Vector3(0,10,0),mass:2,r:.1,len:.3,damping:0}));
@@ -108,14 +123,25 @@ const {FixedClock,PoseBuffer}=require('../motion.js');
     return JSON.stringify({bad,dead,bodies:PHYS.engine.bodies.length,blood:player.blood});})()`));
   assert.equal(result.bad,false);assert.equal(result.bodies,22);assert.equal(result.blood,5000);
  });
+ await test('injury recoil compresses the body and settles without persistent shaking',()=>{
+  const r=JSON.parse(run(`(()=>{
+   setup();game.state='fight';player.bodyImpact(V3(1,0,0),240);
+   const impulse=player.flinchV.x;let peak=0,dip=0;
+   for(let i=0;i<180;i++){player.updateAlive(1/60,enemy);peak=Math.max(peak,player.flinch.length());dip=Math.min(dip,player._bodyBounce);}
+   return JSON.stringify({impulse,peak,dip,residual:player.flinch.length(),breath:player._breathRate});})()`));
+  assert.ok(r.impulse>.2);assert.ok(r.peak>.005&&r.peak<.1);
+  assert.ok(r.dip<0&&r.dip>=-.035);assert.ok(r.residual<1e-6);
+  assert.ok(r.breath>=1&&r.breath<=1.65);
+ });
  await test('blood droplets expire, emitters remain bounded, and severed tissue is finite',()=>{
   const result=JSON.parse(run(`(()=>{
     setup();emitBlood(V3(0,1,0),V3(1,1,0),4,100);
+    const burst=Array.from(sprayLife).filter(x=>x>0).length;
     for(let i=0;i<180;i++)updateBloodFX(1/60);
     for(let i=0;i<20;i++)addSquirt(player,'forearmR',player._K.elR.clone(),2,1);
     const cap=jaggedCap(.05),meshes=[];cap.traverse(o=>{if(o.isMesh)meshes.push(o);});
-    return JSON.stringify({active:Array.from(sprayLife).filter(x=>x>0).length,emitters:SQUIRTS.filter(s=>s.f===player&&s.part===player.parts.forearmR).length,meshes:meshes.length,finite:meshes.every(m=>Array.from(m.geometry.attributes.position.array).every(Number.isFinite))});})()`));
-  assert.equal(result.active,0);assert.equal(result.emitters,1);assert.ok(result.meshes>=18);assert.equal(result.finite,true);
+    return JSON.stringify({burst,active:Array.from(sprayLife).filter(x=>x>0).length,emitters:SQUIRTS.filter(s=>s.f===player&&s.part===player.parts.forearmR).length,meshes:meshes.length,finite:meshes.every(m=>Array.from(m.geometry.attributes.position.array).every(Number.isFinite))});})()`));
+  assert.equal(result.burst,180);assert.equal(result.active,0);assert.equal(result.emitters,1);assert.ok(result.meshes>=18);assert.equal(result.finite,true);
  });
  console.log(`${passed} regression checks passed.`);
 })().catch(e=>{console.error(e);process.exit(1)});

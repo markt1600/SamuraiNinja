@@ -15,20 +15,43 @@ const urls=new Map();function esmURL(file){if(!urls.has(file))urls.set(file,'dat
  const {context,THREE,run}=await loadGame({modelPipeline:true});THREE.SkeletonUtils=SkeletonUtils;context.rigFixture=rig;
  const result=JSON.parse(run(`(()=>{
   setup();game.state='fight';for(const k of Object.keys(Sound))Sound[k]=()=>{};
-  player.model=MODELPIPE.attach(player,rigFixture);let foot=0,grip=0,facing=1;
-  for(let i=0;i<180;i++){
+  player.model=MODELPIPE.attach(player,rigFixture);let foot=0,grip=0,facing=1,relativeGrip=0,maxBladeStep=0,peakBladeSpeed=0,velocityError=0;let lastSword=null,lastTip=null;
+  for(let i=0;i<480;i++){
+   const phase=i%240,fw=DIRY(player.bodyYaw),rt=V3(fw.z,0,-fw.x);
+   player.thrust=phase>=120&&phase<180;player.guarding=phase>=180;
+   player.tipTarget.copy(player.pos).addScaledVector(fw,player.thrust?1.5:1)
+     .addScaledVector(rt,phase<120?Math.sin(phase*.12)*.8:0).setY(phase<120?1.4+Math.cos(phase*.12)*.65:1.3);
    player.vel.set(Math.sin(i*.05)*.8,0,.5);player.updateAlive(1/60,enemy);PHYS.engine.step(1/60);
    const M=player.model;
+   if(lastSword)maxBladeStep=Math.max(maxBladeStep,lastSword.angleTo(player.katana.quaternion));
+   lastSword=player.katana.quaternion.clone();
+   if(lastTip)velocityError=Math.max(velocityError,player.bladeB.clone().sub(lastTip).multiplyScalar(60).distanceTo(player.bladeVel));
+   lastTip=player.bladeB.clone();peakBladeSpeed=Math.max(peakBladeSpeed,player.bladeSpeed);
+   for(const side of ['Right','Left']){
+    const handQ=M.bones[side+'Hand'].getWorldQuaternion(new THREE.Quaternion());
+    const rel=player.katana.quaternion.clone().invert().multiply(handQ);
+    relativeGrip=Math.max(relativeGrip,rel.angleTo(M.gripQ[side]));
+   }
    facing=Math.min(facing,V3(0,0,1).applyQuaternion(M.bones.Head.getWorldQuaternion(new THREE.Quaternion())).setY(0).normalize().dot(DIRY(player.bodyYaw)));
    foot=Math.max(foot,M.bones.RightFoot.getWorldPosition(V3()).distanceTo(player._K.ankR));
    grip=Math.max(grip,M.bones.RightHand.localToWorld(M.gripLoc.Right.clone()).distanceTo(player._K.haR));
   }
+  // Applying an identical pose repeatedly must not rotate the rig further.
+  MODELPIPE.drive(player,player._K);
+  const saved=Object.fromEntries(Object.entries(player.model.bones).filter(([k,b])=>b).map(([k,b])=>[k,b.quaternion.clone()]));
+  for(let i=0;i<30;i++)MODELPIPE.drive(player,player._K);
+  let repeatDrift=0;for(const [k,q] of Object.entries(saved))repeatDrift=Math.max(repeatDrift,q.angleTo(player.model.bones[k].quaternion));
   const count=()=>{let n=0;player.model.root.traverse(o=>{if(o.isSkinnedMesh)n+=o.geometry.index.count;});return n;};
   const before=count();player.severLimb('armL',player._K.elL.clone(),V3(1,0,0),()=>{});const after=count();
   for(let i=0;i<30;i++)player.updateAlive(1/60,enemy);
   player.model.root.updateMatrixWorld(true);let finite=true;
   player.model.root.traverse(o=>{if(o.isSkinnedMesh){o.skeleton.update();for(let i=0;i<o.geometry.attributes.position.count;i+=97){const v=V3().fromBufferAttribute(o.geometry.attributes.position,i);o.applyBoneTransform(i,v);finite=finite&&v.toArray().every(Number.isFinite);}}});
-  return JSON.stringify({foot,grip,facing,before,after,finite,severed:player.severed.armL});})()`));
+  return JSON.stringify({foot,grip,facing,relativeGrip,maxBladeStep,peakBladeSpeed,velocityError,repeatDrift,before,after,finite,severed:player.severed.armL});})()`));
+ assert.ok(result.peakBladeSpeed>4,JSON.stringify(result));
+ assert.ok(result.velocityError<1e-8,JSON.stringify(result));
+ assert.ok(result.relativeGrip<1e-6,JSON.stringify(result));
+ assert.ok(result.repeatDrift<1e-6,JSON.stringify(result));
+ assert.ok(result.maxBladeStep<.24,JSON.stringify(result));
  assert.ok(result.foot<1e-6,JSON.stringify(result));assert.ok(result.grip<1e-6,JSON.stringify(result));assert.ok(result.facing>.7,JSON.stringify(result));assert.ok(result.after<result.before);assert.equal(result.finite,true);assert.equal(result.severed,true);
  console.log('Rig motion: foot and grip contacts within 1 micron; skinned severance and subsequent movement finite.',result);
 })().catch(e=>{console.error(e);process.exit(1)});
