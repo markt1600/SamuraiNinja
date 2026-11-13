@@ -109,8 +109,8 @@ const ZPhys=(()=>{
       const wa=a.angW(_n), wb=b.angW(_n), w=wa+wb;
       if(w<1e-12)return;
       /* rotate child toward the cone, parent slightly away */
-      b.applyAngCorr(_c.copy(_n).multiplyScalar(excess*(wb/w)));
-      a.applyAngCorr(_c.copy(_n).multiplyScalar(-excess*(wa/w)));
+      b.applyAngCorr(_c.copy(_n).multiplyScalar(excess/w));
+      a.applyAngCorr(_c.copy(_n).multiplyScalar(-excess/w));
     }
   }
 
@@ -168,6 +168,7 @@ const ZPhys=(()=>{
     motor(b){ const m=new Motor(b); this.motors.push(m); return m; }
     anchor(b,local){ const a=new Anchor(b,local); this.anchors.push(a); return a; }
     step(dt){
+      if(!Number.isFinite(dt)||dt<=0)return;
       const n=this.substeps, h=dt/n;
       for(let s=0;s<n;s++){
         /* predict */
@@ -216,6 +217,9 @@ const ZPhys=(()=>{
         if(A.noCollide||B2.noCollide)continue;
         if(A.group===undefined||B2.group===undefined||A.group===B2.group)continue;
         if(A.invMass===0&&B2.invMass===0)continue;
+        // Conservative capsule broad phase avoids solving separated limbs.
+        const bound=(A.len+B2.len)*.5+A.r+B2.r;
+        if(A.pos.distanceToSquared(B2.pos)>bound*bound)continue;
         /* segment endpoints */
         _a.set(0,A.len/2,0); A.toWorld(_a,_a); _b.set(0,-A.len/2,0); A.toWorld(_b,_b);
         _c.set(0,B2.len/2,0); B2.toWorld(_c,_c); _d.set(0,-B2.len/2,0); B2.toWorld(_d,_d);
@@ -260,11 +264,22 @@ const ZPhys=(()=>{
               b._grounded=true;
               _d.set(0,pen/w,0);
               b.applyCorr(_d,_r1);
-              /* Coulomb friction: tangential correction capped by μ·penetration */
-              _d.set(-(b.pos.x-b.prevPos.x),0,-(b.pos.z-b.prevPos.z));
-              const tl=_d.length(), cap=this.friction*pen;
-              if(tl>1e-12){ if(tl>cap)_d.multiplyScalar(cap/tl);
-                b.applyCorr(_d,_r1); }
+              /* Friction acts at the contact, including angular slip.
+                 Both normal and tangential corrections are impulses here;
+                 using a displacement directly made friction mass-dependent. */
+              _a.set(0,sy*b.len/2,0).applyQuaternion(b.prevQ).add(b.prevPos);
+              _b.set(0,sy*b.len/2,0);b.toWorld(_b,_b);
+              _n.subVectors(_a,_b).setY(0);
+              const slip=_n.length();
+              if(slip>1e-10){
+                _n.divideScalar(slip);
+                _r1.subVectors(_b,b.pos);
+                const tw=b.wAt(_r1,_n);
+                if(tw>1e-12){
+                  const tangent=Math.min(slip/tw,this.friction*pen/w);
+                  b.applyCorr(_d.copy(_n).multiplyScalar(tangent),_r1);
+                }
+              }
             }
           }
         }

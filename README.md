@@ -39,4 +39,4 @@ Static site: open `index.html` through any web server (`python3 -m http.server`)
 
 `window.ZAN.sim(seconds, intent)` steps the simulation without rendering, for tests.
 
-The previous physics-sword version of the game is still playable at `classic.html` (`game.js`, `physics.js`, `models/`).
+The previous physics-sword version of the game (V65) is still playable at `classic.html`; its notes are in `README-classic.md`.
