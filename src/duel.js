@@ -56,7 +56,7 @@ export class Fighter {
     this.atk = { dir: this.stance, thrust, rip }; this.atkId = ATK_ID++; this.atkW = W; this.set('windup', W);
     this.riposteUntil = 0; this.buffer = null;
     if (thrust) this.fig.go(['thrC', W * .62, 'out'], ['thrE', W * .38 + .03, 'in']);
-    else { const d = this.stance; this.fig.go([d + 'C', W * .58, 'out'], [d + 'M', W * .24, 'in'], [d + 'E', W * .18 + .05, 'lin']); }
+    else { const d = this.stance; this.fig.go([d + 'C', W * .58, 'back'], [d + 'M', W * .24, 'in'], [d + 'E', W * .18 + .05, 'lin']); }
     sfx.windup(thrust);
   }
 
@@ -89,7 +89,7 @@ export class Fighter {
           const l = Math.hypot(mx, mz); this.dodgeSide = Math.abs(mx) > .5;
           this.fwd(_v).multiplyScalar(mz / l); this.left(_w).multiplyScalar(mx / l);
           this.dodgeDir = _v.add(_w).clone(); this.set('dodge', T.dodge); this.dodgeCd = T.dodgeCd + T.dodge; this.poseName = '';
-          fig.go(['dodge', .1, 'out'], [this.stance, .22, 'io']); sfx.dash(); G.puff(this.pos, 6);
+          fig.go(['dodge', .1, 'out'], [this.stance, .22, 'io']); sfx.dash(); G.puff(this.pos, 6); G.burst('streak', fig.chest, 0x15120f, 2.6, .22, this.dodgeDir, 1.3);
         } else if (I.attack || b === 'cut') this.startAttack(false, duel);
         else if (I.thrust || b === 'thrust') this.startAttack(true, duel);
         break;
@@ -147,6 +147,7 @@ export class Fighter {
       }
     }
     // shoves and knock-back bleed off quickly
+    if (this.push.lengthSq() > 5 && Math.random() < dt * 24) G.puff(this.pos, 2);       // heels ploughing the snow
     this.vel.add(this.push); this.push.multiplyScalar(Math.max(0, 1 - 7 * dt));
     this.pos.addScaledVector(this.vel, dt);
     // composure returns when the pressure is off
@@ -159,12 +160,13 @@ export class Fighter {
   }
   endExec(duel) { this.fig.sword.visible = true; if (duel.over) this.flourish(); else { this.atk = null; this.set('idle'); this.poseName = ''; } }
   flourish() {
-    this.atk = null; this.set('done'); this.fig.go(['flick', .22, 'out'], ['flick', .5], ['rest', .9, 'io']); sfx.flick();
+    this.atk = null; this.set('done'); this.fig.go(['flick', .22, 'out'], ['flick', .5], ['sheath', .8, 'io'], ['sheath', .5], ['sheath', 9]); sfx.flick();
     // chiburi: the blood is thrown off the blade in one line across the snow
     setTimeout(() => { const f = this.fig; if (f.bloody) { G.bleed(f.tip, this.left(new THREE.Vector3()).multiplyScalar(-1).setY(-.15), 26, 5, .18); f.setBloody(false); } }, 230);
   }
 }
 
+const STILL = { mx: 0, mz: 0, stance: null, attack: false, thrust: false, guard: false, dodge: false };
 export class Duel {
   /** a: the player; foes / ais: one or two opponents and their minds */
   constructor(a, foes, ais, emit) {
@@ -193,7 +195,7 @@ export class Duel {
     this.time += dt;
     const { a, foes, all } = this;
     this.retarget();
-    const ints = foes.map((f, i) => this.ais[i].think(dt, f, a, this));
+    const ints = foes.map((f, i) => this.hold ? STILL : this.ais[i].think(dt, f, a, this));
     a.update(dt, intent, a.target, this); foes.forEach((f, i) => f.update(dt, ints[i], a, this));
     this.tickBind(dt);
     // bodies do not pass through each other, and the ring holds them
@@ -294,7 +296,7 @@ export class Duel {
       const pn = 'p' + cap(def.stance);
       def.fig.go([pn, .05, 'out'], [pn, .12], ['b' + cap(def.stance), .15, 'io']); def.poseName = 'b' + cap(def.stance);
       def.riposteUntil = this.time + .7;
-      G.sparks(mid, 34); sfx.parry(); G.look.shake = .45; G.look.flash = .22; this.hitStop = .1; G.look.impact = .5; G.look.punch = .45;
+      G.sparks(mid, 34); sfx.parry(); G.look.shake = .45; G.look.flash = .22; this.hitStop = .1; G.look.impact = .5; G.look.punch = .45; G.look.invert = .05;
       G.burst('star', mid, 0xffffff, 1.2, .18); G.burst('ring', mid, 0x15120f, 1, .34, null, 3.6); G.burst('streak', mid, 0xffe9a8, 2.4, .16, away);
       att.atk = null; att.push.addScaledVector(away, -2.4);
       if (!att.addPosture(40, this)) { att.set('stagger', T.stagger); att.poseName = ''; att.fig.go(['reel', .14, 'out'], ['reel', .4], [att.stance, .36, 'io']); }
@@ -319,7 +321,7 @@ export class Duel {
     def.push.addScaledVector(away, 3.4); def.posture = Math.min(96, def.posture + 18); def.lastPosture = this.time;
     if (def.wounds >= MAX_WOUNDS) {
       def.set('kneel'); def.fig.go(['hurt', .2, 'out'], ['kneel', .6, 'io']); def.fig.dropSword(); this.yieldT = 0; this.emit('yield', def);
-    } else { def.set('hit', T.hit); def.poseName = ''; def.fig.go(['hurt', .12, 'out'], ['hurt', .2], [def.stance, .22, 'io']); this.emit('wound', def); }
+    } else { def.set('hit', T.hit); def.poseName = ''; const hp = atk.thrust ? 'hurt' : atk.dir === 'high' ? 'hurtH' : atk.dir === 'left' ? 'hurtR' : 'hurtL'; def.fig.go([hp, .1, 'out'], [hp, .22], [def.stance, .22, 'io']); this.emit('wound', def); }
   }
   sweep(att, atk, out) {
     if (atk.thrust) return att.fwd(out).setY(.25);
@@ -344,7 +346,8 @@ export class Duel {
     setTimeout(() => G.pool(def.pos.x + Math.sin(def.yaw) * back, def.pos.z + Math.cos(def.yaw) * back, .5), 1700);
     sfx.kill(); if (!exec) att.recoverDur = .7; if (!att.bare) att.fig.setBloody(true); G.look.impact = 1.3; G.look.punch = 1;
     const last = def === this.a || !this.foes.some(f => f.alive && !f.spared);
-    G.look.shake = 1; G.look.flash = .5; this.hitStop = .16; this.slow = last ? 1.5 : .5;
+    G.look.shake = 1; G.look.flash = .5; this.hitStop = .16; this.slow = last ? 1.5 : .5; G.look.invert = .09;
+    setTimeout(() => def.fig.dropSword(), 380);
     const at = how === 'left' || how === 'right' ? fig.neckW : fig.chest;
     G.burst('streak', at, 0xffffff, 5, .3, sw, 1.5); G.burst('streak', at, G.BLOOD, 7, .6, sw, 1.3); G.burst('ring', at, G.BLOOD, 1.2, .5, null, 4); G.inkSplash(at, sw, 26);
     if (!last) { this.emit('down', def); return; }

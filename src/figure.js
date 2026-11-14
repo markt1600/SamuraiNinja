@@ -41,6 +41,10 @@ export const POSE = {
   deadB: P([-.4, .05, -.2], [-.9, 0, -.3], { lean: -1.5, hy: .13, limp: 1 }),
   // ceremony
   flick: P([-.5, .95, .16], [-.55, -.72, .42], { twist: -.2, hy: .9 }),
+  sheath:P([.2, .98, .04], [-.14, -.2, -.97], { twist: .28, hy: .92, lean: .06, nod: .15 }),
+  bow:   P([-.3, .84, .26], [-.25, -.9, .35], { lean: .62, hy: .9, nod: .3 }),
+  hurtH: P([-.22, 1.02, .14], [-.4, .3, .86], { lean: -.3, hy: .74, nod: -.45 }),
+  hurtR: P([-.3, .98, .16], [-.6, .1, .8], { lean: .16, twist: -.65, roll: .3, hy: .76, nod: .3 }),
   rest:  P([-.26, .9, .2], [-.2, -.9, .4], { hy: .93 }),
   dodge: P([.1, 1.1, .2], [.5, .8, .2], { hy: .74, lean: .15 }),
   // the bind and what comes out of it
@@ -55,7 +59,7 @@ export const POSE = {
   ripH:  P([-.14, 1.62, .2], [0, 1, 0], { lean: -.14, hy: .92, free: 1 }),
 };
 POSE.right = mir(POSE.left); POSE.rightC = mir(POSE.leftC); POSE.rightM = mir(POSE.leftM); POSE.rightE = mir(POSE.leftE);
-POSE.bRight = mir(POSE.bLeft); POSE.pRight = mir(POSE.pLeft);
+POSE.hurtL = mir(POSE.hurtR); POSE.bRight = mir(POSE.bLeft); POSE.pRight = mir(POSE.pLeft);
 
 const clonePose = p => ({ ...p, h: p.h.clone(), d: p.d.clone() });
 function slerpDir(out, a, b, t) {
@@ -162,7 +166,7 @@ export class Figure {
     if (look.tails) this.tails = new Tails(look.tails, this.headG);
     if (look.coat != null) this.coat = new Coat(toon(look.coat, { side: THREE.DoubleSide })); this.pins = [V(), V(), V(), V()];
     this.elb = [V(), V()]; this.wri = [V(), V()]; this.sleeves = [0, 1].map(() => new Sleeve(toon(look.gi, { side: THREE.DoubleSide })));
-    this.breath = Math.random() * 6;
+    this.breath = Math.random() * 6; this.leanV = 0; this.rollV = 0;
   }
   dispose() { scene.remove(this.root); scene.remove(this.trail.mesh); scene.remove(this.glint.mesh); for (const o of this.pieces) scene.remove(o.g); if (this.tails) scene.remove(this.tails.mesh); this.sleeves.forEach(c => scene.remove(c.mesh)); if (this.coat) scene.remove(this.coat.mesh); }
   setWounds(n) { if (n === this.cutN) return; this.cutN = n; this.cuts.forEach((c, i) => { c.visible = i < n; }); }
@@ -208,9 +212,14 @@ export class Figure {
     }
 
     // joints, in fighter space
-    const hip = _j.hip.set(0, p.hy + br, p.hz);
+    // the body answers its own movement: it leans into a step and sways at rest
+    const live = 1 - p.limp, cy = Math.cos(this.yaw), sy = Math.sin(this.yaw);
+    const vf = this.vel.x * sy + this.vel.z * cy, vl = this.vel.x * cy - this.vel.z * sy, kk = Math.min(1, dt * 9);
+    this.leanV += (THREE.MathUtils.clamp(vf * .04, -.1, .14) * live - this.leanV) * kk; this.rollV += (THREE.MathUtils.clamp(-vl * .05, -.13, .13) * live - this.rollV) * kk;
+    const sw = Math.sin(this.breath * .9) * live;
+    const hip = _j.hip.set(sw * .012, p.hy + br - Math.abs(this.rollV) * .12, p.hz);
     const lift = (this.feet[0].p.y + this.feet[1].p.y) * .25; hip.y += lift;
-    const qC = _j.qC.setFromEuler(_e.set(p.lean, p.twist, p.roll, 'YXZ'));
+    const qC = _j.qC.setFromEuler(_e.set(p.lean + this.leanV, p.twist + sw * .025, p.roll + this.rollV, 'YXZ'));
     const qH = _j.qH.setFromEuler(_e.set(p.lean * .35, p.twist * .35, 0, 'YXZ'));
     const neck = _j.neck.set(0, .5, 0).applyQuaternion(qC).add(hip);
     const qHead = _j.qHead.setFromEuler(_e.set(p.lean * (p.limp ? 1 : .35) + p.nod, p.twist * .3, p.roll * .5, 'YXZ'));
@@ -239,7 +248,7 @@ export class Figure {
     }
 
     // sword and arms
-    const grip = _j.grip.copy(p.h); grip.y += (hip.y - .9) * .8; grip.z += p.hz * .6;
+    const grip = _j.grip.copy(p.h); grip.y += (hip.y - .9) * .8 + Math.sin(this.breath * 1.7) * .007 * live; grip.z += p.hz * .6; grip.x += sw * .012;
     const shR = _j.sR.set(-.2, .42, 0).applyQuaternion(qC).add(hip), shL = _j.sL.set(.2, .42, 0).applyQuaternion(qC).add(hip);
     twoBone(shR, grip, L_UA, L_FA, _c.set(-.6, -.8, -.35).applyQuaternion(qC), _j.mid, _j.end);
     if (!this.swordGone) grip.copy(_j.end);          // the sword never leaves the hand
@@ -285,13 +294,13 @@ export class Figure {
 
   /** everything needed to draw this figure again later */
   snapshot() {
-    return { x: this.pos.x, z: this.pos.z, yaw: this.yaw, pose: clonePose(this.pose), f0: this.feet[0].p.clone(), f1: this.feet[1].p.clone(),
+    return { x: this.pos.x, z: this.pos.z, yaw: this.yaw, vx: this.vel.x, vz: this.vel.z, pose: clonePose(this.pose), f0: this.feet[0].p.clone(), f1: this.feet[1].p.clone(),
       striking: this.striking, headless: this.headless, armOff: [...this.armOff], swordGone: this.swordGone, swordVis: this.sword.visible,
       pieces: this.pieces.map(o => ({ p: o.g.position.clone(), q: o.g.quaternion.clone() })) };
   }
   /** pose the figure between two snapshots (replay) */
   restore(A, B, k) {
-    this.pos.set(lerp(A.x, B.x, k), 0, lerp(A.z, B.z, k));
+    this.pos.set(lerp(A.x, B.x, k), 0, lerp(A.z, B.z, k)); this.vel.set(A.vx, 0, A.vz);
     let d = B.yaw - A.yaw; d = Math.atan2(Math.sin(d), Math.cos(d)); this.yaw = A.yaw + d * k;
     blend(this.pose, A.pose, B.pose, k); this.keys.length = 0;
     this.feet[0].p.lerpVectors(A.f0, B.f0, k); this.feet[1].p.lerpVectors(A.f1, B.f1, k);

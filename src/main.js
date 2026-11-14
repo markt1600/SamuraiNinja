@@ -51,7 +51,7 @@ function startDuel() {
   const ais = newEnemy(game.stage);
   player.reset(0, 2.3, Math.PI); foes.forEach((f, k) => f.reset(foes.length > 1 ? (k ? 1.7 : -1.7) : 0, -2.3, 0));
   duel = new Duel(player, foes, ais, onEvent);
-  game.state = 'intro'; game.t = 0; game.finish = game.mercy = false; Replay.reset(); show('replay', false); G.look.kill = 0; G.look.dim = 0; G.clearGround();
+  game.state = 'intro'; game.t = 0; game.finish = game.mercy = false; game.bowed = false; Replay.reset(); show('replay', false); G.look.kill = 0; G.look.dim = 0; G.clearGround();
   const d = LADDER[game.stage];
   $('card-n').textContent = 'Duel ' + ROMAN[game.stage] + ' of ' + ROMAN[LADDER.length - 1]; $('card-seal').textContent = ['一', '二', '三', '四', '五'][game.stage];
   $('card-name').textContent = d.name + ', ' + d.title + (d.second ? ' — and ' + d.second.name : ''); $('card-blurb').textContent = d.blurb;
@@ -61,6 +61,7 @@ function startDuel() {
 }
 function onEvent(type, who, extra) {
   const mine = who === player;
+  if (SFX[type] && !(type === 'over' && who.mercy)) pop(SFX[type], (type === 'over' ? who.loser : who || player).fig.chest, type === 'over' || type === 'down' ? 'big red' : type === 'wound' || type === 'sever' ? 'red' : type === 'whiff' || type === 'evade' || type === 'block' ? 'small' : '');
   if (type === 'parry') say(mine ? 'Parry' : 'Parried', mine ? 'good' : 'bad');
   else if (type === 'bind') say('Bind — drive forward', '', 1.2);
   else if (type === 'clinch') { const me = who === player; say(({ throw: me ? 'Thrown down' : 'You are thrown', pommel: me ? 'Pommel strike' : 'Struck by the pommel', kick: me ? 'Kick' : 'Kicked back', shove: me ? 'Shoved off' : 'Shoved back' })[extra], me ? 'good' : 'bad'); }
@@ -99,6 +100,27 @@ function proceed(retry) {
 $('m-go').onclick = () => proceed(); $('v-go').onclick = () => proceed(); $('v-retry').onclick = () => proceed(true);
 
 /* ---------- HUD ---------- */
+/* lettered sound effects: katakana where the device can draw it, Latin where it cannot */
+const KANA = (() => {
+  try {                                    // draw a kana and an unassigned glyph: the same picture, or none, means no Japanese font
+    const ink = ch => { const c = document.createElement('canvas'); c.width = c.height = 40; const x = c.getContext('2d', { willReadFrequently: true }); x.font = '30px sans-serif'; x.textBaseline = 'top'; x.fillText(ch, 4, 4); return Array.from(x.getImageData(0, 0, 40, 40).data.filter((v, i) => i % 4 === 3)).join(''); };
+    const a = ink('ザ'), b = ink('\uE000'); return /[1-9]/.test(a) && a !== b;
+  } catch (_) { return false; }
+})();
+const SFX = KANA
+  ? { parry: 'ガキィン', block: 'ガッ', bind: 'ギリギリ', wound: 'ザシュッ', broken: 'グラッ', evade: 'ヒュッ', whiff: 'スカッ', clinch: 'ドカッ', sever: 'ブシャッ', yield: 'ガクッ', down: 'ズバァッ', over: 'ズバァッ' }
+  : { parry: 'KLANG!', block: 'TOK', bind: 'GRRK', wound: 'SLASH!', broken: 'CRACK', evade: 'FWIP', whiff: 'WHIFF', clinch: 'THUD!', sever: 'SPLAT', yield: 'UGH', down: 'ZAN!', over: 'ZAN!' };
+if (!KANA) document.documentElement.classList.add('latin');
+/** a drawn sound effect, lettered beside the action */
+function pop(text, at, cls) {
+  _p.copy(at).project(camera); if (_p.z > 1) return;
+  const e = document.createElement('div'); e.className = 'koe ' + cls; e.textContent = text;
+  const side = Math.random() < .5 ? -1 : 1;
+  e.style.left = ((_p.x * .5 + .5) * innerWidth + side * (60 + Math.random() * 70)) + 'px'; e.style.top = ((-_p.y * .5 + .5) * innerHeight - 40 - Math.random() * 60) + 'px';
+  e.style.setProperty('--r', (side * (6 + Math.random() * 10)) + 'deg');
+  $('koe').appendChild(e); setTimeout(() => e.remove(), 900);
+}
+let dizzyT = 0;
 function show(id, on) { $(id).classList.toggle('on', !!on); }
 let sayT = 0;
 function say(text, cls = '', hold = 1.1) { const m = $('msg'); m.textContent = text; m.className = 'on ' + cls; sayT = hold; }
@@ -165,7 +187,8 @@ function update(dt, forced) {
   if (sayT > 0 && (sayT -= dt) <= 0) $('msg').className = '';
   if (game.state === 'menu') return;
   if (game.state === 'intro') {
-    duel.step(dt, IDLE); duel.time = 0;
+    duel.hold = true; duel.step(dt, IDLE); duel.time = 0; duel.hold = false;
+    if (!game.bowed && game.t > .7) { game.bowed = true; for (const f of duel.all) f.fig.go(['rest', .25, 'io'], ['bow', .45, 'io'], ['bow', .3], [f.stance, .55, 'io']); }
     if (game.t > 2.6 || (game.t > .6 && (inp.intent.attack || inp.confirm))) {
       game.state = 'fight'; show('card', false); Input.state.fighting = true; game.woundsIn = player.wounds; sfx.bell();
       for (const f of [player, enemy]) { f.poseName = ''; }
@@ -178,6 +201,7 @@ function update(dt, forced) {
     show('prompt', vic && !game.finish && !game.mercy);
     if (vic && game.finish && player.state !== 'execute') duel.execute(player, duel.kneeling[0], game.finish);
     else if (vic && game.mercy && player.state === 'idle') duel.spare(player);
+    if ((dizzyT -= dt) < 0) { dizzyT = .16; for (const f of duel.all) if (f.state === 'broken') { const a = game.time * 7; G.burst('star', _p.copy(f.fig.neckW).add(_l.set(Math.cos(a) * .24, .34, Math.sin(a) * .24)), 0xe9b949, .2, .32, null, 1.2); } }
     duel.step(dt, vic ? IDLE : intent); enemy = duel.b; Replay.record(duel.time, duel.all.map(f => f.fig));
   } else if (game.state === 'replay') {
     const figs = duel.all.map(f => f.fig), R = Replay.state(), before = R.t < R.killT;
@@ -214,5 +238,5 @@ show('menu', true);
 requestAnimationFrame(frame);
 
 /* test hook: drive the simulation without the render loop */
-window.ZAN = { game, G, T, AI, LADDER, get player() { return player; }, get enemy() { return enemy; }, get foes() { return foes; }, get duel() { return duel; }, get ai() { return ai; },
+window.ZAN = { game, G, T, AI, LADDER, pop, get player() { return player; }, get enemy() { return enemy; }, get foes() { return foes; }, get duel() { return duel; }, get ai() { return ai; },
   proceed, sim(sec, intent, dt = 1 / 60) { for (let t = 0; t < sec; t += dt) { update(dt, typeof intent === 'function' ? intent() : intent); G.tick(dt, game.time); } } };

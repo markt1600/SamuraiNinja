@@ -74,6 +74,18 @@ body::before{top:0}body::after{bottom:0}.ended::before,.ended::after{height:9vh}
 #replay em{position:absolute;right:max(22px,env(safe-area-inset-right));top:calc(9vh + 16px);font-style:normal;font-size:.7rem;letter-spacing:.2em;text-transform:uppercase;color:var(--soft)}
 @keyframes bl{50%{opacity:.25}}
 
+/* lettered sound effects */
+#koe{position:fixed;inset:0;pointer-events:none;z-index:4;overflow:hidden}
+.koe{position:absolute;writing-mode:vertical-rl;font-family:"Hiragino Kaku Gothic ProN","Hiragino Sans","Yu Gothic","Noto Sans JP","Noto Sans CJK JP",sans-serif;font-weight:900;
+  font-size:clamp(1.7rem,6.5vh,3.4rem);line-height:1;color:var(--ink);letter-spacing:-.04em;
+  text-shadow:3px 0 0 #f4efe2,-3px 0 0 #f4efe2,0 3px 0 #f4efe2,0 -3px 0 #f4efe2,2px 2px 0 #f4efe2,-2px 2px 0 #f4efe2,2px -2px 0 #f4efe2,-2px -2px 0 #f4efe2,0 0 8px #f4efe2;
+  transform-origin:50% 50%;animation:koe .85s cubic-bezier(.2,1.5,.4,1) forwards}
+.latin .koe{writing-mode:horizontal-tb;font-family:Impact,"Arial Black","Helvetica Neue",sans-serif;font-style:italic;letter-spacing:.02em}
+.koe.small{font-size:clamp(1.1rem,4vh,2rem)}.koe.big{font-size:clamp(2.6rem,11vh,5.6rem)}.koe.red{color:var(--red)}
+@keyframes koe{0%{transform:translate(-50%,-50%) rotate(var(--r)) scale(.2);opacity:0}16%{transform:translate(-50%,-50%) rotate(var(--r)) scale(1.18);opacity:1}30%{transform:translate(-50%,-50%) rotate(var(--r)) scale(1)}72%{opacity:1}100%{transform:translate(-50%,-56%) rotate(var(--r)) scale(1.04);opacity:0}}
+#frame{position:fixed;inset:7px;border:3px solid var(--ink);pointer-events:none;z-index:1;opacity:.8;box-shadow:0 0 0 7px #e9e2d2}
+.ended #frame{opacity:0}
+
 /* cards and menus */
 #card{display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;
   background:linear-gradient(rgba(233,226,210,0),rgba(233,226,210,.72) 35%,rgba(233,226,210,.72) 65%,rgba(233,226,210,0))}
@@ -131,6 +143,7 @@ html:not(.touch) .touch-only{display:none!important}
 <div class="ring" id="ring-e" style="display:none"><svg viewBox="-60 -60 120 120"><path class="a-high" d="M-30 -39 A50 50 0 0 1 30 -39"/><path class="a-left" d="M-44 -22 A50 50 0 0 0 -44 22"/><path class="a-right" d="M44 -22 A50 50 0 0 1 44 22"/><circle r="11"/></svg></div>
 <div class="ring" id="ring-e2" style="display:none"><svg viewBox="-60 -60 120 120"><path class="a-high" d="M-30 -39 A50 50 0 0 1 30 -39"/><path class="a-left" d="M-44 -22 A50 50 0 0 0 -44 22"/><path class="a-right" d="M44 -22 A50 50 0 0 1 44 22"/><circle r="11"/></svg></div>
 <div id="slash"><i></i><b>斬</b></div>
+<div id="koe"></div><div id="frame"></div>
 <div id="msg"></div>
 <div id="prompt" class="layer">
   <span class="desk-only"><kbd>F</kbd> fatality &nbsp;·&nbsp; <kbd>G</kbd> bare hands &nbsp;·&nbsp; <kbd>click</kbd> clean finish &nbsp;·&nbsp; <kbd>M</kbd> mercy</span>
@@ -164,7 +177,7 @@ html:not(.touch) .touch-only{display:none!important}
   </div>
   <p class="rules">Match your guard to the side the cut comes from. A parry opens your opponent; a clean cut wounds; three wounds and they kneel. Break a guard, then cut — and it is over.</p>
   <button id="m-go">Draw</button>
-  <span class="build">Build V69</span><a class="legacy" href="classic.html">classic version</a>
+  <span class="build">Build V70</span><a class="legacy" href="classic.html">classic version</a>
 </div>
 
 <div id="verdict" class="layer">
@@ -175,11 +188,11 @@ html:not(.touch) .touch-only{display:none!important}
 
 <script type="importmap">
 { "imports": {
-  "three": "./vendor/three.module.js?v=v69",
-  "zan/gfx": "./src/gfx.js?v=v69", "zan/figure": "./src/figure.js?v=v69", "zan/duel": "./src/duel.js?v=v69",
-  "zan/input": "./src/input.js?v=v69", "zan/replay": "./src/replay.js?v=v69", "zan/audio": "./src/audio.js?v=v69" } }
+  "three": "./vendor/three.module.js?v=v70",
+  "zan/gfx": "./src/gfx.js?v=v70", "zan/figure": "./src/figure.js?v=v70", "zan/duel": "./src/duel.js?v=v70",
+  "zan/input": "./src/input.js?v=v70", "zan/replay": "./src/replay.js?v=v70", "zan/audio": "./src/audio.js?v=v70" } }
 </script>
 <script>if (matchMedia('(pointer:coarse)').matches || 'ontouchstart' in window) document.documentElement.classList.add('touch');</script>
-<script type="module" src="./src/main.js?v=v69"></script>
+<script type="module" src="./src/main.js?v=v70"></script>
 </body>
 </html>

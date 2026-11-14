@@ -35,7 +35,7 @@ export const flat = (color, opt) => new THREE.MeshBasicMaterial(Object.assign({ 
 const POST_FS = `
 precision highp float;
 uniform sampler2D tColor, tDepth, tNormal;
-uniform vec2 uRes; uniform float uNear, uFar, uKill, uFlash, uDim, uTime, uImpact;
+uniform vec2 uRes; uniform float uNear, uFar, uKill, uFlash, uDim, uTime, uImpact, uInvert;
 varying vec2 vUv;
 float hash(vec2 p){ p=fract(p*vec2(123.34,456.21)); p+=dot(p,p+45.32); return fract(p.x*p.y); }
 float vn(vec2 p){ vec2 i=floor(p),f=fract(p); f=f*f*(3.-2.*f);
@@ -51,6 +51,10 @@ void main(){
   float d0=lin(uv), dA=lin(uv+o), dB=lin(uv-o), dC=lin(uv+vec2(o.x,-o.y)), dD=lin(uv+vec2(-o.x,o.y));
   float lap=abs(dA+dB-2.*d0)+abs(dC+dD-2.*d0);
   float eD=smoothstep(.012+d0*.003,.035+d0*.007,lap/d0);
+  // the outer contour is drawn with a heavier hand than the inner lines
+  vec2 o2=o*2.3;
+  float lap2=abs(lin(uv+o2)+lin(uv-o2)-2.*d0)+abs(lin(uv+vec2(o2.x,-o2.y))+lin(uv+vec2(-o2.x,o2.y))-2.*d0);
+  eD=max(eD,smoothstep(.06+d0*.012,.14+d0*.02,lap2/d0)*step(d0,26.));
   vec3 nA=texture2D(tNormal,uv+o).xyz, nB=texture2D(tNormal,uv-o).xyz,
        nC=texture2D(tNormal,uv+vec2(o.x,-o.y)).xyz, nD=texture2D(tNormal,uv+vec2(-o.x,o.y)).xyz;
   float eN=smoothstep(.45,.9,length(nA-nB)+length(nC-nD));
@@ -70,6 +74,10 @@ void main(){
   float hp=(gl_FragCoord.x+gl_FragCoord.y)/sc;
   float h1=smoothstep(.62,.95,abs(fract(hp/9.+vn(vUv*asp*30.)*.4)-.5)*2.);
   col*=1.-hw*.2*h1;
+  // screentone: the blacks carry a dot screen, as on a printed page
+  float tw=smoothstep(.3,.16,lum0)*smoothstep(.03,.08,lum0)*notRed*(1.-smoothstep(12.,34.,d0));
+  vec2 tp=mat2(.707,-.707,.707,.707)*gl_FragCoord.xy/sc/5.5;
+  col=mix(col,col*1.7+.07,tw*smoothstep(.36,.22,length(fract(tp)-.5))*.55);
   float grain=vn(vUv*uRes/sc*.9)*.6+vn(vUv*asp*9.)*.4;
   vec3 ink=vec3(.085,.07,.065);
   // dry-brush: the line breaks up where the paper tooth shows through
@@ -87,6 +95,7 @@ void main(){
   float fl=vn(qd*19.+uTime*40.)*vn(qd*53.+3.);
   col=mix(col,ink,smoothstep(.3,.7,length(q*vec2(1.,1.25)))*smoothstep(.24,.46,fl)*uImpact*.85);
   col=mix(col,col*vec3(.62,.58,.55),vig*.75);
+  col=mix(col,1.-col,uInvert);
   col=mix(col,vec3(1.),uFlash);
   col*=1.-uDim;
   gl_FragColor=vec4(col,1.);
@@ -115,7 +124,7 @@ export function init(canvas) {
   postMat = new THREE.ShaderMaterial({
     uniforms: { tColor: { value: null }, tDepth: { value: null }, tNormal: { value: null },
       uRes: { value: new THREE.Vector2() }, uNear: { value: camera.near }, uFar: { value: camera.far },
-      uKill: { value: 0 }, uFlash: { value: 0 }, uDim: { value: 0 }, uTime: { value: 0 }, uImpact: { value: 0 } },
+      uKill: { value: 0 }, uFlash: { value: 0 }, uDim: { value: 0 }, uTime: { value: 0 }, uImpact: { value: 0 }, uInvert: { value: 0 } },
     vertexShader: 'varying vec2 vUv; void main(){ vUv=uv; gl_Position=vec4(position.xy,0.,1.); }',
     fragmentShader: POST_FS, depthTest: false, depthWrite: false });
   postScene.add(new THREE.Mesh(new THREE.PlaneGeometry(2, 2), postMat));
@@ -137,7 +146,7 @@ export function resize() {
   camera.aspect = w / h; camera.updateProjectionMatrix();
 }
 
-export const look = { kill: 0, flash: 0, dim: 0, shake: 0, impact: 0, punch: 0 };
+export const look = { kill: 0, flash: 0, dim: 0, shake: 0, impact: 0, punch: 0, invert: 0 };
 let clock = 0;
 export function render(dt) {
   if (look.shake > 0) {
@@ -145,7 +154,7 @@ export function render(dt) {
     const a = look.shake * look.shake * .22;
     camera.position.x += (Math.random() - .5) * a; camera.position.y += (Math.random() - .5) * a;
   }
-  look.flash = Math.max(0, look.flash - dt * 5); look.impact = Math.max(0, look.impact - dt * 3.2); look.punch = Math.max(0, look.punch - dt * 3.5);
+  look.flash = Math.max(0, look.flash - dt * 5); look.impact = Math.max(0, look.impact - dt * 3.2); look.invert = Math.max(0, look.invert - dt); look.punch = Math.max(0, look.punch - dt * 3.5);
   renderer.setRenderTarget(rtColor); renderer.render(scene, camera);
   camera.layers.disable(FX); scene.overrideMaterial = normalMat;
   const fog = scene.fog; scene.fog = null;
@@ -154,7 +163,7 @@ export function render(dt) {
   scene.overrideMaterial = null; scene.fog = fog; camera.layers.enable(FX);
   const u = postMat.uniforms;
   u.tColor.value = rtColor.texture; u.tDepth.value = rtColor.depthTexture; u.tNormal.value = rtNormal.texture;
-  u.uTime.value = clock; u.uImpact.value = Math.min(1, look.impact); u.uKill.value = look.kill; u.uFlash.value = look.flash; u.uDim.value = look.dim;
+  u.uTime.value = clock; u.uImpact.value = Math.min(1, look.impact); u.uInvert.value = look.invert > 0 ? 1 : 0; u.uKill.value = look.kill; u.uFlash.value = look.flash; u.uDim.value = look.dim;
   renderer.setRenderTarget(null); renderer.render(postScene, postCam);
 }
 
