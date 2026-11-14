@@ -130,14 +130,15 @@ export class Fighter {
         if (!A) {
           while (this.chops.length && this.chops[0] !== 'head' && foe.fig.armOff[this.chops[0] === 'armR' ? 1 : 0]) this.chops.shift();
           if (!foe.alive || !this.chops.length) { this.endExec(duel); break; }
-          if (dist > 1.5) this.fwd(this.vel).multiplyScalar(1.5);
+          if (dist > (this.bare ? 1.22 : 1.5)) this.fwd(this.vel).multiplyScalar(1.5);
           else {
             const part = this.chops.shift(), d = part === 'head' ? 'left' : 'high';
             this.atk = { dir: d, thrust: false, exec: true, part }; this.t = 0;
-            fig.go([d + 'C', .5, 'io'], [d + 'C', .2], [d + 'M', .07, 'in'], [d + 'E', .08, 'lin']); sfx.windup(false);
+            if (this.bare) { const h = part === 'head' ? 'H' : ''; fig.sword.visible = false; fig.go(['grab' + h, .5, 'io'], ['grab' + h, .22], ['rip' + h, .1, 'in'], ['rip' + h, .35]); }
+            else { fig.go([d + 'C', .5, 'io'], [d + 'C', .2], [d + 'M', .07, 'in'], [d + 'E', .08, 'lin']); sfx.windup(false); }
           }
         } else {
-          fig.striking = this.t > .7 && this.t < .98;
+          fig.striking = !this.bare && this.t > .7 && this.t < .98;
           if (this.t >= .8 && !A.done) { A.done = true; duel.chop(this, foe, A.part); }
           if (this.t >= 1.35) { if (this.chops.length && foe.alive) { this.atk = null; this.t = 0; } else this.endExec(duel); }
         }
@@ -155,7 +156,7 @@ export class Fighter {
     }
     fig.yaw = this.yaw; fig.vel.copy(this.vel);
   }
-  endExec(duel) { if (duel.over) this.flourish(); else { this.atk = null; this.set('idle'); this.poseName = ''; } }
+  endExec(duel) { this.fig.sword.visible = true; if (duel.over) this.flourish(); else { this.atk = null; this.set('idle'); this.poseName = ''; } }
   flourish() { this.atk = null; this.set('done'); this.fig.go(['flick', .22, 'out'], ['flick', .5], ['rest', .9, 'io']); sfx.flick(); }
 }
 
@@ -205,13 +206,15 @@ export class Duel {
     if (a.state === 'kneel' && !this.over) {
       this.yieldT += dt;
       const ex = foes.find(f => f.alive && f.state === 'idle');
-      if (this.yieldT > 1.3 && ex && !foes.some(f => f.state === 'execute')) this.execute(ex, a, true);
+      if (this.yieldT > 1.3 && ex && !foes.some(f => f.state === 'execute')) this.execute(ex, a, ex.def.bare ? 'bare' : 'fatal');
     }
   }
   fountain(fig, at, span, k = 1, dx = 0, dz = 0) { this.fountains.push({ fig, at, until: this.time + span, span, k, dx, dz }); }
-  execute(vic, target, fatal) {
+  /** mode: 'clean' (one stroke), 'fatal' (both arms, then the head) or 'bare' (the same, by hand) */
+  execute(vic, target, mode) {
     if (vic.state !== 'idle' && vic.state !== 'recover') return;
-    vic.target = target; vic.chops = fatal ? ['armR', 'armL', 'head'] : ['head']; vic.set('execute'); vic.atk = null; vic.poseName = '';
+    if (mode !== 'clean' && this.fatalT == null) this.fatalT = this.time;
+    vic.bare = mode === 'bare'; vic.target = target; vic.chops = mode === 'clean' ? ['head'] : ['armR', 'armL', 'head']; vic.set('execute'); vic.atk = null; vic.poseName = '';
   }
   spare(vic) {
     if (this.over) return; const k = this.kneeling; if (!k.length) return;
@@ -220,6 +223,7 @@ export class Duel {
   }
   /** one blow of an execution */
   chop(att, def, part) {
+    if (att.bare) sfx.thud();
     if (part === 'head') return this.kill(att, def, 'left', true);
     const side = part === 'armR' ? 1 : 0, out = def.left(new THREE.Vector3()).multiplyScalar(side ? -1 : 1);
     if (!def.fig.sever(side, out)) return;

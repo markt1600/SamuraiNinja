@@ -10,7 +10,7 @@ const lerp = (a, b, t) => a + (b - a) * t;
 /* ---------- poses (fighter space: +Z ahead, +X own left, Y up) ---------- */
 function P(h, d, o = {}) {
   return { h: V(...h), d: V(...d).normalize(), lean: o.lean || 0, twist: o.twist || 0, roll: o.roll || 0,
-    hy: o.hy ?? .9, hz: o.hz || 0, nod: o.nod || 0, limp: o.limp || 0, kick: o.kick || 0 };
+    hy: o.hy ?? .9, hz: o.hz || 0, nod: o.nod || 0, limp: o.limp || 0, kick: o.kick || 0, free: o.free || 0 };
 }
 const mir = p => ({ ...p, h: V(-p.h.x, p.h.y, p.h.z), d: V(-p.d.x, p.d.y, p.d.z), twist: -p.twist, roll: -p.roll });
 export const POSE = {
@@ -48,6 +48,11 @@ export const POSE = {
   shove: P([0, 1.3, .66], [.62, .76, .16], { lean: .34, hy: .8, hz: .34 }),
   pommel:P([.04, 1.42, .62], [-.25, .55, -.8], { lean: .26, hy: .84, hz: .3, twist: .3 }),
   kick:  P([-.2, 1.2, .1], [.3, .9, -.3], { lean: -.22, hy: .9, kick: 1 }),
+  // bare hands: both reach, take hold, and tear
+  grab:  P([-.17, .98, .62], [0, 1, 0], { lean: .42, hy: .8, hz: .3, free: 1 }),
+  rip:   P([-.36, 1.3, .04], [0, 1, 0], { lean: -.22, hy: .9, free: 1 }),
+  grabH: P([-.11, 1.12, .6], [0, 1, 0], { lean: .38, hy: .82, hz: .3, free: 1 }),
+  ripH:  P([-.14, 1.62, .2], [0, 1, 0], { lean: -.14, hy: .92, free: 1 }),
 };
 POSE.right = mir(POSE.left); POSE.rightC = mir(POSE.leftC); POSE.rightM = mir(POSE.leftM); POSE.rightE = mir(POSE.leftE);
 POSE.bRight = mir(POSE.bLeft); POSE.pRight = mir(POSE.pLeft);
@@ -60,7 +65,7 @@ function slerpDir(out, a, b, t) {
 }
 function blend(out, a, b, t) {
   out.h.lerpVectors(a.h, b.h, t); slerpDir(out.d, a.d, b.d, t);
-  for (const k of ['lean', 'twist', 'roll', 'hy', 'hz', 'nod', 'limp', 'kick']) out[k] = lerp(a[k], b[k], t);
+  for (const k of ['lean', 'twist', 'roll', 'hy', 'hz', 'nod', 'limp', 'kick', 'free']) out[k] = lerp(a[k], b[k], t);
 }
 const EASE = {
   lin: t => t, out: t => 1 - (1 - t) ** 3, in: t => t * t * t, io: t => t * t * (3 - 2 * t),
@@ -136,9 +141,10 @@ export class Figure {
     this.pos = V(); this.yaw = 0; this.vel = V(); this.striking = false;
     this.tip = V(); this.base = V(); this.chest = V(); this.neckW = V(); this.headless = false; this.pieces = []; this.armOff = [false, false]; this.shW = [V(), V()]; this.swordGone = false;
     if (look.tails) this.tails = new Tails(look.tails, this.headG);
+    this.elb = [V(), V()]; this.wri = [V(), V()]; this.sleeves = [0, 1].map(() => new Sleeve(toon(look.gi, { side: THREE.DoubleSide })));
     this.breath = Math.random() * 6;
   }
-  dispose() { scene.remove(this.root); scene.remove(this.trail.mesh); scene.remove(this.glint.mesh); for (const o of this.pieces) scene.remove(o.g); if (this.tails) scene.remove(this.tails.mesh); }
+  dispose() { scene.remove(this.root); scene.remove(this.trail.mesh); scene.remove(this.glint.mesh); for (const o of this.pieces) scene.remove(o.g); if (this.tails) scene.remove(this.tails.mesh); this.sleeves.forEach(c => scene.remove(c.mesh)); }
 
   /** queue pose keys: [name|pose, seconds, ease] ...; replaces whatever was playing */
   go(...keys) { this.from = clonePose(this.pose); this.keys = keys.map(k => ({ p: typeof k[0] === 'string' ? POSE[k[0]] : k[0], d: Math.max(.001, k[1]), e: EASE[k[2] || 'out'] })); this.kt = 0; }
@@ -152,9 +158,9 @@ export class Figure {
     return out.set(this.pos.x + hx * c + hz * s, 0, this.pos.z - hx * s + hz * c);
   }
 
-  update(dt) {
+  update(dt, replay) {
     // pose track
-    if (this.keys.length) {
+    if (!replay && this.keys.length) {
       const k = this.keys[0]; this.kt += dt;
       const t = Math.min(1, this.kt / k.d); blend(this.pose, this.from, k.p, k.e(t));
       if (t >= 1) { this.from = clonePose(k.p); this.keys.shift(); this.kt = 0; }
@@ -166,7 +172,7 @@ export class Figure {
 
     // feet: planted in the world, stepping when the body leaves them behind
     const sp = this.vel.length();
-    for (let i = 0; i < 2; i++) {
+    for (let i = 0; i < 2 && !replay; i++) {
       const f = this.feet[i], o = this.feet[1 - i];
       this.homeOf(f, _a).addScaledVector(this.vel, .13);
       if (f.t >= 0) {
@@ -215,10 +221,13 @@ export class Figure {
     twoBone(shR, grip, L_UA, L_FA, _c.set(-.6, -.8, -.35).applyQuaternion(qC), _j.mid, _j.end);
     if (!this.swordGone) grip.copy(_j.end);          // the sword never leaves the hand
     seg(M.uaR, shR, _j.mid); seg(M.faR, _j.mid, _j.end); M.hdR.position.copy(_j.end); M.stR.position.copy(shR);
+    this.elb[1].copy(_j.mid); this.wri[1].copy(_j.end);
     const lh = _j.b.copy(grip).addScaledVector(p.d, -.15);
+    if (p.free > .5) lh.set(-grip.x, grip.y, grip.z);
     if (p.limp > .5) lh.set(.34, .05, shL.z + .2);
     twoBone(shL, lh, L_UA, L_FA, _c.set(.6, -.8, -.35).applyQuaternion(qC), _j.mid, _j.end);
     seg(M.uaL, shL, _j.mid); seg(M.faL, _j.mid, _j.end); M.hdL.position.copy(_j.end); M.stL.position.copy(shL);
+    this.elb[0].copy(_j.mid); this.wri[0].copy(_j.end);
     if (!this.swordGone) { this.sword.position.copy(grip); this.sword.quaternion.setFromUnitVectors(UP, p.d); }
 
     // world-space handles for the rules and the effects
@@ -229,11 +238,12 @@ export class Figure {
     this.neckW.copy(neck).applyMatrix4(R.matrixWorld);
     this.shW[0].copy(shL).applyMatrix4(R.matrixWorld); this.shW[1].copy(shR).applyMatrix4(R.matrixWorld);
     if (this.tails) this.tails.update(dt);
+    for (let i = 0; i < 2; i++) this.sleeves[i].update(dt, this.elb[i].applyMatrix4(R.matrixWorld), this.wri[i].applyMatrix4(R.matrixWorld), !this.armOff[i]);
     this.trail.push(this.base, this.tip, this.striking, dt);
     this.glint.push(this._g0.lerpVectors(this.base, this.tip, .55), this._g1.lerpVectors(this.base, this.tip, .97), this.striking, dt);
 
     for (const o of this.pieces) {
-      if (o.rest) continue;
+      if (o.rest || replay) continue;
       o.v.y -= 9.8 * dt; o.g.position.addScaledVector(o.v, dt);
       if (o.roll) {
         if (o.g.position.y < o.h) { o.g.position.y = o.h; if (o.v.y < -1) o.v.y *= -.32; else o.v.y = 0; o.v.x *= 1 - 2.2 * dt; o.v.z *= 1 - 2.2 * dt; }
@@ -247,6 +257,31 @@ export class Figure {
         }
       }
     }
+  }
+
+  /** everything needed to draw this figure again later */
+  snapshot() {
+    return { x: this.pos.x, z: this.pos.z, yaw: this.yaw, pose: clonePose(this.pose), f0: this.feet[0].p.clone(), f1: this.feet[1].p.clone(),
+      striking: this.striking, headless: this.headless, armOff: [...this.armOff], swordGone: this.swordGone, swordVis: this.sword.visible,
+      pieces: this.pieces.map(o => ({ p: o.g.position.clone(), q: o.g.quaternion.clone() })) };
+  }
+  /** pose the figure between two snapshots (replay) */
+  restore(A, B, k) {
+    this.pos.set(lerp(A.x, B.x, k), 0, lerp(A.z, B.z, k));
+    let d = B.yaw - A.yaw; d = Math.atan2(Math.sin(d), Math.cos(d)); this.yaw = A.yaw + d * k;
+    blend(this.pose, A.pose, B.pose, k); this.keys.length = 0;
+    this.feet[0].p.lerpVectors(A.f0, B.f0, k); this.feet[1].p.lerpVectors(A.f1, B.f1, k);
+    this.striking = A.striking; this.sword.visible = A.swordVis; const M = this.m;
+    if (this.headless !== A.headless) { this.headless = A.headless; M.stump.visible = A.headless; (A.headless ? scene : this.root).add(this.headG); }
+    if (this.swordGone !== A.swordGone) { this.swordGone = A.swordGone; (A.swordGone ? scene : this.root).add(this.sword); }
+    for (let i = 0; i < 2; i++) if (this.armOff[i] !== A.armOff[i]) {
+      this.armOff[i] = A.armOff[i]; for (const n of i ? ['uaR', 'faR', 'hdR'] : ['uaL', 'faL', 'hdL']) M[n].visible = !A.armOff[i]; (i ? M.stR : M.stL).visible = A.armOff[i];
+    }
+    this.pieces.forEach((o, i) => {
+      const a = A.pieces[i], b = B.pieces[i] || a, loose = o.g !== this.headG && o.g !== this.sword;
+      if (loose) o.g.visible = !!a;
+      if (a) { o.g.position.lerpVectors(a.p, b.p, k); o.g.quaternion.slerpQuaternions(a.q, b.q, k); }
+    });
   }
 
   /** the head leaves the shoulders */
@@ -272,6 +307,27 @@ export class Figure {
     this.root.updateMatrixWorld(true); scene.attach(this.sword);
     const c = Math.cos(this.yaw), s = Math.sin(this.yaw);
     this.pieces.push({ g: this.sword, h: .03, spin: 3, yaw: this.yaw + 1.2, axis: V(c, 0, -s), v: V(-c * .8, .6, s * .8) });
+  }
+}
+
+/* a hanging sleeve: a small cloth sheet pinned along the forearm */
+class Sleeve {
+  constructor(mat) {
+    this.pts = Array.from({ length: 8 }, () => ({ p: V(), q: V() }));       // 2 columns x 4 rows, row 0 pinned
+    this.pos = new Float32Array(24); const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.BufferAttribute(this.pos, 3));
+    const idx = []; for (let r = 0; r < 3; r++) { const a = r * 2; idx.push(a, a + 1, a + 2, a + 1, a + 3, a + 2); } g.setIndex(idx);
+    this.mesh = new THREE.Mesh(g, mat); this.mesh.castShadow = true; this.mesh.frustumCulled = false; scene.add(this.mesh); this.init = false;
+  }
+  update(dt, elbow, wrist, on) {
+    this.mesh.visible = on; if (!on) return; dt = Math.min(dt, .033);
+    const P = this.pts, a = _a.lerpVectors(elbow, wrist, .12), b = _b.lerpVectors(elbow, wrist, .92); a.y -= .07; b.y -= .06;
+    if (!this.init || P[0].p.distanceToSquared(a) > .5) { for (let i = 0; i < 8; i++) { P[i].p.copy(i % 2 ? b : a); P[i].p.y -= (i >> 1) * .1; P[i].q.copy(P[i].p); } this.init = true; }
+    P[0].p.copy(a); P[1].p.copy(b); const w = a.distanceTo(b);
+    for (let i = 2; i < 8; i++) { const o = P[i]; _c.subVectors(o.p, o.q).multiplyScalar(.93); o.q.copy(o.p); o.p.add(_c); o.p.y -= 12 * dt * dt; if (o.p.y < .03) o.p.y = .03; }
+    const link = (i, j, L) => { const u = P[i].p, v = P[j].p; _c.subVectors(v, u); const l = _c.length() || 1e-4, e = (l - L) / l; if (i < 2) v.addScaledVector(_c, -e); else { u.addScaledVector(_c, e * .5); v.addScaledVector(_c, -e * .5); } };
+    for (let k = 0; k < 3; k++) for (let r = 0; r < 3; r++) { link(r * 2, r * 2 + 2, .1); link(r * 2 + 1, r * 2 + 3, .1); link(r * 2 + 2, r * 2 + 3, w); }
+    for (let i = 0; i < 8; i++) { this.pos[i * 3] = P[i].p.x; this.pos[i * 3 + 1] = P[i].p.y; this.pos[i * 3 + 2] = P[i].p.z; }
+    const g = this.mesh.geometry; g.attributes.position.needsUpdate = true; g.computeVertexNormals();
   }
 }
 

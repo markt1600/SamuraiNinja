@@ -290,7 +290,11 @@ function emit(kind, p, v, r, life) {
   pMesh.instanceColor.needsUpdate = true;
 }
 /** a fan of blood thrown along dir */
+/** replay hook: every effect call is offered to the tap so it can be fired again */
+export const fxTap = { on: null };
+const tap = (name, args) => { if (fxTap.on) fxTap.on(name, args.map(a => a && a.isVector3 ? a.clone() : a)); };
 export function bleed(p, dir, n, speed, spread = .45) {
+  tap('bleed', [p, dir, n, speed, spread]);
   for (let i = 0; i < n; i++) {
     _v.set(dir.x + (Math.random() - .5) * spread * 2, dir.y + (Math.random() - .3) * spread * 2, dir.z + (Math.random() - .5) * spread * 2)
       .normalize().multiplyScalar(speed * (.35 + Math.random() * .9));
@@ -298,6 +302,7 @@ export function bleed(p, dir, n, speed, spread = .45) {
   }
 }
 export function sparks(p, n = 16) {
+  tap('sparks', [p, n]);
   for (let i = 0; i < n; i++) {
     _v.set(Math.random() - .5, Math.random() - .2, Math.random() - .5).normalize().multiplyScalar(2 + Math.random() * 5);
     emit(1, p, _v, .012 + Math.random() * .012, .18 + Math.random() * .25);
@@ -305,12 +310,14 @@ export function sparks(p, n = 16) {
 }
 /** flung ink: the impact, drawn */
 export function inkSplash(p, dir, n = 14) {
+  tap('inkSplash', [p, dir, n]);
   for (let i = 0; i < n; i++) {
     _v.set(dir.x + (Math.random() - .5) * 1.6, dir.y + Math.random() * .9, dir.z + (Math.random() - .5) * 1.6).normalize().multiplyScalar(2.5 + Math.random() * 5);
     emit(3, p, _v, .014 + Math.random() * .02, .25 + Math.random() * .3);
   }
 }
 export function puff(p, n = 8) {
+  tap('puff', [p, n]);
   for (let i = 0; i < n; i++) {
     _v.set(Math.random() - .5, Math.random() * .9, Math.random() - .5).multiplyScalar(1.6);
     _v2.set(p.x, .04, p.z); emit(2, _v2, _v, .03 + Math.random() * .04, .4 + Math.random() * .3);
@@ -413,6 +420,7 @@ function buildBursts() {
 }
 /** kind: streak | ring | star; dir (world) aims a streak */
 export function burst(kind, p, color, size, life = .2, dir, grow = 1.8) {
+  tap('burst', [kind, p, color, size, life, dir, grow]);
   const o = bursts.find(b => b.life <= 0) || bursts[0];
   o.m.material.map = TEX[kind]; o.m.material.color.set(color); o.m.material.needsUpdate = true;
   o.m.position.copy(p); o.life = o.max = life; o.size = size; o.grow = grow; o.kind = kind; o.ang = Math.random() * 6.3;

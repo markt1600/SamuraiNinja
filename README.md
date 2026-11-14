@@ -16,7 +16,8 @@ Static site: open `index.html` through any web server (`python3 -m http.server`)
 - A **broken guard** (full posture bar) leaves a fighter open: the next cut kills.
 - Wounds carry into the next duel; one closes between duels.
 - Two cuts landing together lock the blades in a **bind**: keep driving forward to win it and shove, kick, pommel-strike or throw.
-- A kneeling opponent can be finished cleanly (attack), with a **fatality** (F — both arms, then the head), or spared (M).
+- A kneeling opponent can be finished cleanly (attack), with a **fatality** (F — both arms, then the head), with **bare hands** (G), or spared (M).
+- Every kill is followed by a slow-motion **replay** from a second camera; click to skip.
 - The fifth duel is **two against one**; Q / Tab (or the Target button) switches who you face.
 
 | | Desktop | Touch |
@@ -37,6 +38,7 @@ Static site: open `index.html` through any web server (`python3 -m http.server`)
 | `src/duel.js` | combat rules (`Fighter`, `Duel`) and the opponent AI |
 | `src/figure.js` | the posed figure: pose library, IK, stepping, beheading |
 | `src/gfx.js` | renderer, ink-outline post pass, arena, blood / sparks / snow / trails |
+| `src/replay.js` | snapshot tape and effect log for the kill replay |
 | `src/input.js` | keyboard, mouse and touch → one intent per frame |
 | `src/audio.js` | synthesised sound and music |
 

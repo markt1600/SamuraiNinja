@@ -4,12 +4,13 @@ import * as G from 'zan/gfx';
 import { Fighter, Duel, AI, MIRROR, MAX_WOUNDS, T } from 'zan/duel';
 import * as Input from 'zan/input';
 import { sfx } from 'zan/audio';
+import * as Replay from 'zan/replay';
 
 const $ = id => document.getElementById(id);
 const ROMAN = ['I', 'II', 'III', 'IV', 'V'];
 const LADDER = [
   { name: 'Genta', title: 'the Ox', blurb: 'Strong, slow to think. He cuts from where his blade already sits.',
-    look: { gi: 0x9a7436, hakama: 0x3b3230 },
+    look: { gi: 0x9a7436, hakama: 0x3b3230 }, bare: true,
     ai: { react: .36, block: .34, parry: .02, dodge: 0, aggr: .42, mix: .15, feint: 0, thrust: .08, track: .15, punish: .3 } },
   { name: 'Oharu', title: 'the Reed', blurb: 'She waits for you to miss. Do not swing at air.',
     look: { gi: 0x5d7050, hakama: 0x2b302a, hat: 'kasa' },
@@ -50,7 +51,7 @@ function startDuel() {
   const ais = newEnemy(game.stage);
   player.reset(0, 2.3, Math.PI); foes.forEach((f, k) => f.reset(foes.length > 1 ? (k ? 1.7 : -1.7) : 0, -2.3, 0));
   duel = new Duel(player, foes, ais, onEvent);
-  game.state = 'intro'; game.t = 0; game.finish = game.mercy = false; G.look.kill = 0; G.look.dim = 0; G.clearGround();
+  game.state = 'intro'; game.t = 0; game.finish = game.mercy = false; Replay.reset(); show('replay', false); G.look.kill = 0; G.look.dim = 0; G.clearGround();
   const d = LADDER[game.stage];
   $('card-n').textContent = 'Duel ' + ROMAN[game.stage] + ' of ' + ROMAN[LADDER.length - 1];
   $('card-name').textContent = d.name + ', ' + d.title + (d.second ? ' — and ' + d.second.name : ''); $('card-blurb').textContent = d.blurb;
@@ -75,6 +76,7 @@ function onEvent(type, who, extra) {
     if (!who.mercy) { const sl = $('slash'); sl.classList.remove('go'); void sl.offsetWidth; sl.classList.add('go'); }
   }
 }
+function slash() { const sl = $('slash'); sl.classList.remove('go'); void sl.offsetWidth; sl.classList.add('go'); }
 function verdict() {
   game.state = 'verdict'; const last = game.stage === LADDER.length - 1, mercy = duel.over.mercy;
   $('v-title').textContent = game.won ? (last ? 'The shrine is yours' : mercy ? 'Mercy' : 'Victory') : 'Death';
@@ -132,7 +134,12 @@ function cam(dt) {
   } else {
     _f.subVectors(enemy.pos, player.pos).setY(0); const dist = _f.length() || 1; _f.multiplyScalar(1 / dist);
     _r.set(-_f.z, 0, _f.x);                                   // the player's right hand side
-    if (game.state === 'end' || game.state === 'verdict') {
+    if (game.state === 'replay') {
+      // a slow walk around the dying, low and close
+      const R = Replay.state(), k = (R.t - R.t0) / ((R.t1 - R.t0) || 1), v = duel.over.loser.pos, a = Math.atan2(_r.x, _r.z) + Math.PI - .5 - k * 1.5;
+      _m.copy(v).lerp(duel.over.victor.pos, .4);
+      _p.set(_m.x + Math.sin(a) * (4.6 - k * 1.2), .75 + k * .5, _m.z + Math.cos(a) * (4.6 - k * 1.2)); _l.copy(_m); _l.y = 1; fov = 33;
+    } else if (game.state === 'end' || game.state === 'verdict') {
       // step out to the side: the whole cut, drawn in profile
       const v = duel.over.loser.pos; _m.addVectors(player.pos, enemy.pos).multiplyScalar(.5);
       const k = Math.min(1, game.endT / 5);
@@ -143,7 +150,7 @@ function cam(dt) {
       _l.copy(player.pos).addScaledVector(_f, dist * .72).addScaledVector(_r, .1); _l.y = 1.05;
     }
   }
-  const k = camSnap ? 1 : 1 - Math.exp(-dt * (game.state === 'end' ? 2.4 : 5)); camSnap = false;
+  const k = camSnap ? 1 : 1 - Math.exp(-dt * (game.state === 'end' ? 2.4 : game.state === 'replay' ? 3 : 5)); camSnap = false;
   camPos.lerp(_p, k); camLook.lerp(_l, k);
   camera.position.copy(camPos); camera.lookAt(camLook);
   if (Math.abs(camera.fov - fov) > .05) { camera.fov += (fov - camera.fov) * Math.min(1, dt * 3); camera.updateProjectionMatrix(); }
@@ -166,16 +173,27 @@ function update(dt, forced) {
   } else if (game.state === 'fight') {
     const vic = duel.awaiting;
     if (inp.swap) duel.swap = true;
-    if (vic && inp.finish) game.finish = 'fatal'; else if (vic && intent.attack && !game.finish) game.finish = 'clean';
+    if (vic && inp.finish) game.finish = 'fatal'; else if (vic && inp.bare) game.finish = 'bare'; else if (vic && intent.attack && !game.finish) game.finish = 'clean';
     else if (vic && inp.mercy && !game.finish) game.mercy = true;
     show('prompt', vic && !game.finish && !game.mercy);
-    if (vic && game.finish && player.state !== 'execute') duel.execute(player, duel.kneeling[0], game.finish === 'fatal');
+    if (vic && game.finish && player.state !== 'execute') duel.execute(player, duel.kneeling[0], game.finish);
     else if (vic && game.mercy && player.state === 'idle') duel.spare(player);
-    duel.step(dt, vic ? IDLE : intent); enemy = duel.b;
+    duel.step(dt, vic ? IDLE : intent); enemy = duel.b; Replay.record(duel.time, duel.all.map(f => f.fig));
+  } else if (game.state === 'replay') {
+    const figs = duel.all.map(f => f.fig), R = Replay.state(), before = R.t < R.killT;
+    const done = Replay.tick(dt, figs) || (game.t > .5 && (inp.intent.attack || inp.confirm));
+    if (before && R.t >= R.killT) { slash(); sfx.kill(); }
+    G.look.kill = R.t >= R.killT ? Math.max(0, 1 - (R.t - R.killT) / .45) : 0;
+    if (done) { Replay.finish(figs); show('replay', false); G.look.kill = 0; verdict(); }
   } else {
     duel.step(dt, IDLE); game.endT += dt;
-    G.look.kill = duel.over.mercy ? 0 : Math.max(0, Math.min(1, game.endT / .12) * (1 - Math.max(0, game.endT - 1.5) / .9));
-    if (game.state === 'end' && game.endT > (duel.over.mercy ? 2.4 : 5.2)) verdict();
+    if (game.state === 'end') Replay.record(duel.time, duel.all.map(f => f.fig));
+    G.look.kill = duel.over.mercy || game.state !== 'end' ? 0 : Math.max(0, Math.min(1, game.endT / .12) * (1 - Math.max(0, game.endT - 1.5) / .9));
+    if (game.state === 'end' && game.endT > (duel.over.mercy ? 2.4 : 3.4)) {
+      const k = duel.over.t;
+      if (!duel.over.mercy && Replay.start((duel.fatalT != null ? Math.min(duel.fatalT - 1, k - 2.5) : k - 3.2), k)) { game.state = 'replay'; game.t = 0; camSnap = true; show('replay', true); }
+      else verdict();
+    }
     if (game.state === 'verdict') G.look.dim = Math.min(.5, G.look.dim + dt);
   }
   const tension = Math.max(player.posture, enemy.posture) / 100;

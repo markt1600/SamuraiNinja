@@ -70,6 +70,10 @@ button.ghost:hover{background:var(--ink);color:var(--paper)}
 body::before,body::after{content:"";position:fixed;left:0;right:0;height:0;background:var(--ink);z-index:2;transition:height .5s;pointer-events:none}
 body::before{top:0}body::after{bottom:0}.ended::before,.ended::after{height:9vh}
 
+#replay{z-index:5}#replay span{position:absolute;left:max(22px,env(safe-area-inset-left));top:calc(9vh + 14px);letter-spacing:.4em;text-transform:uppercase;color:var(--red);font-size:1.1rem;animation:bl 1.1s steps(2) infinite}
+#replay em{position:absolute;right:max(22px,env(safe-area-inset-right));top:calc(9vh + 16px);font-style:normal;font-size:.7rem;letter-spacing:.2em;text-transform:uppercase;color:var(--soft)}
+@keyframes bl{50%{opacity:.25}}
+
 /* cards and menus */
 #card{display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;
   background:linear-gradient(rgba(233,226,210,0),rgba(233,226,210,.72) 35%,rgba(233,226,210,.72) 65%,rgba(233,226,210,0))}
@@ -126,8 +130,8 @@ html:not(.touch) .touch-only{display:none!important}
 <div id="slash"><i></i><b>斬</b></div>
 <div id="msg"></div>
 <div id="prompt" class="layer">
-  <span class="desk-only"><kbd>F</kbd> fatality &nbsp;·&nbsp; <kbd>click</kbd> clean finish &nbsp;·&nbsp; <kbd>M</kbd> mercy</span>
-  <button class="touch-only" id="btn-finish">Fatality</button><button class="touch-only ghost" id="btn-mercy">Mercy</button>
+  <span class="desk-only"><kbd>F</kbd> fatality &nbsp;·&nbsp; <kbd>G</kbd> bare hands &nbsp;·&nbsp; <kbd>click</kbd> clean finish &nbsp;·&nbsp; <kbd>M</kbd> mercy</span>
+  <button class="touch-only" id="btn-finish">Fatality</button><button class="touch-only" id="btn-bare">Bare hands</button><button class="touch-only ghost" id="btn-mercy">Mercy</button>
 </div>
 
 <div id="touch">
@@ -136,6 +140,7 @@ html:not(.touch) .touch-only{display:none!important}
   <button class="tb" id="btn-swap">Target</button><button class="tb" id="btn-guard">Guard</button><button class="tb" id="btn-dodge">Dodge</button>
 </div>
 
+<div id="replay" class="layer"><span>Replay</span><em class="desk-only">click to skip</em><em class="touch-only">tap to skip</em></div>
 <div id="card" class="layer"><div id="card-n"></div><div id="card-name"></div><div id="card-blurb"></div></div>
 
 <div id="menu" class="layer">
@@ -156,7 +161,7 @@ html:not(.touch) .touch-only{display:none!important}
   </div>
   <p class="rules">Match your guard to the side the cut comes from. A parry opens your opponent; a clean cut wounds; three wounds and they kneel. Break a guard, then cut — and it is over.</p>
   <button id="m-go">Draw</button>
-  <span class="build">Build V67</span><a class="legacy" href="classic.html">classic version</a>
+  <span class="build">Build V68</span><a class="legacy" href="classic.html">classic version</a>
 </div>
 
 <div id="verdict" class="layer">
@@ -167,11 +172,11 @@ html:not(.touch) .touch-only{display:none!important}
 
 <script type="importmap">
 { "imports": {
-  "three": "./vendor/three.module.js?v=v67",
-  "zan/gfx": "./src/gfx.js?v=v67", "zan/figure": "./src/figure.js?v=v67", "zan/duel": "./src/duel.js?v=v67",
-  "zan/input": "./src/input.js?v=v67", "zan/audio": "./src/audio.js?v=v67" } }
+  "three": "./vendor/three.module.js?v=v68",
+  "zan/gfx": "./src/gfx.js?v=v68", "zan/figure": "./src/figure.js?v=v68", "zan/duel": "./src/duel.js?v=v68",
+  "zan/input": "./src/input.js?v=v68", "zan/replay": "./src/replay.js?v=v68", "zan/audio": "./src/audio.js?v=v68" } }
 </script>
 <script>if (matchMedia('(pointer:coarse)').matches || 'ontouchstart' in window) document.documentElement.classList.add('touch');</script>
-<script type="module" src="./src/main.js?v=v67"></script>
+<script type="module" src="./src/main.js?v=v68"></script>
 </body>
 </html>
