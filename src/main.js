@@ -10,24 +10,24 @@ const $ = id => document.getElementById(id);
 const ROMAN = ['I', 'II', 'III', 'IV', 'V'];
 const LADDER = [
   { name: 'Genta', title: 'the Ox', blurb: 'Strong, slow to think. He cuts from where his blade already sits.',
-    look: { gi: 0x9a7436, hakama: 0x3b3230 }, bare: true,
+    look: { gi: 0x9a7436, hakama: 0x3b3230, pattern: 'check', crest: 0x2a1a0c }, bare: true,
     ai: { react: .36, block: .34, parry: .02, dodge: 0, aggr: .42, mix: .15, feint: 0, thrust: .08, track: .15, punish: .3 } },
   { name: 'Oharu', title: 'the Reed', blurb: 'She waits for you to miss. Do not swing at air.',
-    look: { gi: 0x5d7050, hakama: 0x2b302a, hat: 'kasa' },
+    look: { gi: 0x5d7050, hakama: 0x2b302a, hat: 'kasa', pattern: 'wave', crest: 0xe9e4d6 },
     ai: { react: .3, block: .56, parry: .14, dodge: .1, aggr: .26, mix: .4, feint: .04, thrust: .14, track: .45, punish: .85 } },
   { name: 'Jubei', title: 'the Crow', blurb: 'Half of what he shows you is a lie. Parry the cut, not the shoulder.',
-    look: { gi: 0x3c4b6b, hakama: 0x20222b },
+    look: { gi: 0x3c4b6b, hakama: 0x20222b, pattern: 'stripe', crest: 0xe9e4d6, obi: 0x8e1c1c },
     ai: { react: .27, block: .55, parry: .12, dodge: .1, aggr: .6, mix: .6, feint: .4, thrust: .18, track: .5, punish: .6 } },
   { name: 'Kaede', title: 'the Needle', blurb: 'She fights from a long measure and her point comes straight.',
-    look: { gi: 0x6f3b58, hakama: 0x2a1f28, hat: 'kasa' },
+    look: { gi: 0x6f3b58, hakama: 0x2a1f28, hat: 'kasa', pattern: 'dots', crest: 0xe9c46a, obi: 0xe9c46a },
     ai: { react: .23, block: .6, parry: .2, dodge: .2, aggr: .62, mix: .7, feint: .18, thrust: .48, track: .6, punish: .8, range: 2.5 } },
   { name: 'Shiro', title: 'the White Death', blurb: 'The master of this shrine does not fight alone. Kuro, his shadow, circles behind you.',
-    second: { name: 'Kuro', title: 'the Shadow', look: { gi: 0x1d1d22, hakama: 0x0f0f12, hat: 'kasa', saya: 0x111114 },
+    second: { name: 'Kuro', title: 'the Shadow', look: { gi: 0x1d1d22, hakama: 0x0f0f12, hat: 'kasa', saya: 0x111114, coat: 0x17171b, obi: 0x5a1010 },
       ai: { react: .33, block: .4, parry: .04, dodge: .05, aggr: .38, mix: .35, feint: .05, thrust: .12, track: .3, punish: .35 } },
-    look: { gi: 0xeae5db, hakama: 0xcdc6b8, hair: 0xd9d9d6, saya: 0x8e1c1c, grip: 0x8e1c1c },
+    look: { gi: 0xeae5db, hakama: 0xcdc6b8, hair: 0xd9d9d6, saya: 0x8e1c1c, grip: 0x8e1c1c, pattern: 'bloom', obi: 0x8e1c1c, coat: 0xf3efe6, crest: 0xb3261e },
     ai: { react: .22, block: .58, parry: .2, dodge: .12, aggr: .6, mix: .75, feint: .25, thrust: .22, track: .65, punish: .8 } },
 ];
-const PLAYER = { name: 'You', look: { gi: 0x24262f, hakama: 0x14151a, band: G.BLOOD, tails: G.BLOOD } };
+const PLAYER = { name: 'You', look: { gi: 0x24262f, hakama: 0x14151a, band: G.BLOOD, tails: G.BLOOD, crest: 0xe9e4d6, obi: 0x8e1c1c } };
 
 const game = { state: 'menu', stage: 0, t: 0, time: 0, endT: 0, won: false, hintT: 0 };
 let player, enemy, duel, ai, foes = [];
@@ -53,7 +53,7 @@ function startDuel() {
   duel = new Duel(player, foes, ais, onEvent);
   game.state = 'intro'; game.t = 0; game.finish = game.mercy = false; Replay.reset(); show('replay', false); G.look.kill = 0; G.look.dim = 0; G.clearGround();
   const d = LADDER[game.stage];
-  $('card-n').textContent = 'Duel ' + ROMAN[game.stage] + ' of ' + ROMAN[LADDER.length - 1];
+  $('card-n').textContent = 'Duel ' + ROMAN[game.stage] + ' of ' + ROMAN[LADDER.length - 1]; $('card-seal').textContent = ['一', '二', '三', '四', '五'][game.stage];
   $('card-name').textContent = d.name + ', ' + d.title + (d.second ? ' — and ' + d.second.name : ''); $('card-blurb').textContent = d.blurb;
   show('card', true); show('menu', false); show('verdict', false); show('hud', true); show('prompt', false);
   document.body.classList.remove('ended'); document.body.classList.toggle('two', foes.length > 1);
@@ -126,7 +126,7 @@ function hud() {
 }
 
 /* ---------- camera ---------- */
-let camSnap = true, menuA = 0;
+let camSnap = true, menuA = 0, camFov = 40;
 function cam(dt) {
   let fov = 40;
   if (game.state === 'menu') {
@@ -153,7 +153,7 @@ function cam(dt) {
   const k = camSnap ? 1 : 1 - Math.exp(-dt * (game.state === 'end' ? 2.4 : game.state === 'replay' ? 3 : 5)); camSnap = false;
   camPos.lerp(_p, k); camLook.lerp(_l, k);
   camera.position.copy(camPos); camera.lookAt(camLook);
-  if (Math.abs(camera.fov - fov) > .05) { camera.fov += (fov - camera.fov) * Math.min(1, dt * 3); camera.updateProjectionMatrix(); }
+  camFov += (fov - camFov) * Math.min(1, dt * 3); camera.fov = camFov - G.look.punch * 4.5; camera.updateProjectionMatrix();
 }
 
 /* ---------- frame ---------- */

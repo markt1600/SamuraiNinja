@@ -45,7 +45,7 @@ export class Fighter {
     this.posture = Math.min(100, this.posture + n); this.lastPosture = duel.time;
     if (this.posture >= 100 && this.state !== 'broken' && this.alive && this.state !== 'kneel') {
       this.set('broken', T.broken); this.atk = null; this.fig.go(['reel', .16], ['broken', .4, 'io']);
-      sfx.breakPosture(); duel.emit('broken', this); return true;
+      sfx.breakPosture(); G.burst('ring', this.fig.chest, G.BLOOD, 1, .42, null, 3.6); G.look.impact = .7; G.look.punch = .5; duel.emit('broken', this); return true;
     }
     return false;
   }
@@ -98,6 +98,7 @@ export class Fighter {
         const reach = this.atk.thrust ? T.thrustReach : T.reach;
         if (this.t > this.dur * .25 && dist > reach - .45) this.fwd(this.vel).multiplyScalar(this.atk.thrust ? 3.6 : 2.8);
         fig.striking = this.t > this.dur * .58;
+        if (!this.atk.glint && this.dur - this.t < T.parry) { this.atk.glint = true; G.burst('star', fig.tip, 0xffffff, .5, .14); }
         if (gEdge && this.t < this.dur * .6 && !this.atk.rip) {           // feint
           this.atk = null; this.set('recover', T.feint); this.poseName = ''; fig.go([this.stance, T.feint, 'out']); duel.emit('feint', this);
         } else if (this.t >= this.dur) { duel.resolve(this, foe); if (this.state === 'windup') { this.set('strike', T.follow); fig.striking = true; } }
@@ -154,10 +155,14 @@ export class Fighter {
     if (this.alive && this.wounds > 0 && (this.dripT -= dt) < 0) {
       this.dripT = rnd(.25, .7) / this.wounds; G.bleed(fig.chest, _v.set(0, -1, 0), 1, .6, .3);
     }
-    fig.yaw = this.yaw; fig.vel.copy(this.vel);
+    fig.yaw = this.yaw; fig.vel.copy(this.vel); fig.setWounds(Math.min(3, this.wounds));
   }
   endExec(duel) { this.fig.sword.visible = true; if (duel.over) this.flourish(); else { this.atk = null; this.set('idle'); this.poseName = ''; } }
-  flourish() { this.atk = null; this.set('done'); this.fig.go(['flick', .22, 'out'], ['flick', .5], ['rest', .9, 'io']); sfx.flick(); }
+  flourish() {
+    this.atk = null; this.set('done'); this.fig.go(['flick', .22, 'out'], ['flick', .5], ['rest', .9, 'io']); sfx.flick();
+    // chiburi: the blood is thrown off the blade in one line across the snow
+    setTimeout(() => { const f = this.fig; if (f.bloody) { G.bleed(f.tip, this.left(new THREE.Vector3()).multiplyScalar(-1).setY(-.15), 26, 5, .18); f.setBloody(false); } }, 230);
+  }
 }
 
 export class Duel {
@@ -289,7 +294,7 @@ export class Duel {
       const pn = 'p' + cap(def.stance);
       def.fig.go([pn, .05, 'out'], [pn, .12], ['b' + cap(def.stance), .15, 'io']); def.poseName = 'b' + cap(def.stance);
       def.riposteUntil = this.time + .7;
-      G.sparks(mid, 34); sfx.parry(); G.look.shake = .45; G.look.flash = .22; this.hitStop = .1;
+      G.sparks(mid, 34); sfx.parry(); G.look.shake = .45; G.look.flash = .22; this.hitStop = .1; G.look.impact = .5; G.look.punch = .45;
       G.burst('star', mid, 0xffffff, 1.2, .18); G.burst('ring', mid, 0x15120f, 1, .34, null, 3.6); G.burst('streak', mid, 0xffe9a8, 2.4, .16, away);
       att.atk = null; att.push.addScaledVector(away, -2.4);
       if (!att.addPosture(40, this)) { att.set('stagger', T.stagger); att.poseName = ''; att.fig.go(['reel', .14, 'out'], ['reel', .4], [att.stance, .36, 'io']); }
@@ -306,7 +311,7 @@ export class Duel {
     }
     if (def.state === 'broken') { this.kill(att, def, atk.thrust ? 'thrust' : atk.dir); return; }
     // a clean cut
-    def.wounds++; def.atk = null;
+    def.wounds++; def.atk = null; att.fig.setBloody(true); G.look.impact = .75; G.look.punch = .7;
     const sweep = this.sweep(att, atk, new THREE.Vector3());
     G.bleed(def.fig.chest, sweep, 46, 5.5, .5); G.look.shake = .7; this.hitStop = .13; this.slow = .25;
     G.burst('streak', def.fig.chest, 0xffffff, 3.2, .2, sweep, 1.5); G.burst('streak', def.fig.chest, G.BLOOD, 4.2, .34, sweep, 1.4); G.inkSplash(def.fig.chest, sweep, 12); G.look.flash = .18;
@@ -337,7 +342,7 @@ export class Duel {
     }
     const back = how === 'high' ? -.5 : .5;
     setTimeout(() => G.pool(def.pos.x + Math.sin(def.yaw) * back, def.pos.z + Math.cos(def.yaw) * back, .5), 1700);
-    sfx.kill(); if (!exec) att.recoverDur = .7;
+    sfx.kill(); if (!exec) att.recoverDur = .7; if (!att.bare) att.fig.setBloody(true); G.look.impact = 1.3; G.look.punch = 1;
     const last = def === this.a || !this.foes.some(f => f.alive && !f.spared);
     G.look.shake = 1; G.look.flash = .5; this.hitStop = .16; this.slow = last ? 1.5 : .5;
     const at = how === 'left' || how === 'right' ? fig.neckW : fig.chest;
