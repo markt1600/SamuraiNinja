@@ -10,24 +10,24 @@ const $ = id => document.getElementById(id);
 const ROMAN = ['I', 'II', 'III', 'IV', 'V'];
 const LADDER = [
   { name: 'Genta', title: 'the Ox', blurb: 'Strong, slow to think. He cuts from where his blade already sits.',
-    look: { gi: 0x9a7436, hakama: 0x3b3230, pattern: 'check', crest: 0x2a1a0c }, bare: true,
+    look: { gi: 0x9a7436, hakama: 0x3b3230, pattern: 'check', crest: 0x2a1a0c, beard: 0x1c1512, armor: 0x2e2622, rope: 0xc9ae74, kote: 0x2e2622 }, bare: true,
     ai: { react: .36, block: .34, parry: .02, dodge: 0, aggr: .42, mix: .15, feint: 0, thrust: .08, track: .15, punish: .3 } },
   { name: 'Oharu', title: 'the Reed', blurb: 'She waits for you to miss. Do not swing at air.',
-    look: { gi: 0x5d7050, hakama: 0x2b302a, hat: 'kasa', pattern: 'wave', crest: 0xe9e4d6 },
+    look: { gi: 0x5d7050, hakama: 0x2b302a, hat: 'kasa', pattern: 'wave', crest: 0xe9e4d6, beads: 0x3a2416, scarf: 0xe6dfcf, pony: 0x18120f, hem: 0x5d7050 },
     ai: { react: .3, block: .56, parry: .14, dodge: .1, aggr: .26, mix: .4, feint: .04, thrust: .14, track: .45, punish: .85 } },
   { name: 'Jubei', title: 'the Crow', blurb: 'Half of what he shows you is a lie. Parry the cut, not the shoulder.',
-    look: { gi: 0x3c4b6b, hakama: 0x20222b, pattern: 'stripe', crest: 0xe9e4d6, obi: 0x8e1c1c },
+    look: { gi: 0x3c4b6b, hakama: 0x20222b, pattern: 'stripe', crest: 0xe9e4d6, obi: 0x8e1c1c, patch: true, scar: true, wings: 0x26304a, waki: 0x1a1a1e },
     ai: { react: .27, block: .55, parry: .12, dodge: .1, aggr: .6, mix: .6, feint: .4, thrust: .18, track: .5, punish: .6 } },
   { name: 'Kaede', title: 'the Needle', blurb: 'She fights from a long measure and her point comes straight.',
-    look: { gi: 0x6f3b58, hakama: 0x2a1f28, hat: 'kasa', pattern: 'dots', crest: 0xe9c46a, obi: 0xe9c46a },
+    look: { gi: 0x6f3b58, hakama: 0x2a1f28, hat: 'kasa', pattern: 'dots', crest: 0xe9c46a, obi: 0xe9c46a, mask: 0x8e1c1c, scarf: 0xe9c46a, kote: 0x4a2238, pony: 0x18120f, hem: 0xe9c46a },
     ai: { react: .23, block: .6, parry: .2, dodge: .2, aggr: .62, mix: .7, feint: .18, thrust: .48, track: .6, punish: .8, range: 2.5 } },
   { name: 'Shiro', title: 'the White Death', blurb: 'The master of this shrine does not fight alone. Kuro, his shadow, circles behind you.',
-    second: { name: 'Kuro', title: 'the Shadow', look: { gi: 0x1d1d22, hakama: 0x0f0f12, hat: 'kasa', saya: 0x111114, coat: 0x17171b, obi: 0x5a1010 },
+    second: { name: 'Kuro', title: 'the Shadow', look: { gi: 0x1d1d22, hakama: 0x0f0f12, hat: 'kasa', saya: 0x111114, coat: 0x17171b, obi: 0x5a1010, mask: 0x111114, scarf: 0x5a1010, kote: 0x15151a, cord: 0x5a1010 },
       ai: { react: .33, block: .4, parry: .04, dodge: .05, aggr: .38, mix: .35, feint: .05, thrust: .12, track: .3, punish: .35 } },
-    look: { gi: 0xeae5db, hakama: 0xcdc6b8, hair: 0xd9d9d6, saya: 0x8e1c1c, grip: 0x8e1c1c, pattern: 'bloom', obi: 0x8e1c1c, coat: 0xf3efe6, crest: 0xb3261e },
+    look: { gi: 0xeae5db, hakama: 0xcdc6b8, hair: 0xd9d9d6, saya: 0x8e1c1c, grip: 0x8e1c1c, pattern: 'bloom', obi: 0x8e1c1c, coat: 0xf3efe6, crest: 0xb3261e, beard: 0xe6e6e2, beardLong: true, wings: 0xf3efe6, waki: 0x8e1c1c, hem: 0x8e1c1c },
     ai: { react: .22, block: .58, parry: .2, dodge: .12, aggr: .6, mix: .75, feint: .25, thrust: .22, track: .65, punish: .8 } },
 ];
-const PLAYER = { name: 'You', look: { gi: 0x24262f, hakama: 0x14151a, band: G.BLOOD, tails: G.BLOOD, crest: 0xe9e4d6, obi: 0x8e1c1c } };
+const PLAYER = { name: 'You', look: { gi: 0x24262f, hakama: 0x14151a, band: G.BLOOD, tails: G.BLOOD, crest: 0xe9e4d6, obi: 0x8e1c1c, kote: 0x5a1414, waki: 0x1a1a1e, hem: 0x8e1c1c } };
 
 const game = { state: 'menu', stage: 0, t: 0, time: 0, endT: 0, won: false, hintT: 0 };
 let player, enemy, duel, ai, foes = [];
@@ -232,7 +232,7 @@ let last = performance.now();
 function frame(ts) {
   const dt = Math.min(.05, Math.max(0, (ts - last) / 1000)); last = ts;
   if (!game.paused) { update(dt); G.tick(dt, game.time); }
-  cam(dt); if (player) hud(); G.render(dt);
+  cam(dt); if (game.portrait) game.portrait(); if (player) hud(); G.render(dt);
   requestAnimationFrame(frame);
 }
 // a quiet pair on the menu so the court is not empty

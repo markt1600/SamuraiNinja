@@ -45,7 +45,7 @@ export const flat = (color, opt) => new THREE.MeshBasicMaterial(Object.assign({ 
 const POST_FS = `
 precision highp float;
 uniform sampler2D tColor, tDepth, tNormal, tBloom;
-uniform vec2 uSun; uniform float uRays;
+uniform vec2 uSun, uTan; uniform float uRays; uniform mat3 uCam; uniform vec3 uSunDir, uMoon;
 uniform vec2 uRes; uniform float uNear, uFar, uKill, uFlash, uDim, uTime, uImpact, uInvert;
 varying vec2 vUv;
 float hash(vec2 p){ p=fract(p*vec2(123.34,456.21)); p+=dot(p,p+45.32); return fract(p.x*p.y); }
@@ -80,11 +80,31 @@ void main(){
   for(int i=1;i<=12;i++) ray+=texture2D(tBloom,vUv+sd*float(i)/12.*.9).rgb*(1.-float(i)/14.);
   col+=ray*uRays*.028;
   col=pow(max(col,0.),vec3(1./2.2));
-  // sky: a graded wash with slow cloud bands, only where nothing was drawn
+  // sky: a painted dome fixed to the world — graded dusk, two decks of drawn cloud lit from beneath, a thin moon
   float raw=texture2D(tDepth,vUv).x;
   if(raw>=.99999){
-    float cl=vn(vec2(vUv.x*3.+uTime*.012,vUv.y*9.))*.6+vn(vec2(vUv.x*7.-uTime*.02,vUv.y*22.))*.4;
-    col*=mix(vec3(1.05,1.03,1.),vec3(.8,.82,.88),smoothstep(.35,1.,vUv.y)*.8+cl*.28*smoothstep(.3,.8,vUv.y));
+    vec3 rd=normalize(uCam*vec3((vUv*2.-1.)*uTan,-1.));
+    float el=rd.y, az=atan(rd.x,-rd.z), sdn=max(dot(rd,uSunDir),0.);
+    vec3 hor=mix(vec3(.97,.91,.83),vec3(1.,.78,.62),pow(sdn,3.));
+    vec3 S=mix(hor,vec3(.9,.89,.86),smoothstep(0.,.2,el)); S=mix(S,vec3(.5,.55,.67),smoothstep(.14,.8,el));
+    S+=vec3(.55,.22,.08)*pow(sdn,9.)*.55;
+    // far curtains of falling snow
+    S-=smoothstep(.72,1.,vn(vec2(az*38.+el*16.,el*3.)))*smoothstep(.45,.05,el)*.05;
+    for(int L=0;L<2;L++){
+      float fl=float(L);
+      // a flat deck of cloud overhead, seen in perspective: long streaks that gather toward the horizon
+      vec2 cu=rd.xz/(el+.2)*(1.7+fl*1.3); cu.x=cu.x*.45+uTime*(.012+fl*.008)+fl*5.; cu.y+=fl*3.;
+      float dn=vn(cu)*.5+vn(cu*2.3+4.)*.27+vn(cu*5.3+1.)*.15+vn(cu*11.7+2.)*.08;
+      float band=smoothstep(.03,.16,el);
+      float d=dn-(1.-band)*.55-fl*.03;
+      float body=smoothstep(.5,.506,d), lit=smoothstep(.565,.575,d), edge=body-smoothstep(.512,.522,d);
+      vec3 cc=mix(vec3(.7,.73,.8),vec3(.99,.98,.95),lit);
+      cc=mix(cc,vec3(1.,.7,.56),pow(sdn,2.)*.65*(1.-lit*.55));
+      S=mix(S,cc,body*(.92-fl*.3)); S=mix(S,vec3(.22,.2,.22),edge*(.42-fl*.2));
+    }
+    float md=dot(rd,uMoon), disc=smoothstep(.99905,.9993,md), cut=smoothstep(.9990,.99925,dot(rd,normalize(uMoon+vec3(.02,.012,0.))));
+    S=mix(S,vec3(1.,.985,.92),disc*(1.-cut)); S+=vec3(.9,.92,1.)*pow(max(md,0.),260.)*.16;
+    col*=S/vec3(.867,.835,.769);
   }
   // hatching: shade is drawn, not filled
   float lum0=dot(col,vec3(.3,.59,.11));
@@ -92,7 +112,7 @@ void main(){
   float hw=smoothstep(.76,.6,lum0)*smoothstep(.26,.4,lum0)*(1.-smoothstep(20.,50.,d0))*notRed;
   float hp=(gl_FragCoord.x+gl_FragCoord.y)/sc;
   float h1=smoothstep(.62,.95,abs(fract(hp/9.+vn(vUv*asp*30.)*.4)-.5)*2.);
-  col*=1.-hw*.2*h1;
+  col*=1.-hw*.15*h1;
   // screentone: the blacks carry a dot screen, as on a printed page
   float tw=smoothstep(.3,.16,lum0)*smoothstep(.03,.08,lum0)*notRed*(1.-smoothstep(12.,34.,d0));
   vec2 tp=mat2(.707,-.707,.707,.707)*gl_FragCoord.xy/sc/5.5;
@@ -143,7 +163,8 @@ export function init(canvas) {
   postMat = new THREE.ShaderMaterial({
     uniforms: { tColor: { value: null }, tDepth: { value: null }, tNormal: { value: null },
       uRes: { value: new THREE.Vector2() }, uNear: { value: camera.near }, uFar: { value: camera.far },
-      uKill: { value: 0 }, uFlash: { value: 0 }, uDim: { value: 0 }, uTime: { value: 0 }, uImpact: { value: 0 }, uInvert: { value: 0 }, tBloom: { value: null }, uSun: { value: new THREE.Vector2() }, uRays: { value: 0 } },
+      uKill: { value: 0 }, uFlash: { value: 0 }, uDim: { value: 0 }, uTime: { value: 0 }, uImpact: { value: 0 }, uInvert: { value: 0 }, tBloom: { value: null }, uSun: { value: new THREE.Vector2() }, uRays: { value: 0 }, uTan: { value: new THREE.Vector2() }, uCam: { value: new THREE.Matrix3() },
+      uSunDir: { value: sunPos.clone().normalize() }, uMoon: { value: new THREE.Vector3(-.62, .5, .6).normalize() } },
     vertexShader: 'varying vec2 vUv; void main(){ vUv=uv; gl_Position=vec4(position.xy,0.,1.); }',
     fragmentShader: POST_FS, depthTest: false, depthWrite: false });
   postQuad = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), postMat); postScene.add(postQuad);
@@ -211,6 +232,7 @@ export function render(dt) {
   for (const k of [1, 2.2]) { blurMat.uniforms.t.value = rtBa.texture; blurMat.uniforms.d.value.set(k / rtBa.width, 0); pass(blurMat, rtBb); blurMat.uniforms.t.value = rtBb.texture; blurMat.uniforms.d.value.set(0, k / rtBa.height); pass(blurMat, rtBa); }
   postQuad.material = postMat;
   _v.copy(sunPos).project(camera); const su = postMat.uniforms;
+  const th = Math.tan(camera.fov * Math.PI / 360); su.uTan.value.set(th * camera.aspect, th); su.uCam.value.setFromMatrix4(camera.matrixWorld);
   su.tBloom.value = rtBa.texture; su.uSun.value.set(_v.x * .5 + .5, _v.y * .5 + .5); su.uRays.value = _v.z < 1 ? Math.max(0, 1 - Math.hypot(_v.x, _v.y) * .45) : 0;
   camera.layers.disable(FX); scene.overrideMaterial = normalMat;
   const fog = scene.fog; scene.fog = null;
