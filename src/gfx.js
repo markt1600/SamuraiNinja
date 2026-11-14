@@ -6,7 +6,11 @@ export const FX = 1;                     // layer: drawn in colour, never outlin
 export const PAPER = 0xddd5c4, INK = 0x15120f, BLOOD = 0xc8102e, SNOW = 0xf6f3ec;
 export const IS_TOUCH = matchMedia('(pointer:coarse)').matches || 'ontouchstart' in window;
 
-let renderer, scene, camera, rtColor, rtNormal, postScene, postCam, postMat, normalMat;
+let renderer, scene, camera, rtColor, rtNormal, postScene, postCam, postMat, normalMat, postQuad;
+let rtBa, rtBb, rtRefl, brightMat, blurMat, rcam, ice, flashL, lanternL = [], sunPos = new THREE.Vector3(9, 17, -110);
+const texMat = new THREE.Matrix4(), swayers = [], shide = [], windU = { value: new THREE.Vector2() };
+/** the weather: one gusting wind that everything loose answers to */
+export const wind = { gust: .5, x: 1, z: .25 };
 const _v = new THREE.Vector3(), _v2 = new THREE.Vector3(), _q = new THREE.Quaternion(), _m = new THREE.Matrix4();
 const UP = new THREE.Vector3(0, 1, 0);
 
@@ -21,12 +25,18 @@ function gradient() {
 }
 const matCache = new Map();
 /** a toon material carrying a drawn pattern */
-export function toonTex(color, map, opt) { return new THREE.MeshToonMaterial(Object.assign({ color, map, gradientMap: gradient() }, opt)); }
+export function toonTex(color, map, opt) { return rim(new THREE.MeshToonMaterial(Object.assign({ color, map, gradientMap: gradient() }, opt))); }
 export function canvasTex(draw, w = 128, h = 128) { const t = tex(draw, w, h); t.wrapS = t.wrapT = THREE.RepeatWrapping; return t; }
+/** a cool rim of sky light on every edge that turns away from the eye */
+function rim(m) {
+  m.onBeforeCompile = sh => { sh.fragmentShader = sh.fragmentShader.replace('#include <opaque_fragment>', 'float rimL = 1. - clamp(dot(normalize(normal), normalize(vViewPosition)), 0., 1.);\n outgoingLight += vec3(.5, .56, .68) * smoothstep(.62, .7, rimL) * .32 * (.35 + diffuseColor.rgb);\n#include <opaque_fragment>'); };
+  m.customProgramCacheKey = () => 'rim'; return m;
+}
 export function toon(color, opt) {
   const key = color + (opt ? JSON.stringify(opt) : '');
   if (matCache.has(key)) return matCache.get(key);
-  const m = new THREE.MeshToonMaterial(Object.assign({ color, gradientMap: gradient() }, opt));
+  const { norim, ...rest } = opt || {};
+  const m = new THREE.MeshToonMaterial(Object.assign({ color, gradientMap: gradient() }, rest)); if (!norim) rim(m);
   matCache.set(key, m); return m;
 }
 export const flat = (color, opt) => new THREE.MeshBasicMaterial(Object.assign({ color }, opt));
@@ -34,7 +44,8 @@ export const flat = (color, opt) => new THREE.MeshBasicMaterial(Object.assign({ 
 /* ---------- post: ink lines + paper ---------- */
 const POST_FS = `
 precision highp float;
-uniform sampler2D tColor, tDepth, tNormal;
+uniform sampler2D tColor, tDepth, tNormal, tBloom;
+uniform vec2 uSun; uniform float uRays;
 uniform vec2 uRes; uniform float uNear, uFar, uKill, uFlash, uDim, uTime, uImpact, uInvert;
 varying vec2 vUv;
 float hash(vec2 p){ p=fract(p*vec2(123.34,456.21)); p+=dot(p,p+45.32); return fract(p.x*p.y); }
@@ -60,6 +71,14 @@ void main(){
   float eN=smoothstep(.45,.9,length(nA-nB)+length(nC-nD));
   float edge=max(eD,eN)*(1.-.75*smoothstep(30.,80.,d0));
   vec3 col=texture2D(tColor,vUv).rgb;
+  // a heavy blow splits the light at the edges of the frame
+  vec2 ca=(vUv-.5)*.014*uImpact;
+  col.r=mix(col.r,texture2D(tColor,vUv+ca).r,step(.001,uImpact)); col.b=mix(col.b,texture2D(tColor,vUv-ca).b,step(.001,uImpact));
+  // bloom from everything that burns, and shafts of it streaming from the sun
+  col+=texture2D(tBloom,vUv).rgb*.9;
+  vec2 sd=uSun-vUv; vec3 ray=vec3(0.);
+  for(int i=1;i<=12;i++) ray+=texture2D(tBloom,vUv+sd*float(i)/12.*.9).rgb*(1.-float(i)/14.);
+  col+=ray*uRays*.028;
   col=pow(max(col,0.),vec3(1./2.2));
   // sky: a graded wash with slow cloud bands, only where nothing was drawn
   float raw=texture2D(tDepth,vUv).x;
@@ -124,13 +143,23 @@ export function init(canvas) {
   postMat = new THREE.ShaderMaterial({
     uniforms: { tColor: { value: null }, tDepth: { value: null }, tNormal: { value: null },
       uRes: { value: new THREE.Vector2() }, uNear: { value: camera.near }, uFar: { value: camera.far },
-      uKill: { value: 0 }, uFlash: { value: 0 }, uDim: { value: 0 }, uTime: { value: 0 }, uImpact: { value: 0 }, uInvert: { value: 0 } },
+      uKill: { value: 0 }, uFlash: { value: 0 }, uDim: { value: 0 }, uTime: { value: 0 }, uImpact: { value: 0 }, uInvert: { value: 0 }, tBloom: { value: null }, uSun: { value: new THREE.Vector2() }, uRays: { value: 0 } },
     vertexShader: 'varying vec2 vUv; void main(){ vUv=uv; gl_Position=vec4(position.xy,0.,1.); }',
     fragmentShader: POST_FS, depthTest: false, depthWrite: false });
-  postScene.add(new THREE.Mesh(new THREE.PlaneGeometry(2, 2), postMat));
+  postQuad = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), postMat); postScene.add(postQuad);
+  const VS = 'varying vec2 vUv; void main(){ vUv=uv; gl_Position=vec4(position.xy,0.,1.); }';
+  brightMat = new THREE.ShaderMaterial({ uniforms: { t: { value: null }, px: { value: new THREE.Vector2() } }, vertexShader: VS, depthTest: false, depthWrite: false,
+    fragmentShader: 'uniform sampler2D t; uniform vec2 px; varying vec2 vUv; void main(){ vec3 c=(texture2D(t,vUv+px*vec2(-1.,-1.)).rgb+texture2D(t,vUv+px*vec2(1.,-1.)).rgb+texture2D(t,vUv+px*vec2(-1.,1.)).rgb+texture2D(t,vUv+px).rgb)*.25; gl_FragColor=vec4(min(max(c-1.,0.),vec3(6.)),1.); }' });
+  blurMat = new THREE.ShaderMaterial({ uniforms: { t: { value: null }, d: { value: new THREE.Vector2() } }, vertexShader: VS, depthTest: false, depthWrite: false,
+    fragmentShader: 'uniform sampler2D t; uniform vec2 d; varying vec2 vUv; void main(){ vec3 c=texture2D(t,vUv).rgb*.227; c+=(texture2D(t,vUv+d*1.385).rgb+texture2D(t,vUv-d*1.385).rgb)*.316; c+=(texture2D(t,vUv+d*3.231).rgb+texture2D(t,vUv-d*3.231).rgb)*.07; gl_FragColor=vec4(c,1.); }' });
+  renderer.shadowMap.autoUpdate = false;
+  rcam = new THREE.PerspectiveCamera(); rcam.layers.enable(FX);
+  // light that moves: four lantern flames, and one flash that jumps to every clash of steel
+  for (let i = 0; i < 4; i++) { const a = Math.PI / 4 + i * Math.PI / 2, L = new THREE.PointLight(0xff9a3c, 4, 6, 2); L.position.set(Math.sin(a) * (RING + 1.6), 1.45, Math.cos(a) * (RING + 1.6)); scene.add(L); lanternL.push(L); }
+  flashL = new THREE.PointLight(0xfff1cf, 0, 9, 2); scene.add(flashL);
   resize();
   addEventListener('resize', resize);
-  buildArena(); buildDressing(); buildNature(); buildParticles(); buildSnow(); buildBursts();
+  buildArena(); buildDressing(); buildNature(); buildTorches(); buildParticles(); buildSnow(); buildBursts();
   return { renderer, scene, camera };
 }
 
@@ -138,7 +167,10 @@ export function resize() {
   const w = innerWidth, h = innerHeight;
   renderer.setSize(w, h, false);
   const s = renderer.getDrawingBufferSize(new THREE.Vector2());
-  if (rtColor) { rtColor.dispose(); rtNormal.dispose(); }
+  if (rtColor) { rtColor.dispose(); rtNormal.dispose(); rtBa.dispose(); rtBb.dispose(); rtRefl.dispose(); }
+  const bo = { type: THREE.HalfFloatType, depthBuffer: false }, bw = Math.max(2, s.x >> 2), bh = Math.max(2, s.y >> 2), rs = IS_TOUCH ? 3 : 2;
+  rtBa = new THREE.WebGLRenderTarget(bw, bh, bo); rtBb = new THREE.WebGLRenderTarget(bw, bh, bo);
+  rtRefl = new THREE.WebGLRenderTarget(Math.max(2, s.x / rs | 0), Math.max(2, s.y / rs | 0), { type: THREE.HalfFloatType });
   rtColor = new THREE.WebGLRenderTarget(s.x, s.y, { type: THREE.HalfFloatType, depthBuffer: true });
   rtColor.depthTexture = new THREE.DepthTexture(s.x, s.y); rtColor.depthTexture.type = THREE.UnsignedIntType;
   rtNormal = new THREE.WebGLRenderTarget(s.x, s.y, { depthBuffer: true });
@@ -147,7 +179,7 @@ export function resize() {
 }
 
 export const look = { kill: 0, flash: 0, dim: 0, shake: 0, impact: 0, punch: 0, invert: 0 };
-let clock = 0;
+let clock = 0, slow = .016, warm = 0, quality = 2;
 export function render(dt) {
   if (look.shake > 0) {
     look.shake = Math.max(0, look.shake - dt * 2.6);
@@ -155,7 +187,31 @@ export function render(dt) {
     camera.position.x += (Math.random() - .5) * a; camera.position.y += (Math.random() - .5) * a;
   }
   look.flash = Math.max(0, look.flash - dt * 5); look.impact = Math.max(0, look.impact - dt * 3.2); look.invert = Math.max(0, look.invert - dt); look.punch = Math.max(0, look.punch - dt * 3.5);
+  renderer.shadowMap.needsUpdate = true;
+  // the ice: the whole scene once more, seen from under the ground
+  camera.updateMatrixWorld();
+  rcam.position.set(camera.position.x, -camera.position.y, camera.position.z);
+  camera.getWorldDirection(_v); _v2.copy(camera.position).add(_v); _v2.y = -_v2.y;
+  rcam.up.set(0, 1, 0).applyQuaternion(camera.quaternion); rcam.up.y *= -1; rcam.lookAt(_v2);
+  rcam.projectionMatrix.copy(camera.projectionMatrix); rcam.projectionMatrixInverse.copy(camera.projectionMatrixInverse);
+  rcam.updateMatrixWorld(); rcam.matrixWorldInverse.copy(rcam.matrixWorld).invert();
+  texMat.set(.5, 0, 0, .5, 0, .5, 0, .5, 0, 0, .5, .5, 0, 0, 0, 1).multiply(rcam.projectionMatrix).multiply(rcam.matrixWorldInverse);
+  // keep the frame rate: a slow device gives up the mirror first, then resolution
+  if (!navigator.webdriver && dt > 0) {
+    slow = slow * .97 + dt * .03; if ((warm += dt) > 4 && slow > .036 && quality > 0) { quality--; warm = 0; slow = .02; if (quality === 0) { renderer.setPixelRatio(1); resize(); } }
+  }
+  ice.material.uniforms.uOn.value = quality > 1 ? 1 : 0;
+  if (quality > 1) { ice.visible = false; renderer.setRenderTarget(rtRefl); renderer.render(scene, rcam); ice.visible = true; }
+  ice.material.uniforms.tRefl.value = rtRefl.texture; ice.material.uniforms.uTime.value = clock;
+  flashL.intensity *= Math.exp(-dt * 13); if (flashL.intensity < .05) flashL.intensity = 0;
   renderer.setRenderTarget(rtColor); renderer.render(scene, camera);
+  // bloom: keep only what is brighter than paper, and let it spread
+  const pass = (mat, target) => { postQuad.material = mat; renderer.setRenderTarget(target); renderer.render(postScene, postCam); };
+  brightMat.uniforms.t.value = rtColor.texture; brightMat.uniforms.px.value.set(1 / rtColor.width, 1 / rtColor.height); pass(brightMat, rtBa);
+  for (const k of [1, 2.2]) { blurMat.uniforms.t.value = rtBa.texture; blurMat.uniforms.d.value.set(k / rtBa.width, 0); pass(blurMat, rtBb); blurMat.uniforms.t.value = rtBb.texture; blurMat.uniforms.d.value.set(0, k / rtBa.height); pass(blurMat, rtBa); }
+  postQuad.material = postMat;
+  _v.copy(sunPos).project(camera); const su = postMat.uniforms;
+  su.tBloom.value = rtBa.texture; su.uSun.value.set(_v.x * .5 + .5, _v.y * .5 + .5); su.uRays.value = _v.z < 1 ? Math.max(0, 1 - Math.hypot(_v.x, _v.y) * .45) : 0;
   camera.layers.disable(FX); scene.overrideMaterial = normalMat;
   const fog = scene.fog; scene.fog = null;
   renderer.setRenderTarget(rtNormal); renderer.setClearColor(0x8080ff, 1); renderer.render(scene, camera);
@@ -177,7 +233,8 @@ function mesh(geo, mat, x, y, z, shadow = true) {
   scene.add(m); return m;
 }
 function buildArena() {
-  const ground = mesh(new THREE.CircleGeometry(120, 48), toon(SNOW), 0, 0, 0, false);
+  const ground = mesh(new THREE.CircleGeometry(120, 48), toon(SNOW, { norim: true }), 0, 0, 0, false);
+  buildIce();
   ground.rotation.x = -Math.PI / 2;
 
   const cv = document.createElement('canvas'); cv.width = cv.height = DECAL_PX;
@@ -207,7 +264,7 @@ function buildArena() {
   const roofSnow = mesh(new THREE.ConeGeometry(6.2, 2.2, 4), toon(SNOW), 0, 5.78, -27); roofSnow.rotation.y = Math.PI / 4; roofSnow.scale.z = .78;
   // the sun: one red disc, the only saturated thing until blood is drawn
   const sun = new THREE.Mesh(new THREE.CircleGeometry(15, 48), new THREE.MeshBasicMaterial({ color: 0xc23a2b, fog: false }));
-  sun.position.set(9, 17, -110); sun.layers.set(FX); scene.add(sun);
+  sun.material.color.multiplyScalar(1.9); sun.position.copy(sunPos); sun.layers.set(FX); scene.add(sun);
   // ink-wash mountains
   const rnd = mulberry(7);
   for (let layer = 0; layer < 3; layer++) {
@@ -226,15 +283,19 @@ function buildArena() {
     const x = Math.sin(a) * r, z = Math.cos(a) * r;
     if (Math.abs(x) < 5 && z < -8) continue;
     const s = .8 + rnd() * .9;
-    mesh(new THREE.CylinderGeometry(.13 * s, .22 * s, 2.4 * s, 6), trunk, x, 1.2 * s, z);
+    // each pine is one group, so the whole tree can lean in the wind
+    const tree = new THREE.Group(); tree.position.set(x, 0, z); scene.add(tree);
+    const part = (g, m, y, sh = true) => { const o = new THREE.Mesh(g, m); o.position.y = y; o.castShadow = sh; o.receiveShadow = true; tree.add(o); return o; };
+    part(new THREE.CylinderGeometry(.13 * s, .22 * s, 2.4 * s, 6), trunk, 1.2 * s);
     for (let t = 0; t < 4; t++) {
       const y = (2 + t * 1.15) * s, rr = (1.75 - t * .36) * s;
-      const c = mesh(new THREE.ConeGeometry(rr, 1.7 * s, 7), leaf, x, y + .5 * s, z); c.rotation.y = rnd() * 3;
-      const sn = mesh(new THREE.ConeGeometry(rr * .62, 1.06 * s, 7), toon(SNOW), x, y + .86 * s, z, false); sn.rotation.y = c.rotation.y;
+      const c = part(new THREE.ConeGeometry(rr, 1.7 * s, 7), leaf, y + .5 * s); c.rotation.y = rnd() * 3;
+      const sn = part(new THREE.ConeGeometry(rr * .62, 1.06 * s, 7), toon(SNOW), y + .86 * s, false); sn.rotation.y = c.rotation.y;
     }
+    swayers.push({ g: tree, ph: rnd() * 6, amp: .8 + rnd() * .5 });
   }
   // stone lanterns at the quarters of the ring
-  const glow = flat(0xffb347);
+  const glow = flat(0xffb347); glow.color.multiplyScalar(2.2);
   for (let i = 0; i < 4; i++) {
     const a = Math.PI / 4 + i * Math.PI / 2, x = Math.sin(a) * (RING + 1.6), z = Math.cos(a) * (RING + 1.6);
     mesh(new THREE.CylinderGeometry(.3, .36, .2, 6), stone, x, .1, z);
@@ -292,7 +353,7 @@ export function footprint(x, z, yaw) {
 
 /* ---------- particles: blood, sparks, snow-puffs ---------- */
 const NP = 700; let pMesh; const parts = []; let pNext = 0;
-const cBlood = new THREE.Color(BLOOD), cSpark = new THREE.Color(0xffe9a8), cPuff = new THREE.Color(0xffffff), cInk = new THREE.Color(INK);
+const cBlood = new THREE.Color(BLOOD), cSpark = new THREE.Color(0xffe9a8).multiplyScalar(4.5), cEmber = new THREE.Color(0xff7a22).multiplyScalar(4), cPuff = new THREE.Color(0xffffff), cInk = new THREE.Color(INK);
 function buildParticles() {
   pMesh = new THREE.InstancedMesh(new THREE.SphereGeometry(1, 6, 4), new THREE.MeshBasicMaterial({ color: 0xffffff, fog: false }), NP);
   pMesh.layers.set(FX); pMesh.frustumCulled = false; pMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
@@ -302,7 +363,7 @@ function buildParticles() {
 function emit(kind, p, v, r, life) {
   const o = parts[pNext]; pNext = (pNext + 1) % NP;
   o.kind = kind; o.p.copy(p); o.v.copy(v); o.r = r; o.life = o.max = life;
-  pMesh.setColorAt(parts.indexOf(o), kind === 0 ? cBlood : kind === 1 ? cSpark : kind === 3 ? cInk : cPuff);
+  pMesh.setColorAt(parts.indexOf(o), kind === 0 ? cBlood : kind === 1 ? cSpark : kind === 3 ? cInk : kind === 5 ? cEmber : cPuff);
   pMesh.instanceColor.needsUpdate = true;
 }
 /** a fan of blood thrown along dir */
@@ -348,7 +409,8 @@ function tickParticles(dt) {
     const o = parts[i];
     if (o.life <= 0) { _m.makeScale(0, 0, 0); pMesh.setMatrixAt(i, _m); continue; }
     o.life -= dt;
-    o.v.y -= (o.kind === 4 ? -.15 : o.kind === 2 ? 4 : 9.8) * dt;
+    o.v.y -= (o.kind === 5 ? -.5 : o.kind === 4 ? -.15 : o.kind === 2 ? 4 : 9.8) * dt;
+    if (o.kind === 5) { o.v.x += (wind.x * (.6 + wind.gust * 2.5) - o.v.x) * dt * 2 + (Math.random() - .5) * dt * 4; o.v.z += (wind.z * (.6 + wind.gust * 2.5) - o.v.z) * dt * 2; }
     if (o.kind === 2) o.v.multiplyScalar(1 - 3 * dt);
     o.p.addScaledVector(o.v, dt);
     if (o.p.y < .015) {
@@ -377,7 +439,7 @@ function tickSnow(dt, t) {
   const cx = camera.position.x, cz = camera.position.z;
   for (let i = 0; i < NS * 3; i += 3) {
     snowPos[i + 1] -= (.7 + (i % 7) * .08) * dt;
-    snowPos[i] += Math.sin(t * .7 + i) * .12 * dt + .25 * dt;
+    snowPos[i] += Math.sin(t * .7 + i) * .12 * dt + (.15 + wind.gust * 2.1) * dt;
     if (snowPos[i + 1] < 0) snowPos[i + 1] += 12;
     if (snowPos[i] - cx > SBOX / 2) snowPos[i] -= SBOX; else if (snowPos[i] - cx < -SBOX / 2) snowPos[i] += SBOX;
     if (snowPos[i + 2] - cz > SBOX / 2) snowPos[i + 2] -= SBOX; else if (snowPos[i + 2] - cz < -SBOX / 2) snowPos[i + 2] += SBOX;
@@ -436,16 +498,19 @@ function buildNature() {
       }
       if (depth < 3) for (let i = 0; i < 2; i++) buds.push(p.clone().lerp(e, rnd()).add(new THREE.Vector3(rnd() - .5, rnd() * .3, rnd() - .5).multiplyScalar(.15)));
     };
-    grow(new THREE.Vector3(tx, 0, tz), new THREE.Vector3(rnd() * .3 - .15, 1, rnd() * .3 - .15).normalize(), 1.5 * sc, .16 * sc, 4);
+    grow(new THREE.Vector3(0, 0, 0), new THREE.Vector3(rnd() * .3 - .15, 1, rnd() * .3 - .15).normalize(), 1.5 * sc, .16 * sc, 4);
     const bm = new THREE.InstancedMesh(new THREE.CylinderGeometry(.62, 1, 1, 5).translate(0, .5, 0), toon(0x1c1816), segs.length);
     segs.forEach(([a, b, r], i) => { D.position.copy(a); _v.subVectors(b, a); const l = _v.length(); D.quaternion.setFromUnitVectors(UP, _v.multiplyScalar(1 / l)); D.scale.set(r, l * 1.04, r); D.updateMatrix(); bm.setMatrixAt(i, D.matrix); });
-    bm.castShadow = true; scene.add(bm);
+    bm.castShadow = true; scene.add(bm); bm.position.set(tx, 0, tz); const ph = rnd() * 6; swayers.push({ g: bm, ph, amp: 1.5 });
     const fm = new THREE.InstancedMesh(new THREE.IcosahedronGeometry(1, 0), flat(0xd3243f, { fog: false }), buds.length);
     buds.forEach((b, i) => { D.position.copy(b); D.quaternion.identity(); D.scale.setScalar(.05 + rnd() * .05); D.updateMatrix(); fm.setMatrixAt(i, D.matrix); });
-    fm.layers.set(FX); scene.add(fm);
+    fm.layers.set(FX); scene.add(fm); fm.position.set(tx, 0, tz); swayers.push({ g: fm, ph, amp: 1.5 });
   }
   // dry reeds standing through the snow
-  const NR = IS_TOUCH ? 160 : 320, reeds = new THREE.InstancedMesh(new THREE.ConeGeometry(.014, 1, 3).translate(0, .5, 0), toon(0x4a3f30), NR);
+  const NR = IS_TOUCH ? 160 : 320, reedMat = flat(0x352d22), reeds = new THREE.InstancedMesh(new THREE.ConeGeometry(.016, 1, 3, 4).translate(0, .5, 0), reedMat, NR);
+  // reeds bend from the root, each in its own time, harder when it gusts
+  reedMat.onBeforeCompile = sh => { sh.uniforms.uW = windU; sh.vertexShader = 'uniform vec2 uW;\n' + sh.vertexShader.replace('#include <begin_vertex>', '#include <begin_vertex>\n float ph = instanceMatrix[3].x * 1.7 + instanceMatrix[3].z * 1.3; float bend = (sin(uW.x * 2.1 + ph) * .1 + sin(uW.x * 5.3 + ph * 2.) * .03 + .16) * (.3 + uW.y * 1.4) * position.y * position.y;\n transformed.x += bend; transformed.z += bend * .3;'); };
+  reeds.layers.set(FX);
   for (let i = 0, c = 0; i < NR; i++) {
     if (i % 8 === 0) { const a = rnd() * 6.3, r = RING + 1.2 + rnd() * 11; c = [Math.sin(a) * r, Math.cos(a) * r]; }
     D.position.set(c[0] + (rnd() - .5) * .7, 0, c[1] + (rnd() - .5) * .7); D.quaternion.identity(); D.rotation.set((rnd() - .5) * .5, rnd() * 6, (rnd() - .5) * .5); D.scale.set(1, .35 + rnd() * .6, 1); D.updateMatrix(); reeds.setMatrixAt(i, D.matrix);
@@ -477,7 +542,7 @@ function tickNature(dt, t) {
     const f = Math.sin(t * 7 + c.ph) * .7; c.L.rotation.z = f; c.Rw.rotation.z = -f;
   }
   for (let i = 0; i < NPET * 3; i += 3) {
-    petalPos[i + 1] -= (.35 + (i % 5) * .05) * dt; petalPos[i] += (.9 + Math.sin(t * 1.3 + i) * .8) * dt; petalPos[i + 2] += Math.cos(t * .9 + i) * .4 * dt;
+    petalPos[i + 1] -= (.35 + (i % 5) * .05) * dt; petalPos[i] += (.5 + wind.gust * 1.6 + Math.sin(t * 1.3 + i) * .7) * dt; petalPos[i + 2] += Math.cos(t * .9 + i) * .4 * dt;
     if (petalPos[i + 1] < 0) petalPos[i + 1] += 7; if (petalPos[i] > 12) petalPos[i] -= 24;
   }
   petals.geometry.attributes.position.needsUpdate = true;
@@ -508,6 +573,7 @@ export function burst(kind, p, color, size, life = .2, dir, grow = 1.8) {
   tap('burst', [kind, p, color, size, life, dir, grow]);
   const o = bursts.find(b => b.life <= 0) || bursts[0];
   o.m.material.map = TEX[kind]; o.m.material.color.set(color); o.m.material.needsUpdate = true;
+  if (kind === 'star') { o.m.material.color.multiplyScalar(2.6); flashL.position.copy(p); flashL.intensity = 30 * size + 16; }
   o.m.position.copy(p); o.life = o.max = life; o.size = size; o.grow = grow; o.kind = kind; o.ang = Math.random() * 6.3;
   if (dir) { const a = _v.copy(p).project(camera), ax = a.x, ay = a.y; const b = _v2.copy(p).add(dir).project(camera); o.ang = Math.atan2(b.y - ay, (b.x - ax) * camera.aspect); }
   o.m.visible = true;
@@ -543,7 +609,7 @@ function buildDressing() {
   }
   // shimenawa rope and paper streamers on the torii
   const rope = mesh(new THREE.CylinderGeometry(.09, .09, 5, 8), toon(0xc9ae74), 0, 4.32, -14.9); rope.rotation.z = Math.PI / 2;
-  for (let i = -2; i <= 2; i++) { const p = mesh(new THREE.BoxGeometry(.22, .5, .02), toon(0xf8f5ee), i * .95, 4, -14.86, false); p.rotation.z = (i % 2 ? .2 : -.2); }
+  for (let i = -2; i <= 2; i++) { const p = mesh(new THREE.BoxGeometry(.22, .5, .02).translate(0, -.25, 0), toon(0xf8f5ee), i * .95, 4.25, -14.86, false); shide.push(p); }
   // low mist banks
   const mt = tex((c, w, h) => { const g = c.createRadialGradient(w / 2, h / 2, 0, w / 2, h / 2, w / 2); g.addColorStop(0, 'rgba(255,255,255,.75)'); g.addColorStop(1, 'rgba(255,255,255,0)'); c.fillStyle = g; c.fillRect(0, 0, w, h); }, 256, 256);
   for (let i = 0; i < 7; i++) {
@@ -564,7 +630,7 @@ function tickDressing(dt, t) {
     const p = b.m.geometry.attributes.position, a = p.array, o = b.base;
     for (let i = 0; i < a.length; i += 3) {
       const free = (o[i] + .36) / .72, y = o[i + 1];            // the pole edge is pinned
-      a[i + 2] = Math.sin(t * 3.1 + y * 2.2 + b.ph + free * 2) * .16 * free + Math.sin(t * 5.3 + y * 4 + b.ph) * .04 * free;
+      a[i + 2] = Math.sin(t * 3.1 + y * 2.2 + b.ph + free * 2) * .16 * (.4 + wind.gust * 1.1) * free + Math.sin(t * 5.3 + y * 4 + b.ph) * .04 * free;
       a[i] = o[i] - Math.abs(a[i + 2]) * .25 * free;
     }
     p.needsUpdate = true;
@@ -573,8 +639,88 @@ function tickDressing(dt, t) {
   glows.forEach((g, i) => { g.quaternion.copy(camera.quaternion); g.material.opacity = .45 + .12 * Math.sin(t * 9 + i * 2) * Math.sin(t * 23 + i); });
 }
 
+/* ---------- kagaribi: iron fire-baskets burning around the court ---------- */
+const torches = [];
+function buildTorches() {
+  const iron = toon(0x1d1a18), wood = toon(0x3a2a1c);
+  const flameMat = seed => new THREE.ShaderMaterial({ transparent: true, depthWrite: false, side: THREE.DoubleSide, uniforms: { uT: windU, uS: { value: seed } },
+    vertexShader: 'varying vec2 vUv; void main(){ vUv=uv; gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.); }',
+    fragmentShader: `
+uniform vec2 uT; uniform float uS; varying vec2 vUv;
+float hash(vec2 p){ p=fract(p*vec2(123.34,456.21)); p+=dot(p,p+45.32); return fract(p.x*p.y); }
+float vn(vec2 p){ vec2 i=floor(p),f=fract(p); f=f*f*(3.-2.*f); return mix(mix(hash(i),hash(i+vec2(1,0)),f.x),mix(hash(i+vec2(0,1)),hash(i+vec2(1,1)),f.x),f.y); }
+void main(){
+  float t=uT.x, y=vUv.y;
+  // the flame leans with the gust and licks upward in tongues
+  float x=vUv.x-.5-(uT.y*.22+sin(t*3.+uS)*.04)*y*y;
+  float n=vn(vec2(x*5.+uS,y*3.2-t*3.1))*.6+vn(vec2(x*11.-uS,y*7.-t*5.3))*.4;
+  float body=(1.-y)*smoothstep(.5,.0,abs(x)*(1.6+y*2.2));
+  float f=body*(.55+n*1.25)-y*.22;
+  float a=smoothstep(.2,.26,f);
+  // three inked bands: ember red, orange, a white-gold heart
+  vec3 col=mix(vec3(2.6,.5,.08),vec3(3.4,1.5,.18),step(.42,f)); col=mix(col,vec3(4.2,3.4,1.6),step(.66,f));
+  gl_FragColor=vec4(col,a);
+}` });
+  const spots = [[-3.9, -12.6], [3.9, -12.6]];
+  for (let i = 0; i < 4; i++) { const a = Math.PI / 8 + i * Math.PI / 2; spots.push([Math.sin(a) * (RING + 4.6), Math.cos(a) * (RING + 4.6)]); }
+  spots.forEach(([x, z], i) => {
+    for (let k = 0; k < 3; k++) { const a = k * 2.094 + i, leg = mesh(new THREE.CylinderGeometry(.03, .04, 1.75, 5), wood, x + Math.sin(a) * .2, .84, z + Math.cos(a) * .2); leg.rotation.set(Math.cos(a) * .24, 0, -Math.sin(a) * .24); }
+    mesh(new THREE.CylinderGeometry(.27, .15, .3, 8, 1, true), toon(0x1d1a18, { side: THREE.DoubleSide }), x, 1.72, z);
+    mesh(new THREE.CylinderGeometry(.24, .24, .08, 8), flat(new THREE.Color(0xff5a14).multiplyScalar(2.2)), x, 1.8, z, false);
+    const f = new THREE.Mesh(new THREE.PlaneGeometry(.95, 1.5).translate(0, .75, 0), flameMat(i * 3.7)); f.position.set(x, 1.72, z); f.layers.set(FX); f.renderOrder = 3; scene.add(f);
+    let L = null; if (i < 2 || !IS_TOUCH) { L = new THREE.PointLight(0xff8a30, 0, 11, 2); L.position.set(x, 2.3, z); scene.add(L); }
+    torches.push({ f, L, x, z, ph: i * 2.3 });
+  });
+}
+function tickTorches(dt, t) {
+  for (const o of torches) {
+    o.f.rotation.y = Math.atan2(camera.position.x - o.x, camera.position.z - o.z);
+    const fl = .8 + .2 * Math.sin(t * 13 + o.ph) * Math.sin(t * 31 + o.ph * 2) + .1 * Math.sin(t * 4.1 + o.ph);
+    o.f.scale.set(1 + .08 * Math.sin(t * 9 + o.ph), .9 + fl * .22, 1); if (o.L) o.L.intensity = 6 * fl;
+    if (Math.random() < dt * (5 + wind.gust * 9)) { _v2.set(o.x + (Math.random() - .5) * .3, 1.95 + Math.random() * .5, o.z + (Math.random() - .5) * .3); _v.set((Math.random() - .5) * .6, 1.1 + Math.random() * 1.3, (Math.random() - .5) * .6); emit(5, _v2, _v, .011 + Math.random() * .01, .9 + Math.random() * 1.3); }
+  }
+}
+
+/* ---------- ice: clear patches in the trodden snow that hold the world upside down ---------- */
+function buildIce() {
+  ice = new THREE.Mesh(new THREE.CircleGeometry(42, 64), new THREE.ShaderMaterial({
+    transparent: true, depthWrite: false, uniforms: { tRefl: { value: null }, uTex: { value: texMat }, uTime: { value: 0 }, uRing: { value: RING }, uOn: { value: 1 } },
+    vertexShader: 'uniform mat4 uTex; varying vec4 vP; varying vec3 vW; void main(){ vec4 w=modelMatrix*vec4(position,1.); vW=w.xyz; vP=uTex*w; gl_Position=projectionMatrix*viewMatrix*w; }',
+    fragmentShader: `
+uniform sampler2D tRefl; uniform float uTime, uRing, uOn; varying vec4 vP; varying vec3 vW;
+float hash(vec2 p){ p=fract(p*vec2(123.34,456.21)); p+=dot(p,p+45.32); return fract(p.x*p.y); }
+float vn(vec2 p){ vec2 i=floor(p),f=fract(p); f=f*f*(3.-2.*f); return mix(mix(hash(i),hash(i+vec2(1,0)),f.x),mix(hash(i+vec2(0,1)),hash(i+vec2(1,1)),f.x),f.y); }
+float fbm(vec2 p){ return vn(p)*.55+vn(p*2.1+7.)*.3+vn(p*4.3+3.)*.15; }
+void main(){
+  vec2 p=vW.xz; float r=length(p);
+  float iceM=smoothstep(.46,.6,fbm(p*.33+2.))*smoothstep(uRing+.6,uRing-1.2,r);
+  vec2 uv=vP.xy/vP.w+(vec2(vn(p*2.6),vn(p*2.6+9.))-.5)*.014;
+  vec3 refl=min(texture2D(tRefl,uv).rgb,vec3(1.6));
+  vec3 view=normalize(cameraPosition-vW); float fres=.3+.7*pow(1.-max(view.y,0.),2.2);
+  vec3 col=mix(vec3(.5,.62,.72),refl,.78*uOn); float a=iceM*fres*.85;
+  // crack lines in the ice
+  float cr=smoothstep(.016,.0,abs(vn(p*1.3+11.)-.5))*iceM; col=mix(col,vec3(.9,.95,1.),cr*.6);
+  // cloud shadows crossing the court
+  float cl=smoothstep(.5,.78,fbm(p*.06+uTime*vec2(.045,.018)))*.16*smoothstep(42.,30.,r);
+  col=mix(vec3(.36,.42,.56),col,a/(a+cl+1e-4)); a=max(a,cl);
+  // frost glitter: single grains catching the sun as the eye moves
+  vec2 g=floor(p*42.); float h=hash(g);
+  float sp=step(.9972,h)*smoothstep(.55,1.,sin(uTime*2.+h*90.+dot(view.xz,vec2(31.,17.))))*(1.-iceM)*smoothstep(26.,8.,r);
+  col+=vec3(3.2,3.1,2.8)*sp; a=max(a,sp);
+  gl_FragColor=vec4(col,a);
+}` }));
+  ice.rotation.x = -Math.PI / 2; ice.position.y = .006; ice.layers.set(FX); ice.renderOrder = 0; scene.add(ice);
+}
+function tickWind(dt, t) {
+  wind.gust = Math.max(0, Math.min(1, .5 + .55 * Math.sin(t * .23) * Math.sin(t * .61 + 1.3) + .12 * Math.sin(t * 1.7)));
+  windU.value.set(t, wind.gust);
+  for (const s of swayers) { s.g.rotation.z = -(Math.sin(t * 1.3 + s.ph) * .007 + wind.gust * .02) * s.amp; s.g.rotation.x = Math.cos(t * 1.05 + s.ph) * .006 * s.amp; }
+  shide.forEach((p, i) => { p.rotation.z = Math.sin(t * 2.6 + i * 1.3) * .2 * (.4 + wind.gust) + wind.gust * .25; p.rotation.x = Math.sin(t * 3.4 + i) * .12 * wind.gust; });
+  lanternL.forEach((L, i) => { L.intensity = 4 * (.82 + .14 * Math.sin(t * 11 + i * 2.1) * Math.sin(t * 27 + i) + .08 * Math.sin(t * 3.3 + i)); });
+}
+
 export function tick(dt, t) {
-  clock = t; tickParticles(dt); tickSnow(dt, t); tickBursts(dt); tickDressing(dt, t); tickNature(dt, t);
+  clock = t; tickWind(dt, t); tickTorches(dt, t); tickParticles(dt); tickSnow(dt, t); tickBursts(dt); tickDressing(dt, t); tickNature(dt, t);
   if (decalDirty) { decalTex.needsUpdate = true; decalDirty = false; }
 }
 export { scene, camera, renderer };

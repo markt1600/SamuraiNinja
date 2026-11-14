@@ -1,7 +1,7 @@
 /* ZAN — the figure: a posed ink-drawn swordsman. The sword is animated, the
    body follows it: hands by IK to the hilt, feet planted and stepping. */
 import * as THREE from 'three';
-import { toon, toonTex, canvasTex, flat, scene, Trail, footprint, puff, BLOOD, FX } from 'zan/gfx';
+import { toon, toonTex, canvasTex, flat, scene, Trail, footprint, puff, BLOOD, FX, wind } from 'zan/gfx';
 
 const V = (x = 0, y = 0, z = 0) => new THREE.Vector3(x, y, z);
 const UP = V(0, 1, 0), _a = V(), _b = V(), _c = V(), _d = V(), _q = new THREE.Quaternion(), _e = new THREE.Euler();
@@ -157,8 +157,8 @@ export class Figure {
     }
     if (look.band) { const b = add(GEO.band, flat(look.band), this.headG); b.position.y = .035; b.rotation.x = -.12; }
     this.sword = new THREE.Group(); this.root.add(this.sword);
-    this.blade = add(GEO.blade, toon(0xeef2f6), this.sword); const hb = add(new THREE.CylinderGeometry(.014, .014, .03, 6), toon(0xc9a24a), this.sword); hb.position.y = .095; hb.scale.z = 1.8; add(GEO.tsuba, dark, this.sword); add(GEO.grip, toon(look.grip ?? 0x2a2a30), this.sword);
-    this.trail = new Trail(); this.glint = new Trail(8, [1, 1, 1], .95); this._g0 = V(); this._g1 = V();
+    this.bladeMat = toon(0xeef2f6).clone(); this.blade = add(GEO.blade, this.bladeMat, this.sword); const hb = add(new THREE.CylinderGeometry(.014, .014, .03, 6), toon(0xc9a24a), this.sword); hb.position.y = .095; hb.scale.z = 1.8; add(GEO.tsuba, dark, this.sword); add(GEO.grip, toon(look.grip ?? 0x2a2a30), this.sword);
+    this.trail = new Trail(); this.glint = new Trail(8, [2.4, 2.4, 2.6], .95); this._g0 = V(); this._g1 = V();
     this.pose = clonePose(POSE.rest); this.from = clonePose(POSE.rest); this.keys = []; this.kt = 0;
     this.feet = [{ p: V(), from: V(), to: V(), t: -1, home: [.15, -.25] }, { p: V(), from: V(), to: V(), t: -1, home: [-.12, .24] }];
     this.pos = V(); this.yaw = 0; this.vel = V(); this.striking = false;
@@ -170,7 +170,7 @@ export class Figure {
   }
   dispose() { scene.remove(this.root); scene.remove(this.trail.mesh); scene.remove(this.glint.mesh); for (const o of this.pieces) scene.remove(o.g); if (this.tails) scene.remove(this.tails.mesh); this.sleeves.forEach(c => scene.remove(c.mesh)); if (this.coat) scene.remove(this.coat.mesh); }
   setWounds(n) { if (n === this.cutN) return; this.cutN = n; this.cuts.forEach((c, i) => { c.visible = i < n; }); }
-  setBloody(on) { this.bloody = on; this.blade.material = toon(on ? 0xc21a34 : 0xeef2f6); }
+  setBloody(on) { this.bloody = on; this.bladeMat.color.set(on ? 0xc21a34 : 0xeef2f6); }
 
   /** queue pose keys: [name|pose, seconds, ease] ...; replaces whatever was playing */
   go(...keys) { this.from = clonePose(this.pose); this.keys = keys.map(k => ({ p: typeof k[0] === 'string' ? POSE[k[0]] : k[0], d: Math.max(.001, k[1]), e: EASE[k[2] || 'out'] })); this.kt = 0; }
@@ -272,6 +272,7 @@ export class Figure {
     this.shW[0].copy(shL).applyMatrix4(R.matrixWorld); this.shW[1].copy(shR).applyMatrix4(R.matrixWorld);
     if (this.tails) this.tails.update(dt);
     for (let i = 0; i < 2; i++) this.sleeves[i].update(dt, this.elb[i].applyMatrix4(R.matrixWorld), this.wri[i].applyMatrix4(R.matrixWorld), !this.armOff[i]);
+    this.bladeMat.emissive.setScalar(this.striking && !this.bloody ? .9 : 0);          // steel flares as it moves
     this.trail.push(this.base, this.tip, this.striking, dt);
     this.glint.push(this._g0.lerpVectors(this.base, this.tip, .55), this._g1.lerpVectors(this.base, this.tip, .97), this.striking, dt);
 
@@ -378,7 +379,7 @@ class Coat {
     for (let c = 0; c < C; c++) P[c].p.copy(pins[c]);
     for (let i = C; i < P.length; i++) {
       const o = P[i]; _c.subVectors(o.p, o.q).multiplyScalar(.95); o.q.copy(o.p); o.p.add(_c); o.p.y -= 10 * dt * dt;
-      o.p.x += (.7 + Math.sin(this.t * 2.1 + i) * .6) * dt * dt; if (o.p.y < .04) o.p.y = .04;
+      const wf = (.3 + wind.gust * 2.4 + Math.sin(this.t * 2.1 + i) * .6) * dt * dt; o.p.x += wf * wind.x; o.p.z += wf * wind.z; if (o.p.y < .04) o.p.y = .04;
     }
     for (let k = 0; k < 3; k++) for (let r = 1; r < Rw; r++) for (let c = 0; c < C; c++) {
       const i = r * C + c, o = P[i].p, up = P[i - C].p; _c.subVectors(o, up); let l = _c.length() || 1e-4; o.copy(up).addScaledVector(_c, .13 / l);
@@ -409,7 +410,7 @@ class Tails {
       pts[0].p.copy(_a);
       for (let i = 1; i < 6; i++) {
         const o = pts[i]; _b.subVectors(o.p, o.q).multiplyScalar(.965); o.q.copy(o.p);
-        o.p.add(_b); o.p.y -= 9 * dt * dt; o.p.x += (.9 + Math.sin(this.t * 2.3 + i + r) * .7) * dt * dt;
+        o.p.add(_b); o.p.y -= 9 * dt * dt; const wf = (.3 + wind.gust * 3 + Math.sin(this.t * 2.3 + i + r) * .7) * dt * dt; o.p.x += wf * wind.x; o.p.z += wf * wind.z;
         if (o.p.y < .02) o.p.y = .02;
       }
       for (let k = 0; k < 3; k++) for (let i = 1; i < 6; i++) {
