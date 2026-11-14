@@ -49,6 +49,7 @@ export const sfx = {
   cut() { if (!ok()) return; const t = now(); burst(2600, .7, .5, .004, .12, 'bandpass', t, 500); burst(300, .8, .5, .01, .2, 'lowpass', t + .02); tone(110, 'sine', .4, .005, .16, t, 50); },
   grunt(player) { if (!ok()) return; const t = now() + .05, f = player ? 150 : 125; const o = tone(f, 'sawtooth', .13, .02, .22, t, f * .62); burst(700, 3, .1, .02, .2, 'bandpass', t); },
   breakPosture() { if (!ok()) return; const t = now(); tone(92, 'sine', .7, .005, .5, t, 40); burst(180, .7, .5, .005, .3, 'lowpass', t); tone(1320, 'triangle', .1, .003, .5, t); },
+  thud() { if (!ok()) return; const t = now(); tone(120, 'sine', .6, .004, .16, t, 55); burst(400, .8, .4, .003, .1, 'lowpass', t); },
   flick() { if (ok()) burst(1900, 1.5, .16, .02, .12, 'bandpass', now(), 3600); },
   taiko(v = .8) { if (!ok()) return; const t = now(); tone(88, 'sine', v, .004, .55, t, 44); burst(140, .8, v * .6, .002, .12, 'lowpass', t); },
   kill() {

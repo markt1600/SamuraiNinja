@@ -3,7 +3,7 @@ import { IS_TOUCH } from 'zan/gfx';
 
 const keys = new Set();
 const I = { mx: 0, mz: 0, stance: null, attack: false, thrust: false, guard: false, dodge: false };
-let edges = { attack: false, thrust: false, dodge: false, stance: null, finish: false, mercy: false, confirm: false };
+let edges = { attack: false, thrust: false, dodge: false, stance: null, finish: false, mercy: false, confirm: false, swap: false };
 let mouseGuard = false, touchGuard = false, accX = 0, accY = 0, accT = 0, joy = { x: 0, y: 0 };
 export const state = { locked: false, fighting: false };
 
@@ -14,7 +14,8 @@ export function init(canvas) {
     if (e.code === 'ArrowLeft') edges.stance = 'left';
     if (e.code === 'ArrowRight') edges.stance = 'right';
     if (e.code === 'KeyJ') edges.attack = true;
-    if (e.code === 'KeyL' || e.code === 'KeyE' || e.code === 'KeyQ') edges.thrust = true;
+    if (e.code === 'KeyL' || e.code === 'KeyE') edges.thrust = true;
+    if (e.code === 'KeyQ' || e.code === 'Tab') { edges.swap = true; e.preventDefault(); }
     if (e.code === 'Space') { edges.dodge = true; e.preventDefault(); }
     if (e.code === 'KeyF') edges.finish = true;
     if (e.code === 'KeyM') edges.mercy = true;
@@ -71,6 +72,7 @@ function initTouch() {
   hold('btn-dodge', () => { edges.dodge = true; });
   hold('btn-finish', () => { edges.finish = true; });
   hold('btn-mercy', () => { edges.mercy = true; });
+  hold('btn-swap', () => { edges.swap = true; });
 }
 
 /** read the frame's intent; edges are consumed */
@@ -81,7 +83,7 @@ export function read() {
   I.mz = Math.max(-1, Math.min(1, I.mz)); I.mx = Math.max(-1, Math.min(1, I.mx));
   I.guard = mouseGuard || touchGuard || keys.has('KeyK') || keys.has('ShiftLeft') || keys.has('ShiftRight');
   I.attack = edges.attack; I.thrust = edges.thrust; I.dodge = edges.dodge; I.stance = edges.stance;
-  const out = { finish: edges.finish, mercy: edges.mercy, confirm: edges.confirm };
-  edges = { attack: false, thrust: false, dodge: false, stance: null, finish: false, mercy: false, confirm: false };
+  const out = { finish: edges.finish, mercy: edges.mercy, confirm: edges.confirm, swap: edges.swap };
+  edges = { attack: false, thrust: false, dodge: false, stance: null, finish: false, mercy: false, confirm: false, swap: false };
   return { intent: I, ...out };
 }

@@ -20,52 +20,59 @@ const LADDER = [
   { name: 'Kaede', title: 'the Needle', blurb: 'She fights from a long measure and her point comes straight.',
     look: { gi: 0x6f3b58, hakama: 0x2a1f28, hat: 'kasa' },
     ai: { react: .23, block: .6, parry: .2, dodge: .2, aggr: .62, mix: .7, feint: .18, thrust: .48, track: .6, punish: .8, range: 2.5 } },
-  { name: 'Shiro', title: 'the White Death', blurb: 'The master of this shrine. He has read every cut you own.',
+  { name: 'Shiro', title: 'the White Death', blurb: 'The master of this shrine does not fight alone. Kuro, his shadow, circles behind you.',
+    second: { name: 'Kuro', title: 'the Shadow', look: { gi: 0x1d1d22, hakama: 0x0f0f12, hat: 'kasa', saya: 0x111114 },
+      ai: { react: .33, block: .4, parry: .04, dodge: .05, aggr: .38, mix: .35, feint: .05, thrust: .12, track: .3, punish: .35 } },
     look: { gi: 0xeae5db, hakama: 0xcdc6b8, hair: 0xd9d9d6, saya: 0x8e1c1c, grip: 0x8e1c1c },
-    ai: { react: .19, block: .62, parry: .3, dodge: .14, aggr: .74, mix: .85, feint: .3, thrust: .24, track: .78, punish: .95 } },
+    ai: { react: .22, block: .58, parry: .2, dodge: .12, aggr: .6, mix: .75, feint: .25, thrust: .22, track: .65, punish: .8 } },
 ];
-const PLAYER = { name: 'You', look: { gi: 0x24262f, hakama: 0x14151a, band: G.BLOOD } };
+const PLAYER = { name: 'You', look: { gi: 0x24262f, hakama: 0x14151a, band: G.BLOOD, tails: G.BLOOD } };
 
 const game = { state: 'menu', stage: 0, t: 0, time: 0, endT: 0, won: false, hintT: 0 };
-let player, enemy, duel, ai;
+let player, enemy, duel, ai, foes = [];
 const { camera } = G.init($('c'));
 Input.init($('c'));
 const camPos = new THREE.Vector3(0, 3, 9), camLook = new THREE.Vector3(0, 1.2, 0);
 const _f = new THREE.Vector3(), _r = new THREE.Vector3(), _p = new THREE.Vector3(), _l = new THREE.Vector3(), _m = new THREE.Vector3();
 
 /* ---------- flow ---------- */
-function newEnemy(i) {
-  if (enemy) enemy.fig.dispose();
-  enemy = new Fighter(LADDER[i], false); ai = new AI(LADDER[i].ai);
+function newEnemy(i, alone) {
+  foes.forEach(f => f.fig.dispose());
+  const defs = [LADDER[i]]; if (LADDER[i].second && !alone) defs.push(LADDER[i].second);
+  foes = defs.map(d => new Fighter(d, false)); enemy = foes[0]; ai = new AI(defs[0].ai);
+  return defs.map((d, k) => k ? new AI(d.ai) : ai);
 }
 function startLadder() { game.stage = 0; player.wounds = 0; G.clearGround(); startDuel(); }
 function startDuel() {
   const keep = player ? player.wounds : 0;
   if (player) player.fig.dispose();
   player = new Fighter(PLAYER, true); player.wounds = keep;
-  newEnemy(game.stage);
-  player.reset(0, 2.3, Math.PI); enemy.reset(0, -2.3, 0);
-  duel = new Duel(player, enemy, ai, onEvent);
+  const ais = newEnemy(game.stage);
+  player.reset(0, 2.3, Math.PI); foes.forEach((f, k) => f.reset(foes.length > 1 ? (k ? 1.7 : -1.7) : 0, -2.3, 0));
+  duel = new Duel(player, foes, ais, onEvent);
   game.state = 'intro'; game.t = 0; game.finish = game.mercy = false; G.look.kill = 0; G.look.dim = 0; G.clearGround();
   const d = LADDER[game.stage];
   $('card-n').textContent = 'Duel ' + ROMAN[game.stage] + ' of ' + ROMAN[LADDER.length - 1];
-  $('card-name').textContent = d.name + ', ' + d.title; $('card-blurb').textContent = d.blurb;
+  $('card-name').textContent = d.name + ', ' + d.title + (d.second ? ' — and ' + d.second.name : ''); $('card-blurb').textContent = d.blurb;
   show('card', true); show('menu', false); show('verdict', false); show('hud', true); show('prompt', false);
-  $('e-name').textContent = d.name + ' ' + d.title; document.body.classList.remove('ended');
+  document.body.classList.remove('ended'); document.body.classList.toggle('two', foes.length > 1);
   sfx.music(true); sfx.taiko(.7); camSnap = true; hud();
 }
-function onEvent(type, who) {
+function onEvent(type, who, extra) {
   const mine = who === player;
   if (type === 'parry') say(mine ? 'Parry' : 'Parried', mine ? 'good' : 'bad');
-  else if (type === 'clash') say('Clash');
+  else if (type === 'bind') say('Bind — drive forward', '', 1.2);
+  else if (type === 'clinch') { const me = who === player; say(({ throw: me ? 'Thrown down' : 'You are thrown', pommel: me ? 'Pommel strike' : 'Struck by the pommel', kick: me ? 'Kick' : 'Kicked back', shove: me ? 'Shoved off' : 'Shoved back' })[extra], me ? 'good' : 'bad'); }
+  else if (type === 'down') { say(who.name + ' falls', 'good', 1.6); const sl = $('slash'); sl.classList.remove('go'); void sl.offsetWidth; sl.classList.add('go'); }
   else if (type === 'broken') say(mine ? 'Your guard is broken' : 'Guard broken — strike now', mine ? 'bad' : 'good', 1.6);
   else if (type === 'wound') say(mine ? 'You are cut' : 'A clean cut', mine ? 'bad' : 'good');
   else if (type === 'evade') say(mine ? 'Slipped' : 'Evaded');
-  else if (type === 'yield') { say(mine ? 'You fall to your knees' : who.name + ' yields', mine ? 'bad' : 'good', 2); if (!mine) show('prompt', true); }
+  else if (type === 'yield') say(mine ? 'You fall to your knees' : who.name + ' yields', mine ? 'bad' : 'good', 2);
   else if (type === 'over') {
     game.state = 'end'; game.endT = 0; $('msg').className = ''; sayT = 0; game.won = who.victor === player; show('prompt', false); sfx.music(false);
     Input.state.fighting = false; if (document.exitPointerLock) document.exitPointerLock();
     document.body.classList.add('ended');
+    if (!who.mercy) { const sl = $('slash'); sl.classList.remove('go'); void sl.offsetWidth; sl.classList.add('go'); }
   }
 }
 function verdict() {
@@ -74,7 +81,7 @@ function verdict() {
   $('v-sub').textContent = game.won
     ? (last ? 'Five duels. No one is left to stand against you.' : mercy ? LADDER[game.stage].name + ' lives, and will remember.' : LADDER[game.stage].name + ' lies in the snow.') +
       (player.wounds ? ' You carry ' + player.wounds + (player.wounds > 1 ? ' wounds' : ' wound') + ' — one will close before the next duel.' : '')
-    : 'Cut down by ' + LADDER[game.stage].name + ' in duel ' + ROMAN[game.stage] + '.';
+    : 'Cut down by ' + duel.over.victor.name + ' in duel ' + ROMAN[game.stage] + '.';
   $('v-go').textContent = game.won ? (last ? 'Begin again' : 'Next duel') : 'Begin again';
   $('v-retry').style.display = game.won ? 'none' : '';
   show('verdict', true); show('hud', false); sfx.bell();
@@ -104,13 +111,16 @@ function ring(el, f, foe, mirror) {
   const st = mirror ? MIRROR[f.stance] : f.stance, w = f.state === 'windup' && f.atk ? f.atk : null;
   const now = w && f.dur - f.t < T.parry;
   let cls = 'ring ' + st + (f.guard ? ' guard' : '') + (w ? (w.thrust ? ' thrust' : ' atk') : '') + (now ? ' now' : '') + (f.state === 'broken' ? ' broken' : '') + (mirror ? ' foe' : '');
-  if (el.className !== cls) el.className = cls;
+  if (el._c !== cls) { el.className = cls; el._c = cls; }
 }
 function hud() {
+  const nm = enemy.def.name + ' ' + enemy.def.title, en = $('e-name'); if (en.textContent !== nm) en.textContent = nm;
   $('p-post').style.width = player.posture + '%'; $('e-post').style.width = enemy.posture + '%';
   $('p-post').classList.toggle('hot', player.posture > 70); $('e-post').classList.toggle('hot', enemy.posture > 70);
   pips($('p-pips'), player.wounds); pips($('e-pips'), enemy.wounds);
-  ring($('ring-p'), player, enemy, false); ring($('ring-e'), enemy, player, true);
+  ring($('ring-p'), player, enemy, false); ring($('ring-e'), foes[0], player, true);
+  if (foes[1]) ring($('ring-e2'), foes[1], player, true); else $('ring-e2').style.display = 'none';
+  $('ring-e').classList.toggle('dim', foes.length > 1 && enemy !== foes[0]); $('ring-e2').classList.toggle('dim', enemy !== foes[1]);
 }
 
 /* ---------- camera ---------- */
@@ -154,12 +164,14 @@ function update(dt, forced) {
       for (const f of [player, enemy]) { f.poseName = ''; }
     }
   } else if (game.state === 'fight') {
-    const vic = enemy.state === 'kneel';
-    if (vic && (inp.finish || intent.attack)) { game.finish = true; show('prompt', false); }
+    const vic = duel.awaiting;
+    if (inp.swap) duel.swap = true;
+    if (vic && inp.finish) game.finish = 'fatal'; else if (vic && intent.attack && !game.finish) game.finish = 'clean';
     else if (vic && inp.mercy && !game.finish) game.mercy = true;
-    if (vic && game.finish && player.state !== 'execute') duel.execute(player);
+    show('prompt', vic && !game.finish && !game.mercy);
+    if (vic && game.finish && player.state !== 'execute') duel.execute(player, duel.kneeling[0], game.finish === 'fatal');
     else if (vic && game.mercy && player.state === 'idle') duel.spare(player);
-    duel.step(dt, vic ? IDLE : intent);
+    duel.step(dt, vic ? IDLE : intent); enemy = duel.b;
   } else {
     duel.step(dt, IDLE); game.endT += dt;
     G.look.kill = duel.over.mercy ? 0 : Math.max(0, Math.min(1, game.endT / .12) * (1 - Math.max(0, game.endT - 1.5) / .9));
@@ -177,12 +189,12 @@ function frame(ts) {
   requestAnimationFrame(frame);
 }
 // a quiet pair on the menu so the court is not empty
-player = new Fighter(PLAYER, true); newEnemy(4);
+player = new Fighter(PLAYER, true); newEnemy(4, true);
 player.reset(1.9, -1.2, -Math.PI / 2); enemy.reset(-1.9, -1.2, Math.PI / 2);
 player.fig.snap('left'); enemy.fig.snap('high'); player.fig.update(0); enemy.fig.update(0);
 show('menu', true);
 requestAnimationFrame(frame);
 
 /* test hook: drive the simulation without the render loop */
-window.ZAN = { game, G, T, AI, LADDER, get player() { return player; }, get enemy() { return enemy; }, get duel() { return duel; }, get ai() { return ai; },
+window.ZAN = { game, G, T, AI, LADDER, get player() { return player; }, get enemy() { return enemy; }, get foes() { return foes; }, get duel() { return duel; }, get ai() { return ai; },
   proceed, sim(sec, intent, dt = 1 / 60) { for (let t = 0; t < sec; t += dt) { update(dt, typeof intent === 'function' ? intent() : intent); G.tick(dt, game.time); } } };

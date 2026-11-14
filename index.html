@@ -40,7 +40,7 @@ button.ghost:hover{background:var(--ink);color:var(--paper)}
 #prompt kbd{font:inherit;color:var(--red);font-weight:bold}
 #hint{position:fixed;left:0;right:0;bottom:max(10px,env(safe-area-inset-bottom));text-align:center;font-size:.72rem;letter-spacing:.14em;
   text-transform:uppercase;color:var(--soft);pointer-events:none;text-shadow:0 0 5px var(--paper)}
-.ended #hint,.ended .ring{display:none!important}
+.ended #hint,.ended .ring{display:none!important}.ended #hud{opacity:0}
 
 /* guard rings: where the blade sits, and where the cut will come from */
 .ring{position:fixed;left:0;top:0;width:170px;height:170px;pointer-events:none;z-index:3}
@@ -55,7 +55,20 @@ button.ghost:hover{background:var(--ink);color:var(--paper)}
 .ring.foe.now svg{filter:drop-shadow(0 0 3px var(--red)) drop-shadow(0 0 3px var(--red))}
 .ring.foe.now.thrust circle{fill:#fff}
 .ring.broken path{stroke:var(--red);stroke-dasharray:4 9;stroke-width:6}
-#ring-p{opacity:.85}
+#ring-p{opacity:.85}.ring.dim{opacity:.55}
+
+/* the cut, across the whole page */
+#slash{position:fixed;inset:0;pointer-events:none;overflow:hidden;z-index:4}
+#slash i{position:absolute;left:-20%;top:46%;width:140%;height:9vh;transform:rotate(-17deg) scaleX(0);transform-origin:0 50%;
+  background:linear-gradient(90deg,rgba(200,16,46,0),var(--red) 12%,#e2203c 55%,var(--red) 80%,rgba(200,16,46,0));
+  clip-path:polygon(0 45%,8% 12%,30% 0,62% 8%,88% 30%,100% 50%,90% 66%,60% 92%,28% 100%,7% 80%);opacity:0}
+#slash b{position:absolute;right:7vw;top:50%;transform:translateY(-50%) scale(1.5);font-size:min(58vh,36vw);line-height:1;color:var(--red);opacity:0;font-weight:700}
+#slash.go i{animation:sl .9s cubic-bezier(.2,.9,.2,1) forwards}
+#slash.go b{animation:kj 1.9s .12s ease-out forwards}
+@keyframes sl{0%{transform:rotate(-17deg) scaleX(0);opacity:1}22%{transform:rotate(-17deg) scaleX(1);opacity:1}60%{opacity:.9}100%{transform:rotate(-17deg) scaleX(1);opacity:0}}
+@keyframes kj{0%{opacity:0;transform:translateY(-50%) scale(1.5)}9%{opacity:.85;transform:translateY(-50%) scale(1)}55%{opacity:.7}100%{opacity:0;transform:translateY(-50%) scale(1.04)}}
+body::before,body::after{content:"";position:fixed;left:0;right:0;height:0;background:var(--ink);z-index:2;transition:height .5s;pointer-events:none}
+body::before{top:0}body::after{bottom:0}.ended::before,.ended::after{height:9vh}
 
 /* cards and menus */
 #card{display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;
@@ -90,6 +103,7 @@ html:not(.touch) .touch-only{display:none!important}
 .tb{position:fixed;width:min(17vh,72px);height:min(17vh,72px);border-radius:50%;padding:0;font-size:.6rem;letter-spacing:.1em;
   background:rgba(21,18,15,.72);right:calc(max(22px,env(safe-area-inset-right)) + min(34vh,150px) + 14px)}
 .tb.on{background:var(--red)}
+#btn-swap{display:none;bottom:calc(max(18px,env(safe-area-inset-bottom)) + 2*min(17vh,72px) + 20px)}.two #btn-swap{display:block}
 #btn-guard{bottom:max(18px,env(safe-area-inset-bottom))}#btn-dodge{bottom:calc(max(18px,env(safe-area-inset-bottom)) + min(17vh,72px) + 10px)}
 #rotate{position:fixed;inset:0;background:var(--paper);display:none;align-items:center;justify-content:center;text-align:center;z-index:9;
   font-size:1.2rem;letter-spacing:.2em;text-transform:uppercase;padding:2em}
@@ -108,16 +122,18 @@ html:not(.touch) .touch-only{display:none!important}
 </div>
 <div class="ring" id="ring-p" style="display:none"><svg viewBox="-60 -60 120 120"><path class="a-high" d="M-30 -39 A50 50 0 0 1 30 -39"/><path class="a-left" d="M-44 -22 A50 50 0 0 0 -44 22"/><path class="a-right" d="M44 -22 A50 50 0 0 1 44 22"/><circle r="11"/></svg></div>
 <div class="ring" id="ring-e" style="display:none"><svg viewBox="-60 -60 120 120"><path class="a-high" d="M-30 -39 A50 50 0 0 1 30 -39"/><path class="a-left" d="M-44 -22 A50 50 0 0 0 -44 22"/><path class="a-right" d="M44 -22 A50 50 0 0 1 44 22"/><circle r="11"/></svg></div>
+<div class="ring" id="ring-e2" style="display:none"><svg viewBox="-60 -60 120 120"><path class="a-high" d="M-30 -39 A50 50 0 0 1 30 -39"/><path class="a-left" d="M-44 -22 A50 50 0 0 0 -44 22"/><path class="a-right" d="M44 -22 A50 50 0 0 1 44 22"/><circle r="11"/></svg></div>
+<div id="slash"><i></i><b>斬</b></div>
 <div id="msg"></div>
 <div id="prompt" class="layer">
-  <span class="desk-only"><kbd>F</kbd> finish &nbsp;·&nbsp; <kbd>M</kbd> show mercy</span>
-  <button class="touch-only" id="btn-finish">Finish</button><button class="touch-only ghost" id="btn-mercy">Mercy</button>
+  <span class="desk-only"><kbd>F</kbd> fatality &nbsp;·&nbsp; <kbd>click</kbd> clean finish &nbsp;·&nbsp; <kbd>M</kbd> mercy</span>
+  <button class="touch-only" id="btn-finish">Fatality</button><button class="touch-only ghost" id="btn-mercy">Mercy</button>
 </div>
 
 <div id="touch">
   <div class="pad" id="joy"><em>move</em><i id="joy-knob"></i></div>
   <div class="pad" id="blade"><em>blade</em><i id="blade-knob"></i></div>
-  <button class="tb" id="btn-guard">Guard</button><button class="tb" id="btn-dodge">Dodge</button>
+  <button class="tb" id="btn-swap">Target</button><button class="tb" id="btn-guard">Guard</button><button class="tb" id="btn-dodge">Dodge</button>
 </div>
 
 <div id="card" class="layer"><div id="card-n"></div><div id="card-name"></div><div id="card-blurb"></div></div>
@@ -130,7 +146,7 @@ html:not(.touch) .touch-only{display:none!important}
     <b>Left click</b><span>cut from the guard you hold</span>
     <b>Right click</b><span>guard that side · tap just before impact to parry · tap mid-swing to feint</span>
     <b>E</b><span>thrust — pierces a lazy guard, punishes a miss</span>
-    <b>W A S D · Space</b><span>step · dodge</span>
+    <b>W A S D · Space</b><span>step · dodge · walk into a bind to shove, kick or throw</span>
   </div>
   <div class="how touch-only">
     <b>Left pad</b><span>move</span>
@@ -140,7 +156,7 @@ html:not(.touch) .touch-only{display:none!important}
   </div>
   <p class="rules">Match your guard to the side the cut comes from. A parry opens your opponent; a clean cut wounds; three wounds and they kneel. Break a guard, then cut — and it is over.</p>
   <button id="m-go">Draw</button>
-  <span class="build">Build V66</span><a class="legacy" href="classic.html">classic version</a>
+  <span class="build">Build V67</span><a class="legacy" href="classic.html">classic version</a>
 </div>
 
 <div id="verdict" class="layer">
@@ -151,11 +167,11 @@ html:not(.touch) .touch-only{display:none!important}
 
 <script type="importmap">
 { "imports": {
-  "three": "./vendor/three.module.js?v=v66",
-  "zan/gfx": "./src/gfx.js?v=v66", "zan/figure": "./src/figure.js?v=v66", "zan/duel": "./src/duel.js?v=v66",
-  "zan/input": "./src/input.js?v=v66", "zan/audio": "./src/audio.js?v=v66" } }
+  "three": "./vendor/three.module.js?v=v67",
+  "zan/gfx": "./src/gfx.js?v=v67", "zan/figure": "./src/figure.js?v=v67", "zan/duel": "./src/duel.js?v=v67",
+  "zan/input": "./src/input.js?v=v67", "zan/audio": "./src/audio.js?v=v67" } }
 </script>
 <script>if (matchMedia('(pointer:coarse)').matches || 'ontouchstart' in window) document.documentElement.classList.add('touch');</script>
-<script type="module" src="./src/main.js?v=v66"></script>
+<script type="module" src="./src/main.js?v=v67"></script>
 </body>
 </html>

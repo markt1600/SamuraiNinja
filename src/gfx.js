@@ -32,7 +32,7 @@ export const flat = (color, opt) => new THREE.MeshBasicMaterial(Object.assign({ 
 const POST_FS = `
 precision highp float;
 uniform sampler2D tColor, tDepth, tNormal;
-uniform vec2 uRes; uniform float uNear, uFar, uKill, uFlash, uDim;
+uniform vec2 uRes; uniform float uNear, uFar, uKill, uFlash, uDim, uTime;
 varying vec2 vUv;
 float hash(vec2 p){ p=fract(p*vec2(123.34,456.21)); p+=dot(p,p+45.32); return fract(p.x*p.y); }
 float vn(vec2 p){ vec2 i=floor(p),f=fract(p); f=f*f*(3.-2.*f);
@@ -54,6 +54,19 @@ void main(){
   float edge=max(eD,eN)*(1.-.75*smoothstep(30.,80.,d0));
   vec3 col=texture2D(tColor,vUv).rgb;
   col=pow(max(col,0.),vec3(1./2.2));
+  // sky: a graded wash with slow cloud bands, only where nothing was drawn
+  float raw=texture2D(tDepth,vUv).x;
+  if(raw>=.99999){
+    float cl=vn(vec2(vUv.x*3.+uTime*.012,vUv.y*9.))*.6+vn(vec2(vUv.x*7.-uTime*.02,vUv.y*22.))*.4;
+    col*=mix(vec3(1.05,1.03,1.),vec3(.8,.82,.88),smoothstep(.35,1.,vUv.y)*.8+cl*.28*smoothstep(.3,.8,vUv.y));
+  }
+  // hatching: shade is drawn, not filled
+  float lum0=dot(col,vec3(.3,.59,.11));
+  float notRed=1.-step(.25,col.r-max(col.g,col.b)*1.5);
+  float hw=smoothstep(.76,.6,lum0)*smoothstep(.26,.4,lum0)*(1.-smoothstep(20.,50.,d0))*notRed;
+  float hp=(gl_FragCoord.x+gl_FragCoord.y)/sc;
+  float h1=smoothstep(.62,.95,abs(fract(hp/9.+vn(vUv*asp*30.)*.4)-.5)*2.);
+  col*=1.-hw*.2*h1;
   float grain=vn(vUv*uRes/sc*.9)*.6+vn(vUv*asp*9.)*.4;
   vec3 ink=vec3(.085,.07,.065);
   // dry-brush: the line breaks up where the paper tooth shows through
@@ -95,13 +108,13 @@ export function init(canvas) {
   postMat = new THREE.ShaderMaterial({
     uniforms: { tColor: { value: null }, tDepth: { value: null }, tNormal: { value: null },
       uRes: { value: new THREE.Vector2() }, uNear: { value: camera.near }, uFar: { value: camera.far },
-      uKill: { value: 0 }, uFlash: { value: 0 }, uDim: { value: 0 } },
+      uKill: { value: 0 }, uFlash: { value: 0 }, uDim: { value: 0 }, uTime: { value: 0 } },
     vertexShader: 'varying vec2 vUv; void main(){ vUv=uv; gl_Position=vec4(position.xy,0.,1.); }',
     fragmentShader: POST_FS, depthTest: false, depthWrite: false });
   postScene.add(new THREE.Mesh(new THREE.PlaneGeometry(2, 2), postMat));
   resize();
   addEventListener('resize', resize);
-  buildArena(); buildParticles(); buildSnow();
+  buildArena(); buildDressing(); buildParticles(); buildSnow(); buildBursts();
   return { renderer, scene, camera };
 }
 
@@ -118,6 +131,7 @@ export function resize() {
 }
 
 export const look = { kill: 0, flash: 0, dim: 0, shake: 0 };
+let clock = 0;
 export function render(dt) {
   if (look.shake > 0) {
     look.shake = Math.max(0, look.shake - dt * 2.6);
@@ -133,7 +147,7 @@ export function render(dt) {
   scene.overrideMaterial = null; scene.fog = fog; camera.layers.enable(FX);
   const u = postMat.uniforms;
   u.tColor.value = rtColor.texture; u.tDepth.value = rtColor.depthTexture; u.tNormal.value = rtNormal.texture;
-  u.uKill.value = look.kill; u.uFlash.value = look.flash; u.uDim.value = look.dim;
+  u.uTime.value = clock; u.uKill.value = look.kill; u.uFlash.value = look.flash; u.uDim.value = look.dim;
   renderer.setRenderTarget(null); renderer.render(postScene, postCam);
 }
 
@@ -289,6 +303,13 @@ export function sparks(p, n = 16) {
     emit(1, p, _v, .012 + Math.random() * .012, .18 + Math.random() * .25);
   }
 }
+/** flung ink: the impact, drawn */
+export function inkSplash(p, dir, n = 14) {
+  for (let i = 0; i < n; i++) {
+    _v.set(dir.x + (Math.random() - .5) * 1.6, dir.y + Math.random() * .9, dir.z + (Math.random() - .5) * 1.6).normalize().multiplyScalar(2.5 + Math.random() * 5);
+    emit(3, p, _v, .014 + Math.random() * .02, .25 + Math.random() * .3);
+  }
+}
 export function puff(p, n = 8) {
   for (let i = 0; i < n; i++) {
     _v.set(Math.random() - .5, Math.random() * .9, Math.random() - .5).multiplyScalar(1.6);
@@ -321,7 +342,8 @@ function buildSnow() {
   snowPos = new Float32Array(NS * 3);
   for (let i = 0; i < NS * 3; i += 3) { snowPos[i] = (Math.random() - .5) * SBOX; snowPos[i + 1] = Math.random() * 12; snowPos[i + 2] = (Math.random() - .5) * SBOX; }
   const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.BufferAttribute(snowPos, 3));
-  snow = new THREE.Points(g, new THREE.PointsMaterial({ color: 0xffffff, size: .07, sizeAttenuation: true, depthWrite: false, fog: false }));
+  snow = new THREE.Points(g, new THREE.PointsMaterial({ color: 0xffffff, size: .09, sizeAttenuation: true, depthWrite: false, fog: false, transparent: true, alphaTest: .3,
+    map: tex((c, w) => { c.fillStyle = '#fff'; c.beginPath(); c.arc(w / 2, w / 2, w * .42, 0, 6.3); c.fill(); }, 32, 32) }));
   snow.layers.set(FX); snow.frustumCulled = false; scene.add(snow);
 }
 function tickSnow(dt, t) {
@@ -338,8 +360,8 @@ function tickSnow(dt, t) {
 
 /* ---------- blade trails: a brushstroke left in the air ---------- */
 export class Trail {
-  constructor(n = 12) {
-    this.n = n; this.count = 0;
+  constructor(n = 12, rgb = [.08, .07, .065], gain = .8) {
+    this.n = n; this.count = 0; this.rgb = rgb; this.gain = gain;
     this.pos = new Float32Array(n * 2 * 3); this.col = new Float32Array(n * 2 * 4);
     const g = new THREE.BufferGeometry();
     g.setAttribute('position', new THREE.BufferAttribute(this.pos, 3));
@@ -361,16 +383,105 @@ export class Trail {
     if (this.fade <= 0) { this.count = 0; this.mesh.visible = false; return; }
     this.mesh.visible = this.count > 1;
     for (let i = 0; i < n; i++) {
-      const a = i < this.count ? (1 - i / this.count) ** 1.5 * .8 * this.fade : 0;
+      const a = i < this.count ? (1 - i / this.count) ** 1.5 * this.gain * this.fade : 0;
       if (i >= this.count) for (let k = 0; k < 6; k++) p[i * 6 + k] = p[Math.max(0, this.count - 1) * 6 + k];
-      for (let s = 0; s < 2; s++) { const o = (i * 2 + s) * 4; this.col[o] = .08; this.col[o + 1] = .07; this.col[o + 2] = .065; this.col[o + 3] = a * (s ? 1 : .35); }
+      for (let s = 0; s < 2; s++) { const o = (i * 2 + s) * 4; this.col[o] = this.rgb[0]; this.col[o + 1] = this.rgb[1]; this.col[o + 2] = this.rgb[2]; this.col[o + 3] = a * (s ? 1 : .35); }
     }
     this.mesh.geometry.attributes.position.needsUpdate = true; this.mesh.geometry.attributes.color.needsUpdate = true;
   }
 }
 
+/* ---------- bursts: streaks, stars and shock rings, drawn facing the eye ---------- */
+function tex(draw, w = 256, h = 256) { const c = document.createElement('canvas'); c.width = w; c.height = h; draw(c.getContext('2d'), w, h); const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; return t; }
+const TEX = {};
+const bursts = [];
+function buildBursts() {
+  TEX.streak = tex((c, w, h) => {                       // a loaded brush dragged fast: fat belly, dry tail
+    for (let i = 0; i < 90; i++) {
+      const y = h / 2 + (Math.random() - .5) * h * .5, t = .5 + Math.random() * .5;
+      const g = c.createLinearGradient(0, 0, w, 0); g.addColorStop(0, 'rgba(255,255,255,0)'); g.addColorStop(.25 + Math.random() * .2, `rgba(255,255,255,${.5 * t})`); g.addColorStop(.8, `rgba(255,255,255,${.25 * t})`); g.addColorStop(1, 'rgba(255,255,255,0)');
+      c.fillStyle = g; c.fillRect(0, y, w, 1 + Math.random() * 5 * (1 - Math.abs(y - h / 2) / (h * .3)));
+    }
+  }, 512, 64);
+  TEX.ring = tex((c, w) => { c.strokeStyle = '#fff'; for (let i = 0; i < 40; i++) { c.globalAlpha = .1 + Math.random() * .25; c.lineWidth = 2 + Math.random() * 9; c.beginPath(); const a = Math.random() * 6.3; c.arc(w / 2, w / 2, w * .4 + (Math.random() - .5) * 8, a, a + 1 + Math.random() * 3); c.stroke(); } });
+  TEX.star = tex((c, w) => { c.translate(w / 2, w / 2); c.fillStyle = '#fff'; for (let k = 0; k < 8; k++) { c.rotate(Math.PI / 4); const L = k % 2 ? w * .3 : w * .49; c.beginPath(); c.moveTo(0, -5); c.lineTo(L, 0); c.lineTo(0, 5); c.closePath(); c.fill(); } const g = c.createRadialGradient(0, 0, 0, 0, 0, w * .2); g.addColorStop(0, '#fff'); g.addColorStop(1, 'rgba(255,255,255,0)'); c.fillStyle = g; c.fillRect(-w / 2, -w / 2, w, w); });
+  const geo = new THREE.PlaneGeometry(1, 1);
+  for (let i = 0; i < 16; i++) {
+    const m = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({ transparent: true, depthWrite: false, depthTest: false, fog: false }));
+    m.layers.set(FX); m.visible = false; m.renderOrder = 5; scene.add(m); bursts.push({ m, life: 0 });
+  }
+}
+/** kind: streak | ring | star; dir (world) aims a streak */
+export function burst(kind, p, color, size, life = .2, dir, grow = 1.8) {
+  const o = bursts.find(b => b.life <= 0) || bursts[0];
+  o.m.material.map = TEX[kind]; o.m.material.color.set(color); o.m.material.needsUpdate = true;
+  o.m.position.copy(p); o.life = o.max = life; o.size = size; o.grow = grow; o.kind = kind; o.ang = Math.random() * 6.3;
+  if (dir) { const a = _v.copy(p).project(camera), ax = a.x, ay = a.y; const b = _v2.copy(p).add(dir).project(camera); o.ang = Math.atan2(b.y - ay, (b.x - ax) * camera.aspect); }
+  o.m.visible = true;
+}
+function tickBursts(dt) {
+  for (const o of bursts) {
+    if (o.life <= 0) continue; o.life -= dt; if (o.life <= 0) { o.m.visible = false; continue; }
+    const k = 1 - o.life / o.max, s = o.size * (1 + (o.grow - 1) * (1 - (1 - k) ** 2));
+    o.m.quaternion.copy(camera.quaternion).multiply(_q.setFromAxisAngle(_v.set(0, 0, 1), o.ang));
+    o.m.scale.set(s, o.kind === 'streak' ? s * .16 * (1 - k * .6) : s, 1); o.m.material.opacity = (1 - k) ** (o.kind === 'ring' ? 1 : .6);
+  }
+}
+
+/* ---------- dressing: banners, rope, mist, glow ---------- */
+const banners = []; let mist = [], glows = [];
+function buildDressing() {
+  const rnd = mulberry(11);
+  // nobori banners between the lanterns
+  const marks = ['斬', '雪', '刃', '死'];
+  for (let i = 0; i < 4; i++) {
+    const a = i * Math.PI / 2 + .08, R = RING + 3.8, x = Math.sin(a) * R, z = Math.cos(a) * R;
+    mesh(new THREE.CylinderGeometry(.035, .045, 4.6, 6), toon(0x2a2422), x, 2.3, z);
+    const t = tex((c, w, h) => {
+      const red = i % 2 === 0; c.fillStyle = red ? '#b3261e' : '#efe9dc'; c.fillRect(0, 0, w, h);
+      c.fillStyle = red ? '#efe9dc' : '#15120f'; c.font = `bold ${w * .78}px "Hiragino Mincho ProN","Yu Mincho",serif`; c.textAlign = 'center'; c.textBaseline = 'middle';
+      c.fillText(marks[i], w / 2, h * .3); c.beginPath(); c.arc(w / 2, h * .72, w * .26, 0, 6.3); c.lineWidth = w * .09; c.strokeStyle = c.fillStyle; c.stroke();
+      c.fillStyle = 'rgba(21,18,15,.85)'; c.fillRect(0, 0, w, 5); c.fillRect(0, 0, 4, h); c.fillRect(w - 4, 0, 4, h); c.fillRect(0, h - 5, w, 5);
+    }, 128, 512);
+    const g = new THREE.PlaneGeometry(.72, 3, 3, 12);
+    const m = new THREE.Mesh(g, new THREE.MeshBasicMaterial({ map: t, side: THREE.DoubleSide }));
+    m.position.set(x, 2.95, z); m.rotation.y = a + Math.PI / 2; m.layers.set(FX); scene.add(m);
+    banners.push({ m, base: g.attributes.position.array.slice(), ph: rnd() * 6 });
+  }
+  // shimenawa rope and paper streamers on the torii
+  const rope = mesh(new THREE.CylinderGeometry(.09, .09, 5, 8), toon(0xc9ae74), 0, 4.32, -14.9); rope.rotation.z = Math.PI / 2;
+  for (let i = -2; i <= 2; i++) { const p = mesh(new THREE.BoxGeometry(.22, .5, .02), toon(0xf8f5ee), i * .95, 4, -14.86, false); p.rotation.z = (i % 2 ? .2 : -.2); }
+  // low mist banks
+  const mt = tex((c, w, h) => { const g = c.createRadialGradient(w / 2, h / 2, 0, w / 2, h / 2, w / 2); g.addColorStop(0, 'rgba(255,255,255,.75)'); g.addColorStop(1, 'rgba(255,255,255,0)'); c.fillStyle = g; c.fillRect(0, 0, w, h); }, 256, 256);
+  for (let i = 0; i < 7; i++) {
+    const m = new THREE.Mesh(new THREE.PlaneGeometry(26 + rnd() * 20, 3.5 + rnd() * 3), new THREE.MeshBasicMaterial({ map: mt, transparent: true, opacity: .5, depthWrite: false, fog: false, color: 0xf3efe6 }));
+    const a = rnd() * 6.3, r = 24 + rnd() * 22; m.position.set(Math.sin(a) * r, 1.2 + rnd() * 2.2, Math.cos(a) * r); m.layers.set(FX); scene.add(m); mist.push({ m, a, r, sp: (.004 + rnd() * .008) * (i % 2 ? 1 : -1) });
+  }
+  // lantern light and the sun's halo
+  for (let i = 0; i < 4; i++) {
+    const a = Math.PI / 4 + i * Math.PI / 2, x = Math.sin(a) * (RING + 1.6), z = Math.cos(a) * (RING + 1.6);
+    const m = new THREE.Mesh(new THREE.PlaneGeometry(2.2, 2.2), new THREE.MeshBasicMaterial({ map: mt, transparent: true, opacity: .55, depthWrite: false, fog: false, color: 0xffa530 }));
+    m.position.set(x, 1.33, z); m.layers.set(FX); scene.add(m); glows.push(m);
+  }
+  const halo = new THREE.Mesh(new THREE.PlaneGeometry(64, 64), new THREE.MeshBasicMaterial({ map: mt, transparent: true, opacity: .5, depthWrite: false, fog: false, color: 0xd9644f }));
+  halo.position.set(9, 17, -109); halo.layers.set(FX); scene.add(halo);
+}
+function tickDressing(dt, t) {
+  for (const b of banners) {
+    const p = b.m.geometry.attributes.position, a = p.array, o = b.base;
+    for (let i = 0; i < a.length; i += 3) {
+      const free = (o[i] + .36) / .72, y = o[i + 1];            // the pole edge is pinned
+      a[i + 2] = Math.sin(t * 3.1 + y * 2.2 + b.ph + free * 2) * .16 * free + Math.sin(t * 5.3 + y * 4 + b.ph) * .04 * free;
+      a[i] = o[i] - Math.abs(a[i + 2]) * .25 * free;
+    }
+    p.needsUpdate = true;
+  }
+  for (const o of mist) { o.a += o.sp * dt; o.m.position.x = Math.sin(o.a) * o.r; o.m.position.z = Math.cos(o.a) * o.r; o.m.quaternion.copy(camera.quaternion); }
+  glows.forEach((g, i) => { g.quaternion.copy(camera.quaternion); g.material.opacity = .45 + .12 * Math.sin(t * 9 + i * 2) * Math.sin(t * 23 + i); });
+}
+
 export function tick(dt, t) {
-  tickParticles(dt); tickSnow(dt, t);
+  clock = t; tickParticles(dt); tickSnow(dt, t); tickBursts(dt); tickDressing(dt, t);
   if (decalDirty) { decalTex.needsUpdate = true; decalDirty = false; }
 }
 export { scene, camera, renderer };

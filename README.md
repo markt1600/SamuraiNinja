@@ -15,6 +15,9 @@ Static site: open `index.html` through any web server (`python3 -m http.server`)
 - A **clean cut** wounds. Three wounds and a fighter kneels — finish or show mercy.
 - A **broken guard** (full posture bar) leaves a fighter open: the next cut kills.
 - Wounds carry into the next duel; one closes between duels.
+- Two cuts landing together lock the blades in a **bind**: keep driving forward to win it and shove, kick, pommel-strike or throw.
+- A kneeling opponent can be finished cleanly (attack), with a **fatality** (F — both arms, then the head), or spared (M).
+- The fifth duel is **two against one**; Q / Tab (or the Target button) switches who you face.
 
 | | Desktop | Touch |
 |---|---|---|
