@@ -285,7 +285,7 @@ export class Duel {
     // both blades arriving together: they lock
     if (def.state === 'windup' && def.target === att && def.dur - def.t < .12 && !def.atk.exec && !this.bind) {
       for (const f of [att, def]) { f.atk = null; f.drive = 0; f.set('bind'); f.poseName = ''; f.fig.go(['bind', .1, 'out']); }
-      G.sparks(mid, 26); sfx.clang(1.25); G.look.shake = .5; this.hitStop = .08;
+      G.sparks(mid, 26); sfx.clang(1.25); sfx.scrape(); G.look.shake = .5; this.hitStop = .08;
       G.burst('star', mid, 0xfff3c4, 1.1, .16); G.burst('ring', mid, 0x15120f, .9, .3, null, 3);
       att.addPosture(10, this); def.addPosture(10, this);
       if (att.state === 'bind' && def.state === 'bind') { this.bind = { x: att, y: def, t: 0 }; this.emit('bind'); }

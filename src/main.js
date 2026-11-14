@@ -57,7 +57,7 @@ function startDuel() {
   $('card-name').textContent = d.name + ', ' + d.title + (d.second ? ' — and ' + d.second.name : ''); $('card-blurb').textContent = d.blurb;
   show('card', true); show('menu', false); show('verdict', false); show('hud', true); show('prompt', false);
   document.body.classList.remove('ended'); document.body.classList.toggle('two', foes.length > 1);
-  sfx.music(true); sfx.taiko(.7); camSnap = true; hud();
+  sfx.music('intro'); sfx.taiko(.7); camSnap = true; hud();
 }
 function onEvent(type, who, extra) {
   const mine = who === player;
@@ -71,7 +71,7 @@ function onEvent(type, who, extra) {
   else if (type === 'evade') say(mine ? 'Slipped' : 'Evaded');
   else if (type === 'yield') say(mine ? 'You fall to your knees' : who.name + ' yields', mine ? 'bad' : 'good', 2);
   else if (type === 'over') {
-    game.state = 'end'; game.endT = 0; $('msg').className = ''; sayT = 0; game.won = who.victor === player; show('prompt', false); sfx.music(false);
+    game.state = 'end'; game.endT = 0; $('msg').className = ''; sayT = 0; game.won = who.victor === player; show('prompt', false); sfx.music('after');
     Input.state.fighting = false; if (document.exitPointerLock) document.exitPointerLock();
     document.body.classList.add('ended');
     if (!who.mercy) { const sl = $('slash'); sl.classList.remove('go'); void sl.offsetWidth; sl.classList.add('go'); }
@@ -87,7 +87,7 @@ function verdict() {
     : 'Cut down by ' + duel.over.victor.name + ' in duel ' + ROMAN[game.stage] + '.';
   $('v-go').textContent = game.won ? (last ? 'Begin again' : 'Next duel') : 'Begin again';
   $('v-retry').style.display = game.won ? 'none' : '';
-  show('verdict', true); show('hud', false); sfx.bell();
+  show('verdict', true); show('hud', false); if (game.won) sfx.victory(); else sfx.death();
 }
 function proceed(retry) {
   sfx.boot();
@@ -180,8 +180,14 @@ function cam(dt) {
 
 /* ---------- frame ---------- */
 const IDLE = { mx: 0, mz: 0, stance: null, attack: false, thrust: false, guard: false, dodge: false };
+function pressure() {
+  if (!duel || game.state !== 'fight') return .3;
+  const f = duel.all, busy = f.some(x => x.state === 'windup' || x.state === 'strike' || x.state === 'bind') ? .15 : 0;
+  if (f.some(x => x.state === 'broken' || x.state === 'kneel')) return 1;
+  return .25 + Math.max(...f.map(x => x.posture)) / 100 * .45 + Math.max(player.wounds, ...foes.map(x => x.wounds)) * .12 + busy;
+}
 function update(dt, forced) {
-  game.time += dt; game.t += dt;
+  game.time += dt; game.t += dt; sfx.tick(pressure());
   const inp = Input.read(), intent = forced || inp.intent;
   if (inp.confirm) proceed();
   if (sayT > 0 && (sayT -= dt) <= 0) $('msg').className = '';
@@ -190,7 +196,7 @@ function update(dt, forced) {
     duel.hold = true; duel.step(dt, IDLE); duel.time = 0; duel.hold = false;
     if (!game.bowed && game.t > .7) { game.bowed = true; for (const f of duel.all) f.fig.go(['rest', .25, 'io'], ['bow', .45, 'io'], ['bow', .3], [f.stance, .55, 'io']); }
     if (game.t > 2.6 || (game.t > .6 && (inp.intent.attack || inp.confirm))) {
-      game.state = 'fight'; show('card', false); Input.state.fighting = true; game.woundsIn = player.wounds; sfx.bell();
+      game.state = 'fight'; show('card', false); Input.state.fighting = true; game.woundsIn = player.wounds; sfx.bell(); sfx.music('duel');
       for (const f of [player, enemy]) { f.poseName = ''; }
     }
   } else if (game.state === 'fight') {
@@ -220,8 +226,7 @@ function update(dt, forced) {
     }
     if (game.state === 'verdict') G.look.dim = Math.min(.5, G.look.dim + dt);
   }
-  const tension = Math.max(player.posture, enemy.posture) / 100;
-  sfx.tick(tension);
+
 }
 let last = performance.now();
 function frame(ts) {
@@ -235,8 +240,11 @@ player = new Fighter(PLAYER, true); newEnemy(4, true);
 player.reset(1.9, -1.2, -Math.PI / 2); enemy.reset(-1.9, -1.2, Math.PI / 2);
 player.fig.snap('left'); enemy.fig.snap('high'); player.fig.update(0); enemy.fig.update(0);
 show('menu', true);
+// sound may only start on a gesture: the first touch or key brings up the wind and the menu theme
+const wake = () => { if (sfx.boot() && game.state === 'menu') sfx.music('menu'); };
+addEventListener('pointerdown', wake); addEventListener('keydown', wake);
 requestAnimationFrame(frame);
 
 /* test hook: drive the simulation without the render loop */
-window.ZAN = { game, G, T, AI, LADDER, pop, get player() { return player; }, get enemy() { return enemy; }, get foes() { return foes; }, get duel() { return duel; }, get ai() { return ai; },
+window.ZAN = { game, G, T, AI, LADDER, pop, sfx, get player() { return player; }, get enemy() { return enemy; }, get foes() { return foes; }, get duel() { return duel; }, get ai() { return ai; },
   proceed, sim(sec, intent, dt = 1 / 60) { for (let t = 0; t < sec; t += dt) { update(dt, typeof intent === 'function' ? intent() : intent); G.tick(dt, game.time); } } };

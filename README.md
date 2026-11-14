@@ -40,7 +40,7 @@ Static site: open `index.html` through any web server (`python3 -m http.server`)
 | `src/gfx.js` | renderer, ink-outline post pass, arena, blood / sparks / snow / trails |
 | `src/replay.js` | snapshot tape and effect log for the kill replay |
 | `src/input.js` | keyboard, mouse and touch → one intent per frame |
-| `src/audio.js` | synthesised sound and music |
+| `src/audio.js` | recorded fight effects (`audio/`, CC0 — see `audio/ATTRIBUTION.md`) and a live-synthesised orchestral score that follows the duel |
 
 `window.ZAN.sim(seconds, intent)` steps the simulation without rendering, for tests.
 
