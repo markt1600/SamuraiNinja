@@ -298,24 +298,7 @@ function buildArena() {
       m.rotation.y = rnd() * 6; m.receiveShadow = false;
     }
   }
-  // pines
-  const leaf = toon(0x27332e), trunk = toon(0x2e2622);
-  for (let i = 0; i < 22; i++) {
-    const a = rnd() * Math.PI * 2, r = 13 + rnd() * 17;
-    const x = Math.sin(a) * r, z = Math.cos(a) * r;
-    if (Math.abs(x) < 5 && z < -8) continue;
-    const s = .8 + rnd() * .9;
-    // each pine is one group, so the whole tree can lean in the wind
-    const tree = new THREE.Group(); tree.position.set(x, 0, z); scene.add(tree);
-    const part = (g, m, y, sh = true) => { const o = new THREE.Mesh(g, m); o.position.y = y; o.castShadow = sh; o.receiveShadow = true; tree.add(o); return o; };
-    part(new THREE.CylinderGeometry(.13 * s, .22 * s, 2.4 * s, 6), trunk, 1.2 * s);
-    for (let t = 0; t < 4; t++) {
-      const y = (2 + t * 1.15) * s, rr = (1.75 - t * .36) * s;
-      const c = part(new THREE.ConeGeometry(rr, 1.7 * s, 7), leaf, y + .5 * s); c.rotation.y = rnd() * 3;
-      const sn = part(new THREE.ConeGeometry(rr * .62, 1.06 * s, 7), toon(SNOW), y + .86 * s, false); sn.rotation.y = c.rotation.y;
-    }
-    swayers.push({ g: tree, ph: rnd() * 6, amp: .8 + rnd() * .5 });
-  }
+  buildTrees(rnd);
   // stone lanterns at the quarters of the ring
   const glow = flat(0xffb347); glow.color.multiplyScalar(2.2);
   for (let i = 0; i < 4; i++) {
@@ -535,31 +518,136 @@ export class Trail {
   }
 }
 
-/* ---------- nature: plum trees in bloom, reeds, drifts, crows, petals ---------- */
+/* ---------- trees, drawn rather than stacked ---------- */
+let leafMat, flowerMat;
+/** fuse coloured parts into one mesh: parts are { g, color, m? } */
+function merged(parts) {
+  let n = 0; const gs = parts.map(p => { const g = p.g.index ? p.g.toNonIndexed() : p.g.clone(); if (p.m) g.applyMatrix4(p.m); n += g.attributes.position.count; return g; });
+  const pos = new Float32Array(n * 3), nor = new Float32Array(n * 3), col = new Float32Array(n * 3), c = new THREE.Color(); let o = 0;
+  gs.forEach((g, i) => { pos.set(g.attributes.position.array, o * 3); nor.set(g.attributes.normal.array, o * 3); c.set(parts[i].color); for (let k = 0; k < g.attributes.position.count; k++) { col[(o + k) * 3] = c.r; col[(o + k) * 3 + 1] = c.g; col[(o + k) * 3 + 2] = c.b; } o += g.attributes.position.count; });
+  const out = new THREE.BufferGeometry(); out.setAttribute('position', new THREE.BufferAttribute(pos, 3)); out.setAttribute('normal', new THREE.BufferAttribute(nor, 3)); out.setAttribute('color', new THREE.BufferAttribute(col, 3)); return out;
+}
+/** a mass of foliage or snow: a sphere pushed about until it has a silhouette worth outlining */
+function blob(rnd, sx, sy, sz, rough = .3) {
+  const g = new THREE.SphereGeometry(1, 11, 8), p = g.attributes.position, a = rnd() * 9, b = rnd() * 9;
+  for (let i = 0; i < p.count; i++) {
+    let x = p.getX(i), y = p.getY(i), z = p.getZ(i);
+    const n = 1 + Math.sin(x * 3.1 + a) * Math.sin(y * 4.3 + b) * Math.sin(z * 3.7 + a) * rough + Math.sin(x * 8 + b) * Math.sin(z * 7 + y * 6 + a) * rough * .4;
+    x *= n; y *= n; z *= n; if (y < -.42) y = -.42 - (y + .42) * .2;                 // sits flat on its bough
+    p.setXYZ(i, x * sx, y * sy, z * sz);
+  }
+  g.computeVertexNormals(); return g;
+}
+/** a ragged skirt of boughs for a cedar: a cone whose hem hangs unevenly */
+function skirt(rnd, r, h) {
+  const g = new THREE.ConeGeometry(r, h, 13, 2, true), p = g.attributes.position, jag = Array.from({ length: 14 }, () => [.72 + rnd() * .5, rnd() * .3]);
+  for (let i = 0; i < p.count; i++) {
+    const x = p.getX(i), y = p.getY(i), z = p.getZ(i), t = (h / 2 - y) / h; if (t < .2) continue;
+    const j = jag[Math.round((Math.atan2(z, x) / (Math.PI * 2) + .5) * 13) % 13], k = 1 + (j[0] - 1) * t;
+    p.setXYZ(i, x * k, y - j[1] * h * t * t, z * k);
+  }
+  g.computeVertexNormals(); return g;
+}
+function blossomGeo() {
+  const parts = [];
+  for (let i = 0; i < 5; i++) { const a = i / 5 * Math.PI * 2, m = new THREE.Matrix4().makeRotationZ(a).multiply(new THREE.Matrix4().makeTranslation(0, .5, 0)).multiply(new THREE.Matrix4().makeScale(.42, .52, 1)); parts.push({ g: new THREE.CircleGeometry(1, 7), color: 0xffffff, m }); }
+  parts.push({ g: new THREE.CircleGeometry(.24, 6), color: 0xffd23a, m: new THREE.Matrix4().makeTranslation(0, 0, .03) });
+  return merged(parts);
+}
+function buildTrees(rnd) {
+  leafMat = toon(0xffffff, { vertexColors: true });
+  // blossoms quiver on their stems, each to its own time
+  flowerMat = new THREE.MeshBasicMaterial({ vertexColors: true, side: THREE.DoubleSide, fog: false });
+  flowerMat.onBeforeCompile = sh => { sh.uniforms.uW = windU; sh.vertexShader = 'uniform vec2 uW;\n' + sh.vertexShader.replace('#include <begin_vertex>', '#include <begin_vertex>\n float fp = instanceMatrix[3].x * 3.1 + instanceMatrix[3].y * 2.3 + instanceMatrix[3].z * 1.7; float fa = (sin(uW.x * 4.6 + fp) * .22 + sin(uW.x * 9.1 + fp * 1.7) * .08) * (.35 + uW.y * 1.3);\n transformed.xy = mat2(cos(fa), -sin(fa), sin(fa), cos(fa)) * transformed.xy; transformed.z += sin(uW.x * 6.3 + fp) * .25 * (.3 + uW.y);'); };
+  const BARK = 0x2b211c, PINE = [0x1f2f29, 0x283a31, 0x18251f], T = (x, y, z) => new THREE.Matrix4().makeTranslation(x, y, z);
+  const rod = (a, b, r0, r1) => { const d = new THREE.Vector3().subVectors(b, a), l = d.length(), q = new THREE.Quaternion().setFromUnitVectors(UP, d.multiplyScalar(1 / l)); return { g: new THREE.CylinderGeometry(r1, r0, l * 1.06, 6), color: BARK, m: new THREE.Matrix4().compose(a.clone().lerp(b, .5), q, new THREE.Vector3(1, 1, 1)) }; };
+  const add = (parent, parts) => { const m = new THREE.Mesh(merged(parts), leafMat); m.castShadow = true; m.receiveShadow = true; parent.add(m); return m; };
+  // black pines: a leaning, kinked trunk; long limbs reaching out level, each carrying a cloud of needles under snow
+  const matsu = (x, z, s) => {
+    const tree = new THREE.Group(); tree.position.set(x, 0, z); scene.add(tree); swayers.push({ g: tree, ph: rnd() * 6, amp: .45 });
+    const pts = [new THREE.Vector3()], dir = new THREE.Vector3((rnd() - .5) * .7, 1, (rnd() - .5) * .7).normalize(), N = 6;
+    for (let k = 0; k < N; k++) { dir.x += (rnd() - .5) * .62; dir.z += (rnd() - .5) * .62; dir.y = 1; dir.normalize(); pts.push(pts[k].clone().addScaledVector(dir, (1.05 - k * .07) * s)); }
+    add(tree, pts.slice(1).map((p, k) => rod(pts[k], p, (.24 - k * .03) * s, (.21 - k * .03) * s)));
+    const pad = (parts, c, L, yaw, tone) => {
+      const R = new THREE.Matrix4().makeRotationY(yaw), at = T(c.x, c.y, c.z).multiply(R);
+      parts.push({ g: blob(rnd, L, L * .4, L * .7, .38), color: PINE[tone % 3], m: at });
+      parts.push({ g: blob(rnd, L * .86, L * .2, L * .58, .26), color: SNOW, m: T(c.x, c.y + L * .33, c.z).multiply(R) });
+    };
+    let az = rnd() * 6;
+    for (let k = 2; k <= N; k++) for (let j = 0; j < (k === N ? 1 : k < 4 ? 2 : 1 + (rnd() < .5 ? 1 : 0)); j++) {
+      az += 1.9 + rnd() * 1.3;
+      const g = new THREE.Group(); g.position.copy(pts[k]); tree.add(g); swayers.push({ g, ph: rnd() * 6, amp: 2.6 });
+      const top = k === N, L = top ? 1.05 * s : (1.75 - k * .16) * s * (.75 + rnd() * .5), out = new THREE.Vector3(Math.sin(az), top ? .9 : .1 + rnd() * .16, Math.cos(az)).normalize();
+      const end = out.clone().multiplyScalar(top ? .4 * s : L), parts = [rod(new THREE.Vector3(), end, .07 * s, .035 * s)];
+      pad(parts, end, L * (top ? .95 : .62), az, k + j);
+      if (!top && L > 1.1 * s) pad(parts, end.clone().multiplyScalar(.5).add(new THREE.Vector3(0, .12 * s, 0)), L * .4, az + .6, k + j + 1);
+      add(g, parts);
+    }
+  };
+  // cedars: tall, dark and ragged, standing behind
+  const sugi = (x, z, s) => {
+    const tree = new THREE.Group(); tree.position.set(x, 0, z); scene.add(tree); swayers.push({ g: tree, ph: rnd() * 6, amp: 1 + rnd() * .4 });
+    const parts = [{ g: new THREE.CylinderGeometry(.1 * s, .24 * s, 3 * s, 6), color: BARK, m: T(0, 1.5 * s, 0) }], n = 6;
+    for (let t = 0; t < n; t++) {
+      const y = (1.5 + t * 1.02) * s, r = (1.95 - t * .29) * s, h = 1.9 * s, tilt = new THREE.Matrix4().makeRotationFromEuler(new THREE.Euler((rnd() - .5) * .16, rnd() * 6, (rnd() - .5) * .16));
+      parts.push({ g: skirt(rnd, r, h), color: PINE[t % 3], m: T(0, y + h / 2, 0).multiply(tilt) });
+      parts.push({ g: skirt(rnd, r * .8, h * .7), color: SNOW, m: T(0, y + h * .72, 0).multiply(tilt) });
+    }
+    add(tree, parts);
+  };
+  let placed = 0;
+  for (let i = 0; i < 40 && placed < 8; i++) { const a = rnd() * 6.3, r = 12.5 + rnd() * 6, x = Math.sin(a) * r, z = Math.cos(a) * r; if (Math.abs(x) < 5.5 && z < -7) continue; matsu(x, z, .95 + rnd() * .5); placed++; }
+  for (let i = 0; i < 18; i++) { const a = rnd() * 6.3, r = 20 + rnd() * 14, x = Math.sin(a) * r, z = Math.cos(a) * r; if (Math.abs(x) < 6 && z < -8) continue; sugi(x, z, .95 + rnd() * .9); }
+}
+
+/* ---------- nature: plum trees in bloom, camellias, reeds, drifts, crows, petals ---------- */
 let petals, petalPos, crows = [];
 const NPET = 70;
 function buildNature() {
   const rnd = mulberry(29), D = new THREE.Object3D();
-  // plum trees: black boughs, red blossom
-  for (const [tx, tz, sc] of [[-11.5, -5.5, 1.15], [12, 2.5, 1], [-6, 13.5, .9]]) {
-    const segs = [], buds = [];
-    const grow = (p, dir, len, r, depth) => {
-      const e = p.clone().addScaledVector(dir, len); segs.push([p, e, r]);
-      if (depth === 0) { for (let i = 0; i < 5; i++) buds.push(p.clone().lerp(e, rnd()).add(new THREE.Vector3(rnd() - .5, rnd() - .5, rnd() - .5).multiplyScalar(.22))); return; }
-      const n = depth > 2 ? 2 : 2 + (rnd() < .5 ? 1 : 0);
+  // plum trees: black boughs that move one by one, hung with five-petalled blossom
+  const blossom = blossomGeo(), tint = [0xd3243f, 0xd3243f, 0xe2506a, 0xf0a0ac, 0xf7eee6].map(h => new THREE.Color(h));
+  const instanced = (geo, mat, list, place) => { const m = new THREE.InstancedMesh(geo, mat, list.length); list.forEach((it, i) => { place(it, i, m); D.updateMatrix(); m.setMatrixAt(i, D.matrix); }); return m; };
+  const limb = ([a, b, r]) => { D.position.copy(a); _v.subVectors(b, a); const l = _v.length(); D.quaternion.setFromUnitVectors(UP, _v.multiplyScalar(1 / l)); D.scale.set(r, l * 1.04, r); };
+  const bloom = (b, i, m) => { D.position.copy(b); D.rotation.set(rnd() * 6, rnd() * 6, rnd() * 6); D.scale.setScalar(.075 + rnd() * .06); m.setColorAt(i, tint[rnd() * tint.length | 0]); };
+  const twig = new THREE.CylinderGeometry(.62, 1, 1, 5).translate(0, .5, 0), bark = toon(0x1c1816);
+  for (const [tx, tz, sc] of [[-11.5, -5.5, 1.2], [12, 2.5, 1.05], [-6, 13.5, .95], [9.5, -11.5, 1]]) {
+    const tree = new THREE.Group(); tree.position.set(tx, 0, tz); scene.add(tree); swayers.push({ g: tree, ph: rnd() * 6, amp: 1 });
+    const trunk = [], boughs = [];
+    const grow = (p, dir, len, r, depth, bough) => {
+      const e = p.clone().addScaledVector(dir, len); (bough ? bough.segs : trunk).push([p, e, r]);
+      const bud = (n, sp) => { for (let i = 0; i < n; i++) bough.buds.push(p.clone().lerp(e, rnd()).add(new THREE.Vector3(rnd() - .5, rnd() - .4, rnd() - .5).multiplyScalar(sp))); };
+      if (depth === 0) return bud(7, .26);
+      const n = depth > 2 ? 3 : 2 + (rnd() < .5 ? 1 : 0);
       for (let i = 0; i < n; i++) {
-        const d = dir.clone().add(new THREE.Vector3(rnd() - .5, rnd() * .5 - .08, rnd() - .5).multiplyScalar(1.25)).normalize();
-        grow(e, d, len * (.62 + rnd() * .2), r * .62, depth - 1);
+        // old wood: every shoot kinks away from the last, and the low ones reach out flat
+        const d = dir.clone().add(new THREE.Vector3(rnd() - .5, rnd() * .55 - .16, rnd() - .5).multiplyScalar(1.4)).normalize();
+        let b = bough; if (!b) { b = { o: e.clone(), segs: [], buds: [] }; boughs.push(b); }
+        grow(e, d, len * (.6 + rnd() * .24), r * .62, depth - 1, b);
       }
-      if (depth < 3) for (let i = 0; i < 2; i++) buds.push(p.clone().lerp(e, rnd()).add(new THREE.Vector3(rnd() - .5, rnd() * .3, rnd() - .5).multiplyScalar(.15)));
+      if (bough && depth < 3) bud(3, .16);
     };
-    grow(new THREE.Vector3(0, 0, 0), new THREE.Vector3(rnd() * .3 - .15, 1, rnd() * .3 - .15).normalize(), 1.5 * sc, .16 * sc, 4);
-    const bm = new THREE.InstancedMesh(new THREE.CylinderGeometry(.62, 1, 1, 5).translate(0, .5, 0), toon(0x1c1816), segs.length);
-    segs.forEach(([a, b, r], i) => { D.position.copy(a); _v.subVectors(b, a); const l = _v.length(); D.quaternion.setFromUnitVectors(UP, _v.multiplyScalar(1 / l)); D.scale.set(r, l * 1.04, r); D.updateMatrix(); bm.setMatrixAt(i, D.matrix); });
-    bm.castShadow = true; scene.add(bm); bm.position.set(tx, 0, tz); const ph = rnd() * 6; swayers.push({ g: bm, ph, amp: 1.5 });
-    const fm = new THREE.InstancedMesh(new THREE.IcosahedronGeometry(1, 0), flat(0xd3243f, { fog: false }), buds.length);
-    buds.forEach((b, i) => { D.position.copy(b); D.quaternion.identity(); D.scale.setScalar(.05 + rnd() * .05); D.updateMatrix(); fm.setMatrixAt(i, D.matrix); });
-    fm.layers.set(FX); scene.add(fm); fm.position.set(tx, 0, tz); swayers.push({ g: fm, ph, amp: 1.5 });
+    grow(new THREE.Vector3(), new THREE.Vector3(rnd() * .4 - .2, 1, rnd() * .4 - .2).normalize(), 1.35 * sc, .17 * sc, 4, null);
+    const tm = instanced(twig, bark, trunk, limb); tm.castShadow = true; tree.add(tm);
+    for (const b of boughs) {
+      const g = new THREE.Group(); g.position.copy(b.o); tree.add(g); swayers.push({ g, ph: rnd() * 6, amp: 3.2 });
+      const rel = v => v.clone().sub(b.o);
+      const bm = instanced(twig, bark, b.segs.map(([a, e, r]) => [rel(a), rel(e), r]), limb); bm.castShadow = true; g.add(bm);
+      const fm = instanced(blossom, flowerMat, b.buds.map(rel), bloom); fm.layers.set(FX); g.add(fm);
+    }
+  }
+  // camellias: dark glossy bushes under snow, red flowers facing out
+  for (let i = 0; i < 8; i++) {
+    const a = .5 + i * .78 + rnd() * .3, r = RING + 2.3 + rnd() * 2.4, x = Math.sin(a) * r, z = Math.cos(a) * r; if (Math.abs(x) < 3 && z < 0) continue;
+    const g = new THREE.Group(); g.position.set(x, 0, z); scene.add(g); swayers.push({ g, ph: rnd() * 6, amp: 2 });
+    const parts = [], fl = [], k = .8 + rnd() * .5;
+    for (let j = 0; j < 4; j++) {
+      const c = new THREE.Vector3((rnd() - .5) * .9 * k, (.3 + rnd() * .25) * k, (rnd() - .5) * .9 * k), sz = (.42 + rnd() * .22) * k, m = new THREE.Matrix4().makeTranslation(c.x, c.y, c.z);
+      parts.push({ g: blob(rnd, sz, sz * .8, sz), color: j % 2 ? 0x1c3528 : 0x24422f, m }); parts.push({ g: blob(rnd, sz * .7, sz * .28, sz * .7, .2), color: SNOW, m: new THREE.Matrix4().makeTranslation(c.x, c.y + sz * .62, c.z) });
+      for (let f = 0; f < 4; f++) { const n = new THREE.Vector3(rnd() - .5, rnd() * .6 - .05, rnd() - .5).normalize(); fl.push([c.clone().addScaledVector(n, sz * .93), n]); }
+    }
+    const bush = new THREE.Mesh(merged(parts), leafMat); bush.castShadow = bush.receiveShadow = true; g.add(bush);
+    const fm = instanced(blossom, flowerMat, fl, ([p0, n], idx, m) => { D.position.copy(p0); D.quaternion.setFromUnitVectors(_v.set(0, 0, 1), n); D.scale.setScalar(.11 + rnd() * .05); m.setColorAt(idx, tint[rnd() < .8 ? 0 : 4]); }); fm.layers.set(FX); g.add(fm);
   }
   // dry reeds standing through the snow
   const NR = IS_TOUCH ? 160 : 320, reedMat = flat(0x352d22), reeds = new THREE.InstancedMesh(new THREE.ConeGeometry(.016, 1, 3, 4).translate(0, .5, 0), reedMat, NR);
@@ -769,7 +857,8 @@ void main(){
 function tickWind(dt, t) {
   wind.gust = Math.max(0, Math.min(1, .5 + .55 * Math.sin(t * .23) * Math.sin(t * .61 + 1.3) + .12 * Math.sin(t * 1.7)));
   windU.value.set(t, wind.gust);
-  for (const s of swayers) { s.g.rotation.z = -(Math.sin(t * 1.3 + s.ph) * .007 + wind.gust * .02) * s.amp; s.g.rotation.x = Math.cos(t * 1.05 + s.ph) * .006 * s.amp; }
+  // every tree, limb, bough and bush leans with the gust and springs back on its own beat
+  for (const s of swayers) { const g = wind.gust * (.6 + .4 * Math.sin(t * 2.3 + s.ph * 1.7)); s.g.rotation.z = -(Math.sin(t * 1.3 + s.ph) * .008 + g * .022) * s.amp; s.g.rotation.x = (Math.cos(t * 1.05 + s.ph) * .007 + g * .008) * s.amp; }
   shide.forEach((p, i) => { p.rotation.z = Math.sin(t * 2.6 + i * 1.3) * .2 * (.4 + wind.gust) + wind.gust * .25; p.rotation.x = Math.sin(t * 3.4 + i) * .12 * wind.gust; });
   lanternL.forEach((L, i) => { L.intensity = 4 * (.82 + .14 * Math.sin(t * 11 + i * 2.1) * Math.sin(t * 27 + i) + .08 * Math.sin(t * 3.3 + i)); });
 }
