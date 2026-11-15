@@ -213,12 +213,12 @@ function update(dt, forced) {
     const figs = duel.all.map(f => f.fig), R = Replay.state(), before = R.t < R.killT;
     const done = Replay.tick(dt, figs) || (game.t > .5 && (inp.intent.attack || inp.confirm));
     if (before && R.t >= R.killT) { slash(); sfx.kill(); }
-    G.look.kill = R.t >= R.killT ? Math.max(0, 1 - (R.t - R.killT) / .45) : 0;
+    G.look.kill = 0;
     if (done) { Replay.finish(figs); show('replay', false); G.look.kill = 0; verdict(); }
   } else {
     duel.step(dt, IDLE); game.endT += dt;
     if (game.state === 'end') Replay.record(duel.time, duel.all.map(f => f.fig));
-    G.look.kill = duel.over.mercy || game.state !== 'end' ? 0 : Math.max(0, Math.min(1, game.endT / .12) * (1 - Math.max(0, game.endT - 1.5) / .9));
+    G.look.kill = duel.over.mercy || game.state !== 'end' ? 0 : Math.max(0, 1 - game.endT / .16);       // one stark frame on the cut, then the scene as it is
     if (game.state === 'end' && game.endT > (duel.over.mercy ? 2.4 : 3.4)) {
       const k = duel.over.t;
       if (!duel.over.mercy && Replay.start((duel.fatalT != null ? Math.min(duel.fatalT - 1, k - 2.5) : k - 3.2), k)) { game.state = 'replay'; game.t = 0; camSnap = true; show('replay', true); }

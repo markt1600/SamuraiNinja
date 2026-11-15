@@ -209,10 +209,6 @@ export class Duel {
       if (d < 1.12) { if (d < 1e-3) { _v.set(0, 0, 1); d = 1; } _v.multiplyScalar((1.12 - d) / d * .5); q.pos.add(_v); p.pos.sub(_v); }
     }
     for (const f of all) { const r = Math.hypot(f.pos.x, f.pos.z); if (r > G.RING - .4) f.pos.multiplyScalar((G.RING - .4) / r); f.fig.update(dt); }
-    for (const f of this.fountains) if (this.time < f.until) {
-      const k = (f.until - this.time) / f.span;
-      G.bleed(f.at, _v.set((Math.random() - .5) * .5 + f.dx, 1, (Math.random() - .5) * .5 + f.dz), Math.ceil(3 * k), (2 + 4.5 * k * (.7 + .3 * Math.sin(this.time * 9))) * f.k, .22);
-    }
     // the player on their knees: the opponent does not hesitate, and takes everything
     if (a.state === 'kneel' && !this.over) {
       this.yieldT += dt;
@@ -238,8 +234,9 @@ export class Duel {
     if (part === 'head') return this.kill(att, def, 'left', true);
     const side = part === 'armR' ? 1 : 0, out = def.left(new THREE.Vector3()).multiplyScalar(side ? -1 : 1);
     if (!def.fig.sever(side, out)) return;
-    this.fountain(def.fig, def.fig.shW[side], 1.5, .55, out.x * .8, out.z * .8);
-    G.bleed(def.fig.shW[side], out.setY(.5), 40, 5, .5); G.look.shake = .6; this.hitStop = .09;
+    G.gush({ at: def.fig.shW[side], dir: out.clone().setY(.55), dur: 2.4, speed: 3.6, pulse: 1.8, strands: 2, spread: .16, width: .04, pool: true });
+    G.gush({ at: def.fig.shW[side], dir: out.clone().setY(.2), dur: .2, speed: 5.5, strands: 3, spread: .5, width: .035 });
+    G.bleed(def.fig.shW[side], out.setY(.5), 10, 5, .5); G.look.shake = .6; this.hitStop = .09;
     G.burst('streak', def.fig.shW[side], G.BLOOD, 3.4, .3, _w.set(0, -1, 0), 1.4); G.burst('streak', def.fig.shW[side], 0xffffff, 2.6, .16, _w, 1.5);
     sfx.cut(); sfx.grunt(def.isPlayer); def.fig.go(['hurt', .12, 'out'], ['kneel', .4, 'io']); this.emit('sever', def);
   }
@@ -319,7 +316,7 @@ export class Duel {
     // a clean cut
     def.wounds++; def.atk = null; att.fig.setBloody(true); G.look.impact = .75; G.look.punch = .7;
     const sweep = this.sweep(att, atk, new THREE.Vector3());
-    G.bleed(def.fig.chest, sweep, 46, 5.5, .5); G.look.shake = .7; this.hitStop = .13; this.slow = .25;
+    G.gush({ at: def.fig.chest, dir: sweep, dur: .24, speed: 6.2, strands: 4, spread: .5, width: .04 }); G.bleed(def.fig.chest, sweep, 12, 5.5, .5); G.look.shake = .7; this.hitStop = .13; this.slow = .25;
     G.burst('streak', def.fig.chest, 0xffffff, 3.2, .2, sweep, 1.5); G.burst('streak', def.fig.chest, G.BLOOD, 4.2, .34, sweep, 1.4); G.inkSplash(def.fig.chest, sweep, 12); G.look.flash = .18;
     sfx.cut(); sfx.grunt(def.isPlayer);
     def.push.addScaledVector(away, 3.4); def.posture = Math.min(96, def.posture + 18); def.lastPosture = this.time;
@@ -338,13 +335,18 @@ export class Duel {
     const sw = this.sweep(att, { dir: how, thrust: how === 'thrust' }, new THREE.Vector3());
     const fig = def.fig;
     if (how === 'left' || how === 'right') {
-      fig.behead(sw); this.fountain(fig, fig.neckW, 2.6);
+      fig.behead(sw);
+      // the neck: two arteries under full pressure, beating down as the body empties
+      G.gush({ at: fig.neckW, from: fig.chest, dur: 3.6, speed: 5.4, pulse: 1.9, strands: 4, spread: .13, width: .075, pool: true });
+      G.gush({ at: fig.neckW, dir: sw, dur: .22, speed: 6.5, strands: 3, spread: .45, width: .04 });
       fig.go(['kneel', exec ? .3 : .55, 'io'], ['kneel', .35], ['deadF', .8, 'in']);
-      G.bleed(fig.neckW, sw, 60, 6, .5);
+      G.bleed(fig.neckW, sw, 14, 6, .5);
     } else if (how === 'high') {
-      G.bleed(fig.chest, sw, 110, 7.5, .7); fig.go(['reel', .28, 'out'], ['deadB', .85, 'in']);
+      G.gush({ at: fig.chest, dir: sw, dur: .5, speed: 7.5, strands: 5, spread: .6, width: .05 }); G.gush({ at: fig.chest, dir: new THREE.Vector3(sw.x * .4, 1, sw.z * .4), dur: 2.6, speed: 2.8, pulse: 1.8, strands: 2, spread: .2, width: .045, pool: true });
+      G.bleed(fig.chest, sw, 20, 7.5, .7); fig.go(['reel', .28, 'out'], ['deadB', .85, 'in']);
     } else {
-      G.bleed(fig.chest, sw, 80, 7, .35); fig.go(['hurt', .3, 'out'], ['kneel', .5, 'io'], ['deadF', .8, 'in']);
+      G.gush({ at: fig.chest, dir: sw, dur: .4, speed: 7, strands: 3, spread: .25, width: .045 }); G.gush({ at: fig.chest, dir: new THREE.Vector3(-sw.x, .5, -sw.z), dur: 2.4, speed: 2.6, pulse: 1.8, strands: 2, spread: .2, width: .04, pool: true });
+      G.bleed(fig.chest, sw, 14, 7, .35); fig.go(['hurt', .3, 'out'], ['kneel', .5, 'io'], ['deadF', .8, 'in']);
     }
     const back = how === 'high' ? -.5 : .5;
     setTimeout(() => G.pool(def.pos.x + Math.sin(def.yaw) * back, def.pos.z + Math.cos(def.yaw) * back, .5), 1700);

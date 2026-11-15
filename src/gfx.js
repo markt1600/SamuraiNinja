@@ -113,10 +113,6 @@ void main(){
   float hp=(gl_FragCoord.x+gl_FragCoord.y)/sc;
   float h1=smoothstep(.62,.95,abs(fract(hp/9.+vn(vUv*asp*30.)*.4)-.5)*2.);
   col*=1.-hw*.15*h1;
-  // screentone: the blacks carry a dot screen, as on a printed page
-  float tw=smoothstep(.3,.16,lum0)*smoothstep(.03,.08,lum0)*notRed*(1.-smoothstep(12.,34.,d0));
-  vec2 tp=mat2(.707,-.707,.707,.707)*gl_FragCoord.xy/sc/5.5;
-  col=mix(col,col*1.7+.07,tw*smoothstep(.36,.22,length(fract(tp)-.5))*.55);
   float grain=vn(vUv*uRes/sc*.9)*.6+vn(vUv*asp*9.)*.4;
   vec3 ink=vec3(.085,.07,.065);
   // dry-brush: the line breaks up where the paper tooth shows through
@@ -180,7 +176,7 @@ export function init(canvas) {
   flashL = new THREE.PointLight(0xfff1cf, 0, 9, 2); scene.add(flashL);
   resize();
   addEventListener('resize', resize);
-  buildArena(); buildDressing(); buildNature(); buildTorches(); buildDust(); buildParticles(); buildSnow(); buildBursts();
+  buildArena(); buildDressing(); buildNature(); buildTorches(); buildDust(); buildGush(); buildParticles(); buildSnow(); buildBursts();
   return { renderer, scene, camera };
 }
 
@@ -380,7 +376,7 @@ export function bleed(p, dir, n, speed, spread = .45) {
   for (let i = 0; i < n; i++) {
     _v.set(dir.x + (Math.random() - .5) * spread * 2, dir.y + (Math.random() - .3) * spread * 2, dir.z + (Math.random() - .5) * spread * 2)
       .normalize().multiplyScalar(speed * (.35 + Math.random() * .9));
-    emit(0, p, _v, .018 + Math.random() * .03, 2.5);
+    emit(0, p, _v, .009 + Math.random() * .016, 2.5);
   }
 }
 export function sparks(p, n = 16) {
@@ -461,6 +457,69 @@ function tickParticles(dt) {
     _m.compose(o.p, _q, _v2.set(o.r * k, o.r * k * st, o.r * k)); pMesh.setMatrixAt(i, _m);
   }
   pMesh.instanceMatrix.needsUpdate = true;
+}
+
+/* ---------- blood under pressure: unbroken streams that arc, pulse with the heart, thin, and break into drops ---------- */
+const JET_N = 44, jets = [], gushes = [], _gd = new THREE.Vector3(), _gs = new THREE.Vector3(), _gt = new THREE.Vector3();
+function buildGush() {
+  const idx = []; for (let i = 0; i < JET_N - 1; i++) { const a = i * 4; idx.push(a, a + 1, a + 2, a + 1, a + 3, a + 2); }
+  for (let i = 0; i < 16; i++) {
+    const pos = new Float32Array((JET_N - 1) * 12), g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.BufferAttribute(pos, 3)); g.setIndex(idx);
+    const mesh = new THREE.Mesh(g, new THREE.MeshBasicMaterial({ color: i % 3 ? BLOOD : 0xa80c26, side: THREE.DoubleSide, fog: false })); mesh.layers.set(FX); mesh.frustumCulled = false; mesh.visible = false; scene.add(mesh);
+    jets.push({ mesh, pos, busy: false, head: 0, off: new THREE.Vector3(), pts: Array.from({ length: JET_N }, () => ({ p: new THREE.Vector3(), v: new THREE.Vector3(), live: false, w: 0, age: 0 })) });
+  }
+}
+/** o: { at (a live Vector3 that the wound follows), from? (the stream leaves along from->at) or dir, dur, speed, pulse? (beats per second), strands, spread, width, pool? } */
+export function gush(o) {
+  tap('gush', [o]);
+  const g = { o, t: 0, acc: 0, poolT: 0, strands: [] };
+  for (let i = 0; i < (o.strands || 3); i++) {
+    const j = jets.find(x => !x.busy); if (!j) break; j.busy = true; j.head = 0; for (const q of j.pts) q.live = false;
+    j.off.set(Math.random() - .5, Math.random() * .4 - .1, Math.random() - .5).multiplyScalar(o.spread ?? .3); j.gain = .7 + Math.random() * .55; j.mesh.visible = true; g.strands.push(j);
+  }
+  if (g.strands.length) gushes.push(g);
+}
+function tickGush(dt) {
+  for (let gi = gushes.length - 1; gi >= 0; gi--) {
+    const g = gushes[gi], o = g.o; g.t += dt; const on = g.t < o.dur, k = Math.max(0, 1 - g.t / o.dur);
+    // each beat of the heart throws it further; the beats weaken as the pressure goes
+    const beat = o.pulse ? .38 + .62 * Math.pow(Math.max(0, Math.sin(g.t * Math.PI * 2 * o.pulse * (.6 + .4 * k))), .45) : 1;
+    g.acc += dt; let n = on ? Math.min(3, Math.floor(g.acc * 55)) : 0; if (n) g.acc -= n / 55; else if (!on) g.acc = 0;
+    if (o.from) _gd.subVectors(o.at, o.from).normalize(); else _gd.copy(o.dir).normalize();
+    if (o.pool && o.at.y < .75 && (g.poolT -= dt) < 0) { g.poolT = .28; pool(o.at.x + _gd.x * .25, o.at.z + _gd.z * .25, .1 + Math.min(.42, g.t * .13)); }
+    let any = false;
+    for (const j of g.strands) {
+      for (let e = 0; e < n; e++) {
+        const q = j.pts[j.head]; j.head = (j.head + 1) % JET_N; q.live = true; q.age = 0; q.p.copy(o.at);
+        q.v.copy(_gd).add(j.off).normalize().multiplyScalar(o.speed * (.2 + .8 * k) * beat * j.gain);
+        q.v.x += (Math.random() - .5) * .2; q.v.y += (Math.random() - .5) * .2; q.v.z += (Math.random() - .5) * .2;
+        q.w = (o.width || .045) * (.45 + .55 * beat) * (.35 + .65 * k);
+      }
+      let prev = null; const P = j.pos;
+      for (let m = 0; m < JET_N; m++) {                 // newest first
+        const q = j.pts[(j.head - 1 - m + JET_N * 2) % JET_N];
+        if (q.live) {
+          q.age += dt; q.v.y -= 9.8 * dt; q.v.multiplyScalar(1 - .35 * dt); q.p.addScaledVector(q.v, dt);
+          if (q.p.y < .02) { q.live = false; if (Math.random() < .7) splat(q.p.x, q.p.z, q.w * (1.1 + Math.random() * 1.8), q.v.x * .35, q.v.z * .35); }
+          else if (q.age > 1.5) { q.live = false; emit(0, q.p, q.v, .008 + Math.random() * .01, 2); }
+          else if (q.age > .35 && Math.random() < dt * .9) emit(0, q.p, _gt.copy(q.v).multiplyScalar(.8 + Math.random() * .4), .007 + Math.random() * .009, 2);
+        }
+        if (m > 0) {
+          const o3 = (m - 1) * 12;
+          if (q.live && prev && prev.live && prev.p.distanceToSquared(q.p) < .5) {
+            any = true;
+            for (let s = 0; s < 2; s++) {
+              const a = s ? q : prev; _gs.crossVectors(a.v, _gt.subVectors(a.p, camera.position)).normalize().multiplyScalar(a.w * (1 - Math.min(1, a.age / 1.5) * .65));
+              const b = o3 + s * 6; P[b] = a.p.x + _gs.x; P[b + 1] = a.p.y + _gs.y; P[b + 2] = a.p.z + _gs.z; P[b + 3] = a.p.x - _gs.x; P[b + 4] = a.p.y - _gs.y; P[b + 5] = a.p.z - _gs.z;
+            }
+          } else for (let b = 0; b < 12; b++) P[o3 + b] = 0;
+        }
+        if (q.live) any = true; prev = q;
+      }
+      j.mesh.geometry.attributes.position.needsUpdate = true;
+    }
+    if (!on && !any) { for (const j of g.strands) { j.busy = false; j.mesh.visible = false; } gushes.splice(gi, 1); }
+  }
 }
 
 /* ---------- falling snow ---------- */
@@ -864,7 +923,7 @@ function tickWind(dt, t) {
 }
 
 export function tick(dt, t) {
-  clock = t; tickWind(dt, t); tickTorches(dt, t); tickDust(dt); tickParticles(dt); tickSnow(dt, t); tickBursts(dt); tickDressing(dt, t); tickNature(dt, t);
+  clock = t; tickWind(dt, t); tickTorches(dt, t); tickDust(dt); tickGush(dt); tickParticles(dt); tickSnow(dt, t); tickBursts(dt); tickDressing(dt, t); tickNature(dt, t);
   if (decalDirty) { decalTex.needsUpdate = true; decalDirty = false; }
 }
 export { scene, camera, renderer };
