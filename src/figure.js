@@ -96,7 +96,7 @@ const GEO = {
   hair: new THREE.SphereGeometry(.134, 14, 8, 0, Math.PI * 2, 0, Math.PI * .56),
   knot: new THREE.CylinderGeometry(.03, .04, .1, 6), kasa: new THREE.ConeGeometry(.37, .17, 14),
   band: new THREE.CylinderGeometry(.139, .139, .036, 14), foot: new THREE.BoxGeometry(.1, .06, .25).translate(0, 0, .045),
-  blade: new THREE.BoxGeometry(.007, .78, .034).translate(0, .47, 0), tsuba: new THREE.CylinderGeometry(.046, .046, .012, 10).translate(0, .075, 0),
+  blade: (() => { const g = new THREE.BoxGeometry(.012, .78, .046, 1, 6, 1).translate(0, .47, 0), p = g.attributes.position; for (let i = 0; i < p.count; i++) if (p.getY(i) > .85) { p.setZ(i, .019); p.setX(i, p.getX(i) * .3); } return g; })(),   // drawn to a point at the tip tsuba: new THREE.CylinderGeometry(.046, .046, .012, 10).translate(0, .075, 0),
   grip: new THREE.CylinderGeometry(.016, .019, .27, 8).translate(0, -.065, 0), saya: new THREE.CylinderGeometry(.022, .017, .8, 8),
   stump: new THREE.CylinderGeometry(.052, .052, .02, 8),
 };
@@ -112,6 +112,31 @@ const PAT = {
   kasa: () => canvasTex((c, w, h) => { base(c, w, h); c.fillStyle = 'rgba(60,40,10,.4)'; for (let y = 3; y < h; y += 8) c.fillRect(0, y, w, 1.6); for (let x = 0; x < w; x += 16) { c.fillStyle = 'rgba(60,40,10,.22)'; c.fillRect(x, 0, 1.5, h); } }, 128, 64),
 };
 const patCache = {}; const pat = n => patCache[n] || (patCache[n] = PAT[n]());
+/** polished steel: a bright bevelled edge, a wavering temper line, a dark spine, and the sky, the snow and the sun thrown back off it */
+function steel() {
+  return new THREE.ShaderMaterial({ transparent: true, depthWrite: false, uniforms: { uBlood: { value: 0 }, uFlare: { value: 0 } },
+    vertexShader: 'varying vec2 vUv; varying vec3 vN, vW; void main(){ vUv=uv; vN=normalize(mat3(modelMatrix)*normal); vec4 w=modelMatrix*vec4(position,1.); vW=w.xyz; gl_Position=projectionMatrix*viewMatrix*w; }',
+    fragmentShader: `
+uniform float uBlood, uFlare; varying vec2 vUv; varying vec3 vN, vW;
+void main(){
+  float w=vUv.x, y=vUv.y;
+  vec3 V=normalize(cameraPosition-vW), N=normalize(vN)*(gl_FrontFacing?1.:-1.), R=reflect(-V,N);
+  // what the blade sees: snow below, cold sky above, the low red sun, a torch somewhere
+  vec3 env=mix(vec3(.93,.92,.9),vec3(.5,.6,.78),smoothstep(-.25,.45,R.y));
+  env+=vec3(1.6,.75,.4)*pow(max(dot(R,normalize(vec3(.08,.15,-.98))),0.),14.)+vec3(1.,.55,.2)*pow(max(R.x*R.x-.55,0.),2.)*1.2;
+  float ham=.36+sin(y*46.)*.035+sin(y*17.+1.)*.03;
+  vec3 col=mix(vec3(1.),vec3(.74,.78,.84),smoothstep(ham-.02,ham+.02,w))*(.62+.5*env);
+  col=mix(col,vec3(1.25),smoothstep(.03,.0,abs(w-ham))*.7);
+  // a hard streak of light that runs the length of the blade as it turns
+  float g=fract(dot(V,vec3(.83,.21,.52))*2.2+dot(N,vec3(.3,.9,.2))*1.3);
+  col+=vec3(1.5,1.55,1.7)*smoothstep(.09,0.,abs(y-g))*(1.-uBlood*.6);
+  col=mix(col,vec3(.2,.22,.27),smoothstep(.86,.9,w)*.85);                          // the spine, inked
+  vec3 bl=vec3(.62,.03,.09)*(.75+.5*env.b)+vec3(.9,.5,.5)*smoothstep(.09,0.,abs(y-g))*.5;
+  col=mix(col,bl,uBlood*smoothstep(.02,.2,y)*(.7+.3*smoothstep(.9,.3,w)));
+  col+=uFlare*vec3(.7,.75,.9);
+  gl_FragColor=vec4(col*col,1.);
+}` });
+}
 const L_TH = .46, L_SH = .45, L_UA = .3, L_FA = .29;
 
 export class Figure {
@@ -160,8 +185,10 @@ export class Figure {
     }
     if (look.band) { const b = add(GEO.band, flat(look.band), this.headG); b.position.y = .035; b.rotation.x = -.12; }
     this.sword = new THREE.Group(); this.root.add(this.sword);
-    this.bladeMat = toon(0xeef2f6).clone(); this.blade = add(GEO.blade, this.bladeMat, this.sword); const hb = add(new THREE.CylinderGeometry(.014, .014, .03, 6), toon(0xc9a24a), this.sword); hb.position.y = .095; hb.scale.z = 1.8; add(GEO.tsuba, dark, this.sword); add(GEO.grip, toon(look.grip ?? 0x2a2a30), this.sword);
-    this.trail = new Trail(); this.glint = new Trail(8, [2.4, 2.4, 2.6], .95); this._g0 = V(); this._g1 = V();
+    this.bladeMat = steel(); this.blade = add(GEO.blade, this.bladeMat, this.sword); this.blade.layers.set(FX); this.blade.renderOrder = 4;
+    // a hair of ink behind the steel, so the blade still reads against snow
+    const bk = add(new THREE.BoxGeometry(.003, .8, .064).translate(0, .465, 0), new THREE.MeshBasicMaterial({ color: 0x15120f, transparent: true, opacity: .85, depthWrite: false, fog: false }), this.sword); bk.layers.set(FX); bk.renderOrder = 3; bk.castShadow = false; const hb = add(new THREE.CylinderGeometry(.014, .014, .03, 6), toon(0xc9a24a), this.sword); hb.position.y = .095; hb.scale.z = 1.8; add(GEO.tsuba, dark, this.sword); add(GEO.grip, toon(look.grip ?? 0x2a2a30), this.sword);
+    this.trail = new Trail(12, [.3, .34, .42], .5); this.glint = new Trail(10, [2.4, 2.4, 2.6], .95); this._g0 = V(); this._g1 = V();
     this.pose = clonePose(POSE.rest); this.from = clonePose(POSE.rest); this.keys = []; this.kt = 0;
     this.feet = [{ p: V(), from: V(), to: V(), t: -1, home: [.15, -.25] }, { p: V(), from: V(), to: V(), t: -1, home: [-.12, .24] }];
     this.pos = V(); this.yaw = 0; this.vel = V(); this.striking = false;
@@ -174,7 +201,7 @@ export class Figure {
   }
   dispose() { scene.remove(this.root); scene.remove(this.trail.mesh); scene.remove(this.glint.mesh); for (const o of this.pieces) scene.remove(o.g); if (this.tails) scene.remove(this.tails.mesh); this.sleeves.forEach(c => scene.remove(c.mesh)); scene.remove(this.hakama.mesh); if (this.coat) scene.remove(this.coat.mesh); }
   setWounds(n) { if (n === this.cutN) return; this.cutN = n; this.cuts.forEach((c, i) => { c.visible = i < n; }); }
-  setBloody(on) { this.bloody = on; this.bladeMat.color.set(on ? 0xc21a34 : 0xeef2f6); }
+  setBloody(on) { this.bloody = on; this.bladeMat.uniforms.uBlood.value = on ? 1 : 0; }
 
   /** queue pose keys: [name|pose, seconds, ease] ...; replaces whatever was playing */
   go(...keys) { this.from = clonePose(this.pose); this.keys = keys.map(k => ({ p: typeof k[0] === 'string' ? POSE[k[0]] : k[0], d: Math.max(.001, k[1]), e: EASE[k[2] || 'out'] })); this.kt = 0; }
@@ -285,7 +312,7 @@ export class Figure {
     for (const q of this.waist) q.applyMatrix4(R.matrixWorld); for (const L of this.legJ) for (const q of L) q.applyMatrix4(R.matrixWorld);
     this.hakama.update(dt, this.waist, this.legJ, this.vel);
     for (let i = 0; i < 2; i++) this.sleeves[i].update(dt, this.elb[i].applyMatrix4(R.matrixWorld), this.wri[i].applyMatrix4(R.matrixWorld), !this.armOff[i]);
-    this.bladeMat.emissive.setScalar(this.striking && !this.bloody ? .9 : 0);          // steel flares as it moves
+    this.bladeMat.uniforms.uFlare.value = this.striking ? 1 : 0;          // steel flares as it moves
     this.trail.push(this.base, this.tip, this.striking, dt);
     this.glint.push(this._g0.lerpVectors(this.base, this.tip, .55), this._g1.lerpVectors(this.base, this.tip, .97), this.striking, dt);
 
