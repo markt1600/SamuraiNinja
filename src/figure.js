@@ -74,6 +74,7 @@ function blend(out, a, b, t) {
 const EASE = {
   lin: t => t, out: t => 1 - (1 - t) ** 3, in: t => t * t * t, io: t => t * t * (3 - 2 * t),
   back: t => { const c = 1.9; return 1 + (c + 1) * (t - 1) ** 3 + c * (t - 1) ** 2; },
+  settle: t => { const c = 1.25; return 1 + (c + 1) * (t - 1) ** 3 + c * (t - 1) ** 2; },
 };
 
 function twoBone(a, t, l1, l2, pole, mid, end) {
@@ -92,7 +93,7 @@ const GEO = {
   thigh: cyl(.118, .112), shin: cyl(.175, .12), upper: cyl(.082, .07), fore: cyl(.1, .084),
   torso: cyl(.215, .165, 12), skirt: cyl(.25, .175, 12), neck: cyl(.05, .055, 8),
   head: new THREE.SphereGeometry(.125, 14, 10), hand: new THREE.SphereGeometry(.046, 8, 6),
-  hair: new THREE.SphereGeometry(.136, 14, 8, 0, Math.PI * 2, 0, Math.PI * .46),
+  hair: new THREE.SphereGeometry(.134, 14, 8, 0, Math.PI * 2, 0, Math.PI * .56),
   knot: new THREE.CylinderGeometry(.03, .04, .1, 6), kasa: new THREE.ConeGeometry(.37, .17, 14),
   band: new THREE.CylinderGeometry(.139, .139, .036, 14), foot: new THREE.BoxGeometry(.1, .06, .25).translate(0, 0, .045),
   blade: new THREE.BoxGeometry(.007, .78, .034).translate(0, .47, 0), tsuba: new THREE.CylinderGeometry(.046, .046, .012, 10).translate(0, .075, 0),
@@ -101,15 +102,10 @@ const GEO = {
 };
 /* drawn cloth: pleats for the hakama, a weave for each kimono, rings for the straw hat */
 const base = (c, w, h) => { c.fillStyle = '#fff'; c.fillRect(0, 0, w, h); };
-// creases: a few loaded strokes where the cloth gathers
-const folds = (c, w, h) => { c.lineCap = 'round'; for (let i = 0; i < 7; i++) { const x = Math.random() * w, y = Math.random() * h, l = 14 + Math.random() * 26, a = .9 + Math.random() * .9; c.strokeStyle = `rgba(0,0,0,${.14 + Math.random() * .16})`; c.lineWidth = 1 + Math.random() * 2.2; c.beginPath(); c.moveTo(x, y); c.quadraticCurveTo(x + Math.cos(a) * l * .5 + 5, y + Math.sin(a) * l * .5, x + Math.cos(a) * l, y + Math.sin(a) * l); c.stroke(); } };
 const PAT = {
-  plain: () => canvasTex((c, w, h) => { base(c, w, h); folds(c, w, h); }, 128, 64),
-  lace: () => canvasTex((c, w, h) => { base(c, w, h); for (let y = 0; y < h; y += 8) { c.fillStyle = 'rgba(0,0,0,.4)'; c.fillRect(0, y, w, 1.5); for (let x = (y / 8 % 2) * 6; x < w; x += 12) { c.fillStyle = 'rgba(200,150,60,.75)'; c.fillRect(x, y + 2.5, 5, 3.5); } } }, 96, 32),
-  ito: () => canvasTex((c, w, h) => { c.fillStyle = '#fff'; c.fillRect(0, 0, w, h); c.strokeStyle = 'rgba(0,0,0,.6)'; c.lineWidth = 2; for (let y = -h; y < h * 2; y += 8) { c.beginPath(); c.moveTo(0, y); c.lineTo(w, y + w); c.moveTo(0, y + w); c.lineTo(w, y); c.stroke(); } }, 16, 64),
   pleat: () => canvasTex((c, w, h) => { base(c, w, h); for (let x = 6; x < w; x += 16) { c.fillStyle = 'rgba(0,0,0,.42)'; c.fillRect(x + Math.random() * 3, 0, 2.2, h); c.fillStyle = 'rgba(0,0,0,.12)'; c.fillRect(x + 4, 0, 5, h); } }, 128, 32),
-  stripe: () => canvasTex((c, w, h) => { base(c, w, h); c.fillStyle = 'rgba(0,0,0,.3)'; for (let x = 0; x < w; x += 12) c.fillRect(x, 0, 3, h); folds(c, w, h); }, 96, 64),
-  check: () => canvasTex((c, w, h) => { base(c, w, h); c.fillStyle = 'rgba(0,0,0,.2)'; for (let x = 0; x < w; x += 16) for (let y = 0; y < h; y += 16) if ((x + y) / 16 % 2) c.fillRect(x, y, 16, 16); folds(c, w, h); }, 128, 64),
+  stripe: () => canvasTex((c, w, h) => { base(c, w, h); c.fillStyle = 'rgba(0,0,0,.3)'; for (let x = 0; x < w; x += 12) c.fillRect(x, 0, 3, h); }, 96, 16),
+  check: () => canvasTex((c, w, h) => { base(c, w, h); c.fillStyle = 'rgba(0,0,0,.2)'; for (let x = 0; x < w; x += 16) for (let y = 0; y < h; y += 16) if ((x + y) / 16 % 2) c.fillRect(x, y, 16, 16); }, 128, 64),
   dots: () => canvasTex((c, w, h) => { base(c, w, h); c.fillStyle = 'rgba(0,0,0,.3)'; for (let x = 8; x < w; x += 16) for (let y = 8; y < h; y += 16) { c.beginPath(); c.arc(x + (y / 16 % 2) * 8, y, 3, 0, 6.3); c.fill(); } }, 128, 64),
   wave: () => canvasTex((c, w, h) => { base(c, w, h); c.strokeStyle = 'rgba(0,0,0,.3)'; c.lineWidth = 2; for (let y = 6; y < h; y += 12) for (let x = -8; x < w; x += 16) { c.beginPath(); c.arc(x + (y / 12 % 2) * 8, y + 6, 8, Math.PI, 0); c.stroke(); } }, 128, 48),
   bloom: () => canvasTex((c, w, h) => { base(c, w, h); for (let i = 0; i < 9; i++) { const x = Math.random() * w, y = Math.random() * h; c.fillStyle = 'rgba(120,0,20,.55)'; for (let k = 0; k < 5; k++) { c.beginPath(); c.arc(x + Math.cos(k * 1.257) * 4, y + Math.sin(k * 1.257) * 4, 3, 0, 6.3); c.fill(); } } }, 128, 64),
@@ -122,7 +118,7 @@ export class Figure {
   /** look: {gi, hakama, skin, hair, hat:'kasa'|'knot'|'band', band} */
   constructor(look) {
     this.root = new THREE.Group(); scene.add(this.root);
-    const gi = this.gi = toonTex(look.gi, pat(look.pattern || 'plain')), hk = toonTex(look.hakama, pat('pleat')), skin = toon(look.skin ?? 0xe8cfb4), dark = toon(0x1b1716);
+    const gi = this.gi = look.pattern ? toonTex(look.gi, pat(look.pattern)) : toon(look.gi), hk = toonTex(look.hakama, pat('pleat')), skin = toon(look.skin ?? 0xe8cfb4), dark = toon(0x1b1716);
     const add = (g, m, parent = this.root) => { const o = new THREE.Mesh(g, m); o.castShadow = true; parent.add(o); return o; };
     this.m = {
       torso: add(GEO.torso, gi), skirt: add(GEO.skirt, hk), neck: add(GEO.neck, skin),
@@ -133,7 +129,9 @@ export class Figure {
       saya: add(GEO.saya, toon(look.saya ?? 0x3a1512)), stump: add(GEO.stump, flat(BLOOD)),
       stL: add(GEO.hand, flat(BLOOD)), stR: add(GEO.hand, flat(BLOOD)),
     };
-    this.m.torso.scale.z = .64; this.m.skirt.scale.z = .74; this.m.stump.visible = this.m.stL.visible = this.m.stR.visible = false; this.m.stL.scale.setScalar(1.5); this.m.stR.scale.setScalar(1.5);
+    this.m.torso.scale.z = .64; this.m.skirt.visible = false;
+    for (const k of ['thL', 'thR']) this.m[k].scale.x = this.m[k].scale.z = .72; for (const k of ['shL', 'shR']) this.m[k].scale.x = this.m[k].scale.z = .5;   // the legs inside the cloth
+    this.m.stump.visible = this.m.stL.visible = this.m.stR.visible = false; this.m.stL.scale.setScalar(1.5); this.m.stR.scale.setScalar(1.5);
     // chest dressing: white under-collar, obi and its knot ride the torso
     this.chestG = new THREE.Group(); this.root.add(this.chestG);
     const white = toon(look.collar ?? 0xf1ece0), obi = toon(look.obi ?? 0x16130f);
@@ -152,19 +150,17 @@ export class Figure {
     add(GEO.head, skin, this.headG);
     const ink = flat(0x15120f);
     for (const sx of [-1, 1]) {
-      const w = add(new THREE.BoxGeometry(.042, .022, .008), flat(0xf4f0e6), this.headG); w.position.set(sx * .047, .01, .1165); w.castShadow = false;
-      const e = add(new THREE.BoxGeometry(.017, .02, .008), ink, this.headG); e.position.set(sx * .043, .011, .1195); e.castShadow = false;
-      const b = add(new THREE.BoxGeometry(.052, .012, .01), ink, this.headG); b.position.set(sx * .047, .034, .119); b.rotation.z = -sx * .28; b.castShadow = false;
+      const e = add(new THREE.BoxGeometry(.032, .012, .01), ink, this.headG); e.position.set(sx * .046, .012, .118); e.castShadow = false;
+      const b = add(new THREE.BoxGeometry(.046, .01, .01), ink, this.headG); b.position.set(sx * .046, .042, .116); b.rotation.z = -sx * .28; b.castShadow = false;
     }
     if (look.hat === 'kasa') { const k = add(GEO.kasa, toonTex(0xc7ad72, pat('kasa')), this.headG); k.position.y = .12; }
     else {
-      const h = add(GEO.hair, toon(look.hair ?? 0x18120f), this.headG); h.rotation.x = -.5; h.position.y = .012;
+      const h = add(GEO.hair, toon(look.hair ?? 0x18120f), this.headG); h.rotation.x = -.28;
       const k = add(GEO.knot, toon(look.hair ?? 0x18120f), this.headG); k.position.set(0, .14, -.05); k.rotation.x = -.5;
     }
     if (look.band) { const b = add(GEO.band, flat(look.band), this.headG); b.position.y = .035; b.rotation.x = -.12; }
-    this.dress(look, add, skin, ink, dark);
     this.sword = new THREE.Group(); this.root.add(this.sword);
-    this.bladeMat = toon(0xeef2f6).clone(); this.blade = add(GEO.blade, this.bladeMat, this.sword); const hb = add(new THREE.CylinderGeometry(.014, .014, .03, 6), toon(0xc9a24a), this.sword); hb.position.y = .095; hb.scale.z = 1.8; add(GEO.tsuba, dark, this.sword); add(GEO.grip, toonTex(look.grip ?? 0x2a2a30, pat('ito')), this.sword);
+    this.bladeMat = toon(0xeef2f6).clone(); this.blade = add(GEO.blade, this.bladeMat, this.sword); const hb = add(new THREE.CylinderGeometry(.014, .014, .03, 6), toon(0xc9a24a), this.sword); hb.position.y = .095; hb.scale.z = 1.8; add(GEO.tsuba, dark, this.sword); add(GEO.grip, toon(look.grip ?? 0x2a2a30), this.sword);
     this.trail = new Trail(); this.glint = new Trail(8, [2.4, 2.4, 2.6], .95); this._g0 = V(); this._g1 = V();
     this.pose = clonePose(POSE.rest); this.from = clonePose(POSE.rest); this.keys = []; this.kt = 0;
     this.feet = [{ p: V(), from: V(), to: V(), t: -1, home: [.15, -.25] }, { p: V(), from: V(), to: V(), t: -1, home: [-.12, .24] }];
@@ -173,59 +169,10 @@ export class Figure {
     if (look.tails) this.tails = new Tails(look.tails, this.headG);
     if (look.coat != null) this.coat = new Coat(toon(look.coat, { side: THREE.DoubleSide })); this.pins = [V(), V(), V(), V()];
     this.elb = [V(), V()]; this.wri = [V(), V()]; this.sleeves = [0, 1].map(() => new Sleeve(toon(look.gi, { side: THREE.DoubleSide })));
-    this.breath = Math.random() * 6; this.leanV = 0; this.rollV = 0;
+    this.breath = Math.random() * 6; this.leanV = 0; this.rollV = 0; this.leanS = 0; this.rollS = 0; this.exert = 0;
+    this.legJ = [[V(), V(), V()], [V(), V(), V()]]; this.waist = Array.from({ length: 14 }, () => V()); this.hakama = new Hakama(toonTex(look.hakama, pat('pleat'), { side: THREE.DoubleSide }));
   }
-  /** everything that makes one swordsman not another: the face, what he wears, what he carries */
-  dress(look, add, skin, ink, dark) {
-    const H = this.headG, C = this.chestG, box = (w, h, d) => new THREE.BoxGeometry(w, h, d), hairM = toon(look.hair ?? 0x18120f), gold = toon(0xc9a24a);
-    const put = (g, m, parent, x, y, z, rx = 0, ry = 0, rz = 0, sh = false) => { const o = add(g, m, parent); o.position.set(x, y, z); o.rotation.set(rx, ry, rz); o.castShadow = sh; return o; };
-    // face
-    H.children[0].scale.set(1, 1.1, 1.03);
-    put(box(.024, .044, .034), skin, H, 0, -.014, .127, -.25);
-    put(box(.046, .007, .01), ink, H, 0, -.066, .113);
-    for (const sx of [-1, 1]) { const e = put(new THREE.SphereGeometry(.03, 8, 6), skin, H, sx * .124, -.004, -.004); e.scale.z = .55; }
-    if (look.hat !== 'kasa') for (const sx of [-1, 1]) put(box(.022, .12, .07), hairM, H, sx * .121, -.01, -.035);
-    else { for (const sx of [-1, 1]) put(box(.007, .23, .007), dark, H, sx * .1, -.03, .07, .15, 0, -sx * .52); put(box(.05, .014, .014), dark, H, 0, -.135, .105); }
-    if (look.band) put(box(.06, .05, .03), flat(look.band), H, 0, .035, -.142);
-    if (look.pony != null) put(new THREE.CylinderGeometry(.035, .016, .34, 6), toon(look.pony), H, 0, -.2, -.125, .22, 0, 0, true);
-    if (look.beard != null) {
-      const bm = toon(look.beard), L = look.beardLong ? .3 : .13;
-      const c = put(new THREE.ConeGeometry(.075, L, 7), bm, H, 0, -.115 - L / 2, .068, Math.PI + .28); c.scale.z = .7;
-      for (const sx of [-1, 1]) { put(box(.06, .016, .014), bm, H, sx * .034, -.05, .118, 0, 0, -sx * .42); put(box(.03, .1, .03), bm, H, sx * .092, -.07, .06); }
-      if (look.beardLong) for (const sx of [-1, 1]) put(box(.062, .02, .02), bm, H, sx * .046, .046, .118, 0, 0, -sx * .3);
-    }
-    if (look.patch) { put(new THREE.CircleGeometry(.034, 10), ink, H, -.046, .012, .1235); const s = put(new THREE.CylinderGeometry(.1305, .1305, .013, 16, 1, true), ink, H, 0, .03, 0, 0, 0, .42); s.scale.z = 1.04; }
-    if (look.scar) put(box(.007, .1, .006), flat(0x7a2a26), H, .05, -.02, .1215, 0, 0, .3);
-    if (look.mask != null) put(new THREE.SphereGeometry(.138, 12, 6, Math.PI / 2 - 1.25, 2.5, Math.PI * .53, Math.PI * .3), toon(look.mask, { side: THREE.DoubleSide }), H, 0, .006, .002);
-    // what he wears over the kimono
-    put(box(.2, .1, .02), toon(look.hakama), C, 0, .065, -.128);                                         // the stiff back-board of the hakama
-    if (look.wings != null) {
-      const wm = toon(look.wings);
-      for (const sx of [-1, 1]) { put(box(.15, .018, .25), wm, C, sx * .27, .485, 0, 0, 0, sx * .42, true); put(box(.075, .42, .014), wm, C, sx * .105, .24, .139, -.06, 0, sx * .12); put(box(.075, .4, .014), wm, C, sx * .105, .25, -.139, .06, 0, sx * .12); }
-    }
-    if (look.armor != null) {
-      const am = toonTex(look.armor, pat('lace'));
-      const d = put(new THREE.CylinderGeometry(.226, .192, .34, 12), am, C, 0, .22, 0, 0, 0, 0, true); d.scale.z = .7;
-      for (const sx of [-1, 1]) put(box(.03, .21, .17), am, C, sx * .275, .37, 0, 0, 0, -sx * .18, true);
-    }
-    if (look.beads != null) { const bm = toon(look.beads); for (let i = 0; i < 16; i++) { const a = i / 16 * Math.PI * 2, s = put(new THREE.SphereGeometry(.014, 6, 4), bm, C, Math.sin(a) * .115, .49 - (1 - Math.cos(a)) * .085, .02 + Math.cos(a) * -.02 + (1 - Math.cos(a)) * .062); s.castShadow = false; } }
-    if (look.scarf != null) { const sm = toon(look.scarf); const r = put(new THREE.CylinderGeometry(.088, .104, .075, 10), sm, C, 0, .505, 0); r.scale.z = .92; put(box(.05, .15, .018), sm, C, .1, .41, .128, -.1, 0, -.2); put(box(.045, .12, .018), sm, C, .135, .4, .112, -.1, 0, -.5); }
-    if (look.rope != null) { const rm = toon(look.rope); const r = put(new THREE.TorusGeometry(.184, .028, 6, 16), rm, C, 0, .03, 0, Math.PI / 2); r.scale.y = .7; put(new THREE.SphereGeometry(.042, 8, 6), rm, C, 0, .03, .135); for (const sx of [-1, 1]) put(new THREE.CylinderGeometry(.018, .024, .2, 5), rm, C, sx * .035, -.08, .14, 0, 0, sx * .2); }
-    // at the hip
-    this.hipG = new THREE.Group(); this.root.add(this.hipG);
-    if (look.waki != null) { const w = put(new THREE.CylinderGeometry(.02, .016, .46, 8), toon(look.waki), this.hipG, .165, .0, .0, 1.38, 0, .16, true); put(new THREE.CylinderGeometry(.017, .019, .15, 8), toonTex(0x2a2a30, pat('ito')), w, 0, .305, 0); put(new THREE.CylinderGeometry(.036, .036, .01, 8), dark, w, 0, .232, 0); }
-    const S = this.m.saya; put(new THREE.CylinderGeometry(.019, .014, .05, 8), gold, S, 0, -.41, 0); put(new THREE.CylinderGeometry(.025, .025, .03, 8), gold, S, 0, .4, 0); put(new THREE.TorusGeometry(.031, .008, 5, 10), flat(look.cord ?? 0x8e1c1c), S, 0, .2, 0, Math.PI / 2);
-    // forearms, hands and feet
-    this.kote = [null, null];
-    if (look.kote != null) for (let i = 0; i < 2; i++) { const k = add(cyl(.086, .104, 10), toonTex(look.kote, pat('lace'))); this.kote[i] = k; }
-    for (const h of [this.m.hdL, this.m.hdR]) { h.scale.set(1, 1.3, .85); put(new THREE.SphereGeometry(.02, 6, 4), skin, h, .034, .012, .022); put(box(.066, .03, .05), skin, h, 0, .034, .006); }
-    const tabi = toon(0xe9e4d8);
-    for (const ft of [this.m.ftL, this.m.ftR]) { ft.material = tabi; put(box(.112, .016, .275), dark, ft, 0, -.034, .045); for (const sx of [-1, 1]) put(box(.012, .012, .13), dark, ft, sx * .022, .034, .085, 0, sx * .42, 0); }
-    for (const sh of [this.m.shL, this.m.shR]) put(new THREE.CylinderGeometry(.18, .174, .06, 10), toon(look.hem ?? 0x0e0d0c), sh, 0, .962, 0);
-    // the sword's furniture
-    put(new THREE.CylinderGeometry(.021, .021, .022, 8), gold, this.sword, 0, -.205, 0);
-  }
-  dispose() { scene.remove(this.root); scene.remove(this.trail.mesh); scene.remove(this.glint.mesh); for (const o of this.pieces) scene.remove(o.g); if (this.tails) scene.remove(this.tails.mesh); this.sleeves.forEach(c => scene.remove(c.mesh)); if (this.coat) scene.remove(this.coat.mesh); }
+  dispose() { scene.remove(this.root); scene.remove(this.trail.mesh); scene.remove(this.glint.mesh); for (const o of this.pieces) scene.remove(o.g); if (this.tails) scene.remove(this.tails.mesh); this.sleeves.forEach(c => scene.remove(c.mesh)); scene.remove(this.hakama.mesh); if (this.coat) scene.remove(this.coat.mesh); }
   setWounds(n) { if (n === this.cutN) return; this.cutN = n; this.cuts.forEach((c, i) => { c.visible = i < n; }); }
   setBloody(on) { this.bloody = on; this.bladeMat.color.set(on ? 0xc21a34 : 0xeef2f6); }
 
@@ -250,8 +197,8 @@ export class Figure {
     }
     const p = this.pose, R = this.root;
     R.position.copy(this.pos); R.rotation.y = this.yaw;
-    this.breath += dt;
-    const br = Math.sin(this.breath * 1.7) * .006 * (1 - p.limp);
+    const ex = this.exert || 0; this.breath += dt * (1 + ex * 1.5);                // a pressed fighter breathes hard
+    const br = Math.sin(this.breath * 1.7) * .006 * (1 + ex * 3.5) * (1 - p.limp);
 
     // feet: planted in the world, stepping when the body leaves them behind
     const sp = this.vel.length();
@@ -261,7 +208,7 @@ export class Figure {
       if (f.t >= 0) {
         f.t += dt / (sp > 3.4 ? .11 : .17); f.to.copy(_a);
         const t = Math.min(1, f.t); f.p.lerpVectors(f.from, f.to, t * t * (3 - 2 * t)); f.p.y = Math.sin(t * Math.PI) * .09;
-        if (t >= 1) { f.t = -1; f.p.y = 0; if (!p.limp) { footprint(f.p.x, f.p.z, this.yaw); if (sp > 3.4) puff(f.p, 3); } this.onStep && this.onStep(sp); }
+        if (t >= 1) { f.t = -1; f.p.y = 0; if (!p.limp) { footprint(f.p.x, f.p.z, this.yaw); if (sp > .5) puff(f.p, sp > 3.4 ? 5 : 2, .35 + Math.min(1, sp * .22)); } this.onStep && this.onStep(sp); }
       } else if (p.limp < .5) {
         const d = _b.subVectors(_a, f.p).setY(0).length();
         if (d > (o.t >= 0 ? .62 : .2 + (sp < .2 ? .12 : 0))) { f.t = 0; f.from.copy(f.p); f.to.copy(_a); }
@@ -272,11 +219,16 @@ export class Figure {
     // the body answers its own movement: it leans into a step and sways at rest
     const live = 1 - p.limp, cy = Math.cos(this.yaw), sy = Math.sin(this.yaw);
     const vf = this.vel.x * sy + this.vel.z * cy, vl = this.vel.x * cy - this.vel.z * sy, kk = Math.min(1, dt * 9);
-    this.leanV += (THREE.MathUtils.clamp(vf * .04, -.1, .14) * live - this.leanV) * kk; this.rollV += (THREE.MathUtils.clamp(-vl * .05, -.13, .13) * live - this.rollV) * kk;
+    // sprung, not eased: the trunk overshoots a stop and settles, as a body does
+    const h = Math.min(dt, .033), tl = THREE.MathUtils.clamp(vf * .045, -.11, .15) * live, tr = THREE.MathUtils.clamp(-vl * .055, -.14, .14) * live;
+    this.leanS += (95 * (tl - this.leanV) - 9.5 * this.leanS) * h; this.leanV += this.leanS * h; this.rollS += (95 * (tr - this.rollV) - 9.5 * this.rollS) * h; this.rollV += this.rollS * h;
+    // the walk shows in the hips: weight goes over the planted foot, shoulders turn against the stride
+    const f0 = this.feet[0].p, f1 = this.feet[1].p, shift = (f1.y - f0.y) * .4 * live;
+    const stride = ((f1.x - f0.x) * sy + (f1.z - f0.z) * cy - .49) * live, counter = THREE.MathUtils.clamp(stride * .28, -.16, .16);
     const sw = Math.sin(this.breath * .9) * live;
-    const hip = _j.hip.set(sw * .012, p.hy + br - Math.abs(this.rollV) * .12, p.hz);
+    const hip = _j.hip.set(sw * .012 + shift, p.hy + br - Math.abs(this.rollV) * .12, p.hz);
     const lift = (this.feet[0].p.y + this.feet[1].p.y) * .25; hip.y += lift;
-    const qC = _j.qC.setFromEuler(_e.set(p.lean + this.leanV, p.twist + sw * .025, p.roll + this.rollV, 'YXZ'));
+    const qC = _j.qC.setFromEuler(_e.set(p.lean + this.leanV + Math.sin(this.breath * 1.7) * .012 * ex, p.twist + sw * .025 - counter, p.roll + this.rollV - shift * .5, 'YXZ'));
     const qH = _j.qH.setFromEuler(_e.set(p.lean * .35, p.twist * .35, 0, 'YXZ'));
     const neck = _j.neck.set(0, .5, 0).applyQuaternion(qC).add(hip);
     const qHead = _j.qHead.setFromEuler(_e.set(p.lean * (p.limp ? 1 : .35) + p.nod, p.twist * .3, p.roll * .5, 'YXZ'));
@@ -285,8 +237,8 @@ export class Figure {
     this.chestG.position.copy(hip); this.chestG.quaternion.copy(qC);
     for (let i = 0; i < 4; i++) this.pins[i].set(-.2 + i * .1333, .43, -.125).applyQuaternion(qC).add(hip);
     M.torso.position.copy(hip).addScaledVector(_a.set(0, -.06, 0).applyQuaternion(qC), 1); M.torso.quaternion.copy(qC); M.torso.scale.y = .58;
+    for (let i = 0; i < 14; i++) { const th = i / 14 * Math.PI * 2; this.waist[i].set(Math.cos(th) * .185, .04, Math.sin(th) * .15).applyQuaternion(qH).add(hip); }
     M.skirt.position.copy(hip).add(_a.set(0, .04, 0)); M.skirt.quaternion.copy(qH).multiply(_q.setFromAxisAngle(_c.set(1, 0, 0), Math.PI)); M.skirt.scale.y = .34;
-    this.hipG.position.copy(hip); this.hipG.quaternion.copy(qH);
     M.saya.position.copy(_a.set(.2, -.02, -.1).applyQuaternion(qH).add(hip)); M.saya.quaternion.copy(qH).multiply(_q.setFromEuler(_e.set(1.25, 0, .12)));
     seg(M.neck, neck, _a.set(0, .08, 0).applyQuaternion(qHead).add(neck));
     if (!this.headless) { this.headG.position.copy(_a.set(0, .17, .01).applyQuaternion(qHead).add(neck)); this.headG.quaternion.copy(qHead); }
@@ -302,6 +254,7 @@ export class Figure {
       if (i && p.kick > 0) ank.lerp(_c.set(-.08, .78, .92), p.kick);
       twoBone(hj, ank, L_TH, L_SH, _c.set(sgn * .35, .1, 1), _j.mid, _j.end);
       seg(i ? M.thR : M.thL, hj, _j.mid); seg(i ? M.shR : M.shL, _j.mid, _j.end);
+      this.legJ[i][0].copy(hj); this.legJ[i][1].copy(_j.mid); this.legJ[i][2].copy(_j.end);
       const ft = i ? M.ftR : M.ftL; ft.position.copy(_j.end).setY(_j.end.y - .04); ft.rotation.set(0, sgn * .22 * (i ? .4 : 1.6), 0);
     }
 
@@ -311,13 +264,13 @@ export class Figure {
     twoBone(shR, grip, L_UA, L_FA, _c.set(-.6, -.8, -.35).applyQuaternion(qC), _j.mid, _j.end);
     if (!this.swordGone) grip.copy(_j.end);          // the sword never leaves the hand
     seg(M.uaR, shR, _j.mid); seg(M.faR, _j.mid, _j.end); M.hdR.position.copy(_j.end); M.stR.position.copy(shR);
-    this.elb[1].copy(_j.mid); this.wri[1].copy(_j.end); this.cuff(1);
+    this.elb[1].copy(_j.mid); this.wri[1].copy(_j.end);
     const lh = _j.b.copy(grip).addScaledVector(p.d, -.15);
     if (p.free > .5) lh.set(-grip.x, grip.y, grip.z);
     if (p.limp > .5) lh.set(.34, .05, shL.z + .2);
     twoBone(shL, lh, L_UA, L_FA, _c.set(.6, -.8, -.35).applyQuaternion(qC), _j.mid, _j.end);
     seg(M.uaL, shL, _j.mid); seg(M.faL, _j.mid, _j.end); M.hdL.position.copy(_j.end); M.stL.position.copy(shL);
-    this.elb[0].copy(_j.mid); this.wri[0].copy(_j.end); this.cuff(0);
+    this.elb[0].copy(_j.mid); this.wri[0].copy(_j.end);
     if (!this.swordGone) { this.sword.position.copy(grip); this.sword.quaternion.setFromUnitVectors(UP, p.d); }
 
     // world-space handles for the rules and the effects
@@ -329,6 +282,8 @@ export class Figure {
     if (this.coat) { for (const q of this.pins) q.applyMatrix4(R.matrixWorld); this.coat.update(dt, this.pins, this.pos, this.yaw); }
     this.shW[0].copy(shL).applyMatrix4(R.matrixWorld); this.shW[1].copy(shR).applyMatrix4(R.matrixWorld);
     if (this.tails) this.tails.update(dt);
+    for (const q of this.waist) q.applyMatrix4(R.matrixWorld); for (const L of this.legJ) for (const q of L) q.applyMatrix4(R.matrixWorld);
+    this.hakama.update(dt, this.waist, this.legJ, this.vel);
     for (let i = 0; i < 2; i++) this.sleeves[i].update(dt, this.elb[i].applyMatrix4(R.matrixWorld), this.wri[i].applyMatrix4(R.matrixWorld), !this.armOff[i]);
     this.bladeMat.emissive.setScalar(this.striking && !this.bloody ? .9 : 0);          // steel flares as it moves
     this.trail.push(this.base, this.tip, this.striking, dt);
@@ -351,11 +306,6 @@ export class Figure {
     }
   }
 
-  /** bracer and hand follow the forearm just solved */
-  cuff(i) {
-    const M = this.m, fa = i ? M.faR : M.faL, hd = i ? M.hdR : M.hdL, k = this.kote[i]; hd.quaternion.copy(fa.quaternion);
-    if (k) { k.visible = !this.armOff[i]; seg(k, _a.lerpVectors(this.elb[i], this.wri[i], .4), _d2.lerpVectors(this.elb[i], this.wri[i], 1.02)); }
-  }
   /** everything needed to draw this figure again later */
   snapshot() {
     return { x: this.pos.x, z: this.pos.z, yaw: this.yaw, vx: this.vel.x, vz: this.vel.z, pose: clonePose(this.pose), f0: this.feet[0].p.clone(), f1: this.feet[1].p.clone(),
@@ -408,23 +358,75 @@ export class Figure {
 }
 
 /* a hanging sleeve: a small cloth sheet pinned along the forearm */
+/* the hakama: a full skirt of cloth hung from the waist, thrown about by the legs inside it */
+class Hakama {
+  constructor(mat) {
+    const C = 14, Rw = 8; this.C = C; this.R = Rw; this.pts = Array.from({ length: C * Rw }, () => ({ p: V(), q: V() }));
+    this.pos = new Float32Array((C + 1) * Rw * 3); const uv = new Float32Array((C + 1) * Rw * 2), idx = [];
+    for (let r = 0; r < Rw; r++) for (let c = 0; c <= C; c++) { uv[(r * (C + 1) + c) * 2] = c / C * 5; uv[(r * (C + 1) + c) * 2 + 1] = 1 - r / (Rw - 1); }
+    for (let r = 0; r < Rw - 1; r++) for (let c = 0; c < C; c++) { const a = r * (C + 1) + c; idx.push(a, a + C + 1, a + 1, a + 1, a + C + 1, a + C + 2); }
+    const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.BufferAttribute(this.pos, 3)); g.setAttribute('uv', new THREE.BufferAttribute(uv, 2)); g.setIndex(idx);
+    this.mesh = new THREE.Mesh(g, mat); this.mesh.castShadow = true; this.mesh.frustumCulled = false; scene.add(this.mesh); this.init = false; this.t = 0;
+    this.len = .118; this.hw = r => 2 * Math.PI * (.172 + r * .026) / C;           // drop per row; ring spacing widens toward the hem
+  }
+  update(dt, waist, legs, vel) {
+    dt = Math.min(dt, .033); this.t += dt; const { C, R: Rw, pts: P } = this;
+    if (!this.init || P[0].p.distanceToSquared(waist[0]) > .5) {
+      let cx = 0, cz = 0; for (const w of waist) { cx += w.x / C; cz += w.z / C; }
+      for (let r = 0; r < Rw; r++) for (let c = 0; c < C; c++) { const o = P[r * C + c], w = waist[c], k = 1 + r * .13; o.p.set(cx + (w.x - cx) * k, Math.max(.03, w.y - r * this.len), cz + (w.z - cz) * k); o.q.copy(o.p); }
+      this.init = true;
+    }
+    // cloth is worn, not towed: most of the body's travel carries it along, the rest it has to catch up
+    let mx = 0, mz = 0; for (const w of waist) { mx += w.x / C; mz += w.z / C; }
+    if (this.lx !== undefined) { const dx = (mx - this.lx) * .6, dz = (mz - this.lz) * .6; for (let i = C; i < P.length; i++) { const o = P[i]; o.p.x += dx; o.q.x += dx; o.p.z += dz; o.q.z += dz; } }
+    this.lx = mx; this.lz = mz;
+    for (let c = 0; c < C; c++) P[c].p.copy(waist[c]);
+    const g = 11 * dt * dt, wf = (.15 + wind.gust * 1.5) * dt * dt;
+    for (let i = C; i < P.length; i++) { const o = P[i]; _c.subVectors(o.p, o.q).multiplyScalar(.93); o.q.copy(o.p); o.p.add(_c); o.p.y -= g * 1.5; o.p.x += wf * wind.x * (1 + Math.sin(this.t * 2.3 + i) * .5); o.p.z += wf * wind.z; }
+    for (let k = 0; k < 3; k++) {
+      for (let r = 1; r < Rw; r++) for (let c = 0; c < C; c++) {
+        const i = r * C + c, o = P[i].p, up = P[i - C].p; _c.subVectors(o, up); let l = _c.length() || 1e-4; o.copy(up).addScaledVector(_c, this.len / l);
+        const a = P[r * C + (c + C - 1) % C].p; _c.subVectors(o, a); l = _c.length() || 1e-4;
+        // cloth resists stretch, not folding: neighbours may close up into pleats but never pull past their width
+        const hw = this.hw(r), want = l > hw ? hw : l < hw * .5 ? hw * .5 : l, e = (l - want) / l * .5; a.addScaledVector(_c, e); o.addScaledVector(_c, -e);
+        const top = P[c].p.y - r * this.len * .5; if (o.y > top) o.y = top;               // and it hangs: it cannot fly up past a fan
+      }
+      // the legs: nothing of the cloth may sit inside a thigh or shin
+      for (let i = C; i < P.length; i++) {
+        const o = P[i].p;
+        for (let L = 0; L < 2; L++) for (let s = 0; s < 2; s++) {
+          const a = legs[L][s], b = legs[L][s + 1]; _c.subVectors(b, a); const t = THREE.MathUtils.clamp(_d.subVectors(o, a).dot(_c) / (_c.lengthSq() || 1e-4), 0, 1);
+          _d.copy(a).addScaledVector(_c, t); _c.subVectors(o, _d); const d = _c.length() || 1e-4, rad = s ? .105 : .12; if (d < rad) o.addScaledVector(_c, (rad - d) / d);
+        }
+        if (o.y < .03) o.y = .03;
+      }
+    }
+    for (let r = 0; r < Rw; r++) for (let c = 0; c <= C; c++) { const q = P[r * C + c % C].p, o = (r * (C + 1) + c) * 3; this.pos[o] = q.x; this.pos[o + 1] = q.y; this.pos[o + 2] = q.z; }
+    const ge = this.mesh.geometry; ge.attributes.position.needsUpdate = true; ge.computeVertexNormals();
+  }
+}
+
+/* a kimono sleeve: a deep pouch of cloth hung the length of the forearm */
 class Sleeve {
   constructor(mat) {
-    this.pts = Array.from({ length: 8 }, () => ({ p: V(), q: V() }));       // 2 columns x 4 rows, row 0 pinned
-    this.pos = new Float32Array(24); const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.BufferAttribute(this.pos, 3));
-    const idx = []; for (let r = 0; r < 3; r++) { const a = r * 2; idx.push(a, a + 1, a + 2, a + 1, a + 3, a + 2); } g.setIndex(idx);
-    this.mesh = new THREE.Mesh(g, mat); this.mesh.castShadow = true; this.mesh.frustumCulled = false; scene.add(this.mesh); this.init = false;
+    const C = 4, Rw = 6; this.C = C; this.R = Rw; this.pts = Array.from({ length: C * Rw }, () => ({ p: V(), q: V() }));
+    this.pos = new Float32Array(C * Rw * 3); const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.BufferAttribute(this.pos, 3));
+    const idx = []; for (let r = 0; r < Rw - 1; r++) for (let c = 0; c < C - 1; c++) { const a = r * C + c; idx.push(a, a + 1, a + C, a + 1, a + C + 1, a + C); } g.setIndex(idx);
+    this.mesh = new THREE.Mesh(g, mat); this.mesh.castShadow = true; this.mesh.frustumCulled = false; scene.add(this.mesh); this.init = false; this.t = 0;
   }
   update(dt, elbow, wrist, on) {
-    this.mesh.visible = on; if (!on) return; dt = Math.min(dt, .033);
-    const P = this.pts, a = _a.lerpVectors(elbow, wrist, .12), b = _b.lerpVectors(elbow, wrist, .92); a.y -= .07; b.y -= .06;
-    if (!this.init || P[0].p.distanceToSquared(a) > .5) { for (let i = 0; i < 8; i++) { P[i].p.copy(i % 2 ? b : a); P[i].p.y -= (i >> 1) * .1; P[i].q.copy(P[i].p); } this.init = true; }
-    P[0].p.copy(a); P[1].p.copy(b); const w = a.distanceTo(b);
-    for (let i = 2; i < 8; i++) { const o = P[i]; _c.subVectors(o.p, o.q).multiplyScalar(.93); o.q.copy(o.p); o.p.add(_c); o.p.y -= 12 * dt * dt; if (o.p.y < .03) o.p.y = .03; }
-    const link = (i, j, L) => { const u = P[i].p, v = P[j].p; _c.subVectors(v, u); const l = _c.length() || 1e-4, e = (l - L) / l; if (i < 2) v.addScaledVector(_c, -e); else { u.addScaledVector(_c, e * .5); v.addScaledVector(_c, -e * .5); } };
-    for (let k = 0; k < 3; k++) for (let r = 0; r < 3; r++) { link(r * 2, r * 2 + 2, .1); link(r * 2 + 1, r * 2 + 3, .1); link(r * 2 + 2, r * 2 + 3, w); }
-    for (let i = 0; i < 8; i++) { this.pos[i * 3] = P[i].p.x; this.pos[i * 3 + 1] = P[i].p.y; this.pos[i * 3 + 2] = P[i].p.z; }
-    const g = this.mesh.geometry; g.attributes.position.needsUpdate = true; g.computeVertexNormals();
+    this.mesh.visible = on; if (!on) return; dt = Math.min(dt, .033); this.t += dt;
+    const { C, R: Rw, pts: P } = this, pin = c => _b.lerpVectors(elbow, wrist, -.08 + c / (C - 1) * 1.02).setY(_b.y - .07), w = elbow.distanceTo(wrist) * 1.02 / (C - 1), L = .068;
+    if (!this.init || P[0].p.distanceToSquared(pin(0)) > .5) { for (let i = 0; i < P.length; i++) { P[i].p.copy(pin(i % C)); P[i].p.y -= (i / C | 0) * L; P[i].q.copy(P[i].p); } this.init = true; }
+    for (let c = 0; c < C; c++) P[c].p.copy(pin(c));
+    const g = 12 * dt * dt, wf = (.2 + wind.gust * 2) * dt * dt;
+    for (let i = C; i < P.length; i++) { const o = P[i]; _c.subVectors(o.p, o.q).multiplyScalar(.94); o.q.copy(o.p); o.p.add(_c); o.p.y -= g; o.p.x += wf * wind.x; o.p.z += wf * wind.z; if (o.p.y < .03) o.p.y = .03; }
+    for (let k = 0; k < 3; k++) for (let r = 1; r < Rw; r++) for (let c = 0; c < C; c++) {
+      const i = r * C + c, o = P[i].p, up = P[i - C].p; _c.subVectors(o, up); let l = _c.length() || 1e-4; o.copy(up).addScaledVector(_c, L / l);
+      if (c > 0) { const a = P[i - 1].p; _c.subVectors(o, a); l = _c.length() || 1e-4; const e = (l - w * (1 - r * .04)) / l * .5; a.addScaledVector(_c, e); o.addScaledVector(_c, -e); }
+    }
+    for (let i = 0; i < P.length; i++) { this.pos[i * 3] = P[i].p.x; this.pos[i * 3 + 1] = P[i].p.y; this.pos[i * 3 + 2] = P[i].p.z; }
+    const ge = this.mesh.geometry; ge.attributes.position.needsUpdate = true; ge.computeVertexNormals();
   }
 }
 
@@ -487,7 +489,6 @@ class Tails {
     this.init = true; this.t = (this.t || 0) + dt; this.mesh.geometry.attributes.position.needsUpdate = true;
   }
 }
-const _d2 = V();
 const _j = { hip: V(), neck: V(), a: V(), b: V(), mid: V(), end: V(), grip: V(), sR: V(), sL: V(),
   qC: new THREE.Quaternion(), qH: new THREE.Quaternion(), qHead: new THREE.Quaternion() };
 function seg(mesh, a, b) {

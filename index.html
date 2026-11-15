@@ -136,8 +136,8 @@ html:not(.touch) .touch-only{display:none!important}
 <div id="hud" class="layer">
   <div class="side l"><div class="nm">You</div><div class="bar"><b id="p-post"></b></div><div class="lbl">posture</div><div class="pips" id="p-pips"></div></div>
   <div class="side r"><div class="nm" id="e-name"></div><div class="bar"><b id="e-post"></b></div><div class="lbl">posture</div><div class="pips" id="e-pips"></div></div>
-  <div id="hint"><span class="desk-only">mouse — set guard · left click — cut · right click — guard, tap to parry · E — thrust · space — dodge</span>
-    <span class="touch-only">swipe red pad — cut · swipe down — thrust · hold guard + swipe — guard a side</span></div>
+  <div id="hint"><span class="desk-only">click — cut (with A or D: from that side) · double click — thrust · right click — guard, tap to parry · space — dodge</span>
+    <span class="touch-only">tap red pad — cut, the way you are moving · double tap — thrust · guard — block that side</span></div>
 </div>
 <div class="ring" id="ring-p" style="display:none"><svg viewBox="-60 -60 120 120"><path class="a-high" d="M-30 -39 A50 50 0 0 1 30 -39"/><path class="a-left" d="M-44 -22 A50 50 0 0 0 -44 22"/><path class="a-right" d="M44 -22 A50 50 0 0 1 44 22"/><circle r="11"/></svg></div>
 <div class="ring" id="ring-e" style="display:none"><svg viewBox="-60 -60 120 120"><path class="a-high" d="M-30 -39 A50 50 0 0 1 30 -39"/><path class="a-left" d="M-44 -22 A50 50 0 0 0 -44 22"/><path class="a-right" d="M44 -22 A50 50 0 0 1 44 22"/><circle r="11"/></svg></div>
@@ -163,21 +163,20 @@ html:not(.touch) .touch-only{display:none!important}
   <div class="kanji">斬</div>
   <h1>ZAN<small>one cut decides</small></h1>
   <div class="how desk-only">
-    <b>Move mouse</b><span>set your guard — high, left or right</span>
-    <b>Left click</b><span>cut from the guard you hold</span>
-    <b>Right click</b><span>guard that side · tap just before impact to parry · tap mid-swing to feint</span>
-    <b>E</b><span>thrust — pierces a lazy guard, punishes a miss</span>
+    <b>Left click</b><span>cut high · moving left (A) cuts from the left · moving right (D) from the right</span>
+    <b>Double click</b><span>thrust — pierces a lazy guard, punishes a miss</span>
+    <b>Right click</b><span>guard — high, or the side you are moving to · tap just before impact to parry</span>
     <b>W A S D · Space</b><span>step · dodge · walk into a bind to shove, kick or throw</span>
   </div>
   <div class="how touch-only">
     <b>Left pad</b><span>move</span>
-    <b>Red pad</b><span>swipe up / left / right to cut from that side · down to thrust</span>
-    <b>Guard</b><span>hold and swipe to guard a side · press just before impact to parry</span>
+    <b>Red pad</b><span>tap to cut — high, or from the side you are moving to · double tap to thrust</span>
+    <b>Guard</b><span>hold to block high, or the side you are moving to · press just before impact to parry</span>
     <b>Dodge</b><span>slip away from the blade</span>
   </div>
   <p class="rules">Match your guard to the side the cut comes from. A parry opens your opponent; a clean cut wounds; three wounds and they kneel. Break a guard, then cut — and it is over.</p>
   <button id="m-go">Draw</button>
-  <span class="build">Build V73</span><a class="legacy" href="classic.html">classic version</a>
+  <span class="build">Build V74</span><a class="legacy" href="classic.html">classic version</a>
 </div>
 
 <div id="verdict" class="layer">
@@ -188,11 +187,11 @@ html:not(.touch) .touch-only{display:none!important}
 
 <script type="importmap">
 { "imports": {
-  "three": "./vendor/three.module.js?v=v73",
-  "zan/gfx": "./src/gfx.js?v=v73", "zan/figure": "./src/figure.js?v=v73", "zan/duel": "./src/duel.js?v=v73",
-  "zan/input": "./src/input.js?v=v73", "zan/replay": "./src/replay.js?v=v73", "zan/audio": "./src/audio.js?v=v73" } }
+  "three": "./vendor/three.module.js?v=v74",
+  "zan/gfx": "./src/gfx.js?v=v74", "zan/figure": "./src/figure.js?v=v74", "zan/duel": "./src/duel.js?v=v74",
+  "zan/input": "./src/input.js?v=v74", "zan/replay": "./src/replay.js?v=v74", "zan/audio": "./src/audio.js?v=v74" } }
 </script>
 <script>if (matchMedia('(pointer:coarse)').matches || 'ontouchstart' in window) document.documentElement.classList.add('touch');</script>
-<script type="module" src="./src/main.js?v=v73"></script>
+<script type="module" src="./src/main.js?v=v74"></script>
 </body>
 </html>

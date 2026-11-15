@@ -4,7 +4,7 @@ import { IS_TOUCH } from 'zan/gfx';
 const keys = new Set();
 const I = { mx: 0, mz: 0, stance: null, attack: false, thrust: false, guard: false, dodge: false };
 let edges = { attack: false, thrust: false, dodge: false, stance: null, finish: false, mercy: false, confirm: false, swap: false, bare: false };
-let mouseGuard = false, touchGuard = false, accX = 0, accY = 0, accT = 0, joy = { x: 0, y: 0 };
+let lastClick = 0, lastTap = 0, mouseGuard = false, touchGuard = false, accX = 0, accY = 0, accT = 0, joy = { x: 0, y: 0 };
 export const state = { locked: false, fighting: false };
 
 export function init(canvas) {
@@ -28,21 +28,10 @@ export function init(canvas) {
   canvas.addEventListener('mousedown', e => {
     if (IS_TOUCH) return;
     if (state.fighting && !document.pointerLockElement && canvas.requestPointerLock) { try { const r = canvas.requestPointerLock(); r && r.catch && r.catch(() => {}); } catch (_) {} }
-    if (e.button === 0) edges.attack = true; else if (e.button === 2) mouseGuard = true; else if (e.button === 1) { edges.thrust = true; e.preventDefault(); }
+    if (e.button === 0) { const t = performance.now(); if (t - lastClick < 300) { edges.thrust = true; lastClick = 0; } else { edges.attack = true; lastClick = t; } } else if (e.button === 2) mouseGuard = true; else if (e.button === 1) { edges.thrust = true; e.preventDefault(); }
   });
   addEventListener('mouseup', e => { if (e.button === 2) mouseGuard = false; });
   addEventListener('contextmenu', e => e.preventDefault());
-  // the mouse draws the guard: a short push up, left or right
-  addEventListener('mousemove', e => {
-    if (!state.fighting || IS_TOUCH) return;
-    const t = performance.now(); if (t - accT > 140) accX = accY = 0; accT = t;
-    accX += e.movementX || 0; accY += e.movementY || 0;
-    const m = Math.hypot(accX, accY);
-    if (m > 34) {
-      if (Math.abs(accX) > Math.abs(accY) * .9) edges.stance = accX < 0 ? 'left' : 'right'; else if (accY < 0) edges.stance = 'high';
-      accX = accY = 0;
-    }
-  });
   if (IS_TOUCH) initTouch();
 }
 
@@ -67,7 +56,7 @@ function initTouch() {
       edges.stance = Math.abs(x) > -y * .9 ? (x < 0 ? 'left' : 'right') : 'high';
       if (!touchGuard) edges.attack = true;
     }
-  }, () => { if (!fired && !touchGuard) edges.attack = true; fired = false; sw = null; });
+  }, () => { if (!fired && !touchGuard) { const t = performance.now(); if (t - lastTap < 320) { edges.thrust = true; lastTap = 0; } else { edges.attack = true; lastTap = t; } } fired = false; sw = null; });
   const hold = (id, down, up) => { const b = $(id); b.addEventListener('touchstart', e => { down(); b.classList.add('on'); e.preventDefault(); }, { passive: false }); const u = () => { up && up(); b.classList.remove('on'); }; b.addEventListener('touchend', u); b.addEventListener('touchcancel', u); };
   hold('btn-guard', () => { touchGuard = true; }, () => { touchGuard = false; });
   hold('btn-dodge', () => { edges.dodge = true; });
@@ -84,7 +73,10 @@ export function read() {
   if (Math.abs(I.mz) < .25) I.mz = 0; if (Math.abs(I.mx) < .25) I.mx = 0;
   I.mz = Math.max(-1, Math.min(1, I.mz)); I.mx = Math.max(-1, Math.min(1, I.mx));
   I.guard = mouseGuard || touchGuard || keys.has('KeyK') || keys.has('ShiftLeft') || keys.has('ShiftRight');
-  I.attack = edges.attack; I.thrust = edges.thrust; I.dodge = edges.dodge; I.stance = edges.stance;
+  I.attack = edges.attack; I.thrust = edges.thrust; I.dodge = edges.dodge;
+  // the way you are moving is the way you cut, and the side you guard: left, right, or — standing your ground — high
+  const dir = I.mx > .35 ? 'left' : I.mx < -.35 ? 'right' : 'high';
+  I.stance = edges.stance || (I.attack || I.thrust || I.guard ? dir : null);
   const out = { finish: edges.finish, mercy: edges.mercy, confirm: edges.confirm, swap: edges.swap, bare: edges.bare };
   edges = { attack: false, thrust: false, dodge: false, stance: null, finish: false, mercy: false, confirm: false, swap: false, bare: false };
   return { intent: I, ...out };

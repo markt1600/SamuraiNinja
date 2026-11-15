@@ -180,7 +180,7 @@ export function init(canvas) {
   flashL = new THREE.PointLight(0xfff1cf, 0, 9, 2); scene.add(flashL);
   resize();
   addEventListener('resize', resize);
-  buildArena(); buildDressing(); buildNature(); buildTorches(); buildParticles(); buildSnow(); buildBursts();
+  buildArena(); buildDressing(); buildNature(); buildTorches(); buildDust(); buildParticles(); buildSnow(); buildBursts();
   return { renderer, scene, camera };
 }
 
@@ -419,11 +419,44 @@ export function inkSplash(p, dir, n = 14) {
 export function vapor(p, dir) {
   for (let i = 0; i < 3; i++) { _v.set(dir.x * .5 + (Math.random() - .5) * .2, .12 + Math.random() * .1, dir.z * .5 + (Math.random() - .5) * .2); emit(4, p, _v, .028 + Math.random() * .02, .8 + Math.random() * .5); }
 }
-export function puff(p, n = 8) {
-  tap('puff', [p, n]);
+/** powder kicked off the ground: soft washes of grey that swell, drift on the wind and thin out */
+export function puff(p, n = 8, power = 1) {
+  tap('puff', [p, n, power]);
   for (let i = 0; i < n; i++) {
-    _v.set(Math.random() - .5, Math.random() * .9, Math.random() - .5).multiplyScalar(1.6);
-    _v2.set(p.x, .04, p.z); emit(2, _v2, _v, .03 + Math.random() * .04, .4 + Math.random() * .3);
+    const o = dusts[dustNext]; dustNext = (dustNext + 1) % dusts.length;
+    o.m.position.set(p.x + (Math.random() - .5) * .22, .06 + Math.random() * .08, p.z + (Math.random() - .5) * .22);
+    o.v.set((Math.random() - .5) * 1.7, .35 + Math.random() * .9, (Math.random() - .5) * 1.7).multiplyScalar(power);
+    o.life = o.max = .55 + Math.random() * .6; o.size = (.14 + Math.random() * .16) * (.7 + power * .4); o.spin = (Math.random() - .5) * 2; o.rot = Math.random() * 6; o.m.visible = true;
+  }
+}
+/** dust thrown one way: off a sliding foot, a lunge, a falling body */
+export function spray(p, dir, n = 6, power = 1) {
+  tap('spray', [p, dir, n, power]);
+  for (let i = 0; i < n; i++) {
+    const o = dusts[dustNext], k = .4 + Math.random() * 1.1; dustNext = (dustNext + 1) % dusts.length;
+    o.m.position.set(p.x + (Math.random() - .5) * .15, .05 + Math.random() * .06, p.z + (Math.random() - .5) * .15);
+    o.v.set(dir.x * 2.6 * k + (Math.random() - .5) * .8, .5 + Math.random() * 1.2, dir.z * 2.6 * k + (Math.random() - .5) * .8).multiplyScalar(power);
+    o.life = o.max = .5 + Math.random() * .55; o.size = (.12 + Math.random() * .14) * (.7 + power * .4); o.spin = (Math.random() - .5) * 2; o.rot = Math.random() * 6; o.m.visible = true;
+  }
+}
+const dusts = []; let dustNext = 0;
+function buildDust() {
+  const t = tex((c, w) => {                              // a bled wash: soft heart, ragged rim
+    for (let i = 0; i < 26; i++) { const a = Math.random() * 6.3, r = Math.random() * w * .2, R = w * (.14 + Math.random() * .16); const g = c.createRadialGradient(w / 2 + Math.cos(a) * r, w / 2 + Math.sin(a) * r, 0, w / 2 + Math.cos(a) * r, w / 2 + Math.sin(a) * r, R); g.addColorStop(0, 'rgba(255,255,255,.2)'); g.addColorStop(1, 'rgba(255,255,255,0)'); c.fillStyle = g; c.fillRect(0, 0, w, w); }
+  }, 128, 128), geo = new THREE.PlaneGeometry(1, 1);
+  for (let i = 0; i < (IS_TOUCH ? 40 : 72); i++) {
+    const m = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({ map: t, transparent: true, depthWrite: false, fog: false, color: i % 3 ? 0xb4bccd : 0xe9edf4 }));
+    m.layers.set(FX); m.visible = false; m.renderOrder = 2; scene.add(m); dusts.push({ m, v: new THREE.Vector3(), life: 0 });
+  }
+}
+function tickDust(dt) {
+  for (const o of dusts) {
+    if (o.life <= 0) continue; o.life -= dt; if (o.life <= 0) { o.m.visible = false; continue; }
+    const k = 1 - o.life / o.max;
+    o.v.multiplyScalar(Math.max(0, 1 - 2.6 * dt)); o.v.y -= 1.1 * dt; o.v.x += wind.x * wind.gust * 1.6 * dt; o.v.z += wind.z * wind.gust * 1.6 * dt;
+    o.m.position.addScaledVector(o.v, dt); if (o.m.position.y < .04) o.m.position.y = .04; o.rot += o.spin * dt;
+    const s = o.size * (1 + k * 2.4); o.m.scale.set(s, s, 1); o.m.quaternion.copy(camera.quaternion).multiply(_q.setFromAxisAngle(_v.set(0, 0, 1), o.rot));
+    o.m.material.opacity = Math.min(1, k * 9) * (1 - k) ** 1.3 * .95;
   }
 }
 function tickParticles(dt) {
@@ -742,7 +775,7 @@ function tickWind(dt, t) {
 }
 
 export function tick(dt, t) {
-  clock = t; tickWind(dt, t); tickTorches(dt, t); tickParticles(dt); tickSnow(dt, t); tickBursts(dt); tickDressing(dt, t); tickNature(dt, t);
+  clock = t; tickWind(dt, t); tickTorches(dt, t); tickDust(dt); tickParticles(dt); tickSnow(dt, t); tickBursts(dt); tickDressing(dt, t); tickNature(dt, t);
   if (decalDirty) { decalTex.needsUpdate = true; decalDirty = false; }
 }
 export { scene, camera, renderer };

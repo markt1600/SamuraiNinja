@@ -4,7 +4,7 @@ import * as G from 'zan/gfx';
 
 const KEEP = 11;
 let tape = [], fx = [], clock = 0, play = null;
-const FX = { bleed: G.bleed, sparks: G.sparks, inkSplash: G.inkSplash, puff: G.puff, burst: G.burst };
+const FX = { bleed: G.bleed, sparks: G.sparks, inkSplash: G.inkSplash, puff: G.puff, spray: G.spray, burst: G.burst };
 const log = (name, args) => fx.push({ t: clock, name, args });
 
 export function reset() { tape = []; fx = []; play = null; G.fxTap.on = log; }

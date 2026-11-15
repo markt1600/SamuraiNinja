@@ -23,10 +23,9 @@ Static site: open `index.html` through any web server (`python3 -m http.server`)
 | | Desktop | Touch |
 |---|---|---|
 | Move | W A S D | left pad |
-| Set guard | move the mouse (or arrow keys) | hold Guard and swipe the red pad |
-| Cut | left click (J) | swipe the red pad up / left / right, or tap it |
-| Guard / parry / feint | right click (K, Shift) | Guard button |
-| Thrust | E (L, middle click) | swipe the red pad down |
+| Cut | left click (J): high by default, from the left while moving left (A), from the right while moving right (D) | tap the red pad, same rule; or swipe it toward a side |
+| Thrust | double click (E, L, middle click) | double tap the red pad, or swipe it down |
+| Guard / parry / feint | right click (K, Shift): guards high, or the side you are moving to | Guard button |
 | Dodge | Space | Dodge button |
 | Finish / mercy | F / M | on-screen buttons |
 

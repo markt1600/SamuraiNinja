@@ -33,7 +33,7 @@ export class Fighter {
     this.posture = 0; this.lastPosture = -9; this.guard = false; this.guardAt = -9; this.guardUp = -9; this.guardHeld = false;
     this.atk = null; this.atkId = 0; this.atkW = 0; this.dodgeCd = 0; this.buffer = null; this.riposteUntil = 0;
     this.vel = new THREE.Vector3(); this.push = new THREE.Vector3(); this.alive = true; this.dripT = 0; this.dodgeSide = false;
-    this.chops = []; this.drive = 0; this.spared = false;
+    this.chops = []; this.drive = 0; this.spared = false; this.walk = new THREE.Vector3();
   }
   get busy() { return this.state !== 'idle'; }
   get helpless() { return this.state === 'broken' || this.state === 'kneel'; }
@@ -82,7 +82,8 @@ export class Fighter {
         if (want !== this.poseName) { this.poseName = want; fig.go([want, this.guard ? .09 : .16, 'out']); }
         const sp = this.guard ? 1.3 : 1;
         this.fwd(_v).multiplyScalar(I.mz * (I.mz > 0 ? 2.7 : 2.2) * sp); this.left(_w).multiplyScalar(I.mx * 2.3 * sp);
-        this.vel.add(_v).add(_w); if (this.guard) this.vel.multiplyScalar(.55);
+        _v.add(_w); if (this.guard) _v.multiplyScalar(.55);
+        this.walk.lerp(_v, Math.min(1, dt * 9)); this.vel.add(this.walk);                // a body has weight: it takes a moment to start and to stop
         const b = this.buffer; this.buffer = null;
         if (I.dodge && this.dodgeCd <= 0) {
           let mx = I.mx, mz = Math.min(0, I.mz); if (!mx && !mz) mz = -1;
@@ -95,18 +96,19 @@ export class Fighter {
         break;
       }
       case 'windup': {
+        if (I.thrust && !this.atk.thrust && !this.atk.rip && !this.atk.exec && this.t < .3) { this.startAttack(true, duel); break; }   // a second click turns the cut into a thrust
         const reach = this.atk.thrust ? T.thrustReach : T.reach;
         if (this.t > this.dur * .25 && dist > reach - .45) this.fwd(this.vel).multiplyScalar(this.atk.thrust ? 3.6 : 2.8);
         fig.striking = this.t > this.dur * .58;
         if (!this.atk.glint && this.dur - this.t < T.parry) { this.atk.glint = true; G.burst('star', fig.tip, 0xffffff, .5, .14); }
         if (gEdge && this.t < this.dur * .6 && !this.atk.rip) {           // feint
           this.atk = null; this.set('recover', T.feint); this.poseName = ''; fig.go([this.stance, T.feint, 'out']); duel.emit('feint', this);
-        } else if (this.t >= this.dur) { duel.resolve(this, foe); if (this.state === 'windup') { this.set('strike', T.follow); fig.striking = true; } }
+        } else if (this.t >= this.dur) { G.spray(fig.feet[1].p, this.fwd(_w), 5, .9); duel.resolve(this, foe); if (this.state === 'windup') { this.set('strike', T.follow); fig.striking = true; } }
         break;
       }
       case 'strike':
         fig.striking = true;
-        if (this.t >= this.dur) { const d = this.recoverDur || T.recover; this.set('recover', d); this.poseName = ''; fig.go([this.stance, d * .95, 'io']); }
+        if (this.t >= this.dur) { const d = this.recoverDur || T.recover; this.set('recover', d); this.poseName = ''; fig.go([this.stance, d * .95, 'settle']); }
         break;
       case 'recover':
         if (I.attack) this.buffer = 'cut'; else if (I.thrust) this.buffer = 'thrust';
@@ -147,7 +149,7 @@ export class Fighter {
       }
     }
     // shoves and knock-back bleed off quickly
-    if (this.push.lengthSq() > 5 && Math.random() < dt * 24) G.puff(this.pos, 2);       // heels ploughing the snow
+    if (this.push.lengthSq() > 4 && Math.random() < dt * 30) G.spray(this.pos, _w.copy(this.push).normalize().negate(), 2, .8);       // heels ploughing the snow
     this.vel.add(this.push); this.push.multiplyScalar(Math.max(0, 1 - 7 * dt));
     this.pos.addScaledVector(this.vel, dt);
     // composure returns when the pressure is off
@@ -156,6 +158,8 @@ export class Fighter {
     if (this.alive && this.wounds > 0 && (this.dripT -= dt) < 0) {
       this.dripT = rnd(.25, .7) / this.wounds; G.bleed(fig.chest, _v.set(0, -1, 0), 1, .6, .3);
     }
+    if (this.state !== 'idle') this.walk.multiplyScalar(Math.max(0, 1 - 10 * dt));
+    fig.exert = this.alive ? Math.min(1, this.posture / 100 + this.wounds * .12) : 0;
     fig.yaw = this.yaw; fig.vel.copy(this.vel); fig.setWounds(Math.min(3, this.wounds));
   }
   endExec(duel) { this.fig.sword.visible = true; if (duel.over) this.flourish(); else { this.atk = null; this.set('idle'); this.poseName = ''; } }
@@ -320,7 +324,7 @@ export class Duel {
     sfx.cut(); sfx.grunt(def.isPlayer);
     def.push.addScaledVector(away, 3.4); def.posture = Math.min(96, def.posture + 18); def.lastPosture = this.time;
     if (def.wounds >= MAX_WOUNDS) {
-      def.set('kneel'); def.fig.go(['hurt', .2, 'out'], ['kneel', .6, 'io']); def.fig.dropSword(); this.yieldT = 0; this.emit('yield', def);
+      def.set('kneel'); def.fig.go(['hurt', .2, 'out'], ['kneel', .6, 'io']); setTimeout(() => G.puff(def.pos, 8, 1), 650); def.fig.dropSword(); this.yieldT = 0; this.emit('yield', def);
     } else { def.set('hit', T.hit); def.poseName = ''; const hp = atk.thrust ? 'hurt' : atk.dir === 'high' ? 'hurtH' : atk.dir === 'left' ? 'hurtR' : 'hurtL'; def.fig.go([hp, .1, 'out'], [hp, .22], [def.stance, .22, 'io']); this.emit('wound', def); }
   }
   sweep(att, atk, out) {
@@ -348,6 +352,7 @@ export class Duel {
     const last = def === this.a || !this.foes.some(f => f.alive && !f.spared);
     G.look.shake = 1; G.look.flash = .5; this.hitStop = .16; this.slow = last ? 1.5 : .5; G.look.invert = .09;
     setTimeout(() => def.fig.dropSword(), 380);
+    setTimeout(() => G.puff(def.pos, 16, 1.5), how === 'high' ? 900 : 1500);                // the body meets the snow
     const at = how === 'left' || how === 'right' ? fig.neckW : fig.chest;
     G.burst('streak', at, 0xffffff, 5, .3, sw, 1.5); G.burst('streak', at, G.BLOOD, 7, .6, sw, 1.3); G.burst('ring', at, G.BLOOD, 1.2, .5, null, 4); G.inkSplash(at, sw, 26);
     if (!last) { this.emit('down', def); return; }
