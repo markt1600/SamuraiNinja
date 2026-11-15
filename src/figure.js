@@ -178,11 +178,24 @@ export class Figure {
       const e = add(new THREE.BoxGeometry(.032, .012, .01), ink, this.headG); e.position.set(sx * .046, .012, .118); e.castShadow = false;
       const b = add(new THREE.BoxGeometry(.046, .01, .01), ink, this.headG); b.position.set(sx * .046, .042, .116); b.rotation.z = -sx * .28; b.castShadow = false;
     }
-    if (look.hat === 'kasa') { const k = add(GEO.kasa, toonTex(0xc7ad72, pat('kasa')), this.headG); k.position.y = .12; }
-    else {
-      const h = add(GEO.hair, toon(look.hair ?? 0x18120f), this.headG); h.rotation.x = -.28;
-      const k = add(GEO.knot, toon(look.hair ?? 0x18120f), this.headG); k.position.set(0, .14, -.05); k.rotation.x = -.5;
-    }
+    // the head is the signature: each fighter is known first by its outline
+    const hairM = toon(look.hair ?? 0x18120f), H = this.headG, hat = look.hat || 'knot';
+    const cap = () => { const h = add(GEO.hair, hairM, H); h.rotation.x = -.28; };
+    if (hat === 'kasa') { const k = add(GEO.kasa, toonTex(0xc7ad72, pat('kasa')), H); k.position.y = .12; }
+    else if (hat === 'knot') { cap(); const k = add(GEO.knot, hairM, H); k.position.set(0, .14, -.05); k.rotation.x = -.5; }
+    else if (hat === 'long') {                              // loose hair to the shoulder blades, and a high tail
+      cap(); const m = add(new THREE.CylinderGeometry(.125, .075, .46, 9), hairM, H); m.position.set(0, -.2, -.075); m.rotation.x = .16; m.scale.z = .6;
+      const t = add(new THREE.CylinderGeometry(.03, .05, .3, 6), hairM, H); t.position.set(0, .2, -.1); t.rotation.x = -.9;
+    } else if (hat === 'jingasa') {                         // a flat lacquered war hat with a gilt rim
+      const k = add(new THREE.ConeGeometry(.31, .075, 18), toon(0x14110f), H); k.position.y = .125;
+      const r = add(new THREE.TorusGeometry(.305, .014, 5, 20), flat(0xd9a93a), H); r.position.y = .09; r.rotation.x = Math.PI / 2;
+      const kn = add(new THREE.SphereGeometry(.03, 8, 6), flat(0xd9a93a), H); kn.position.y = .165;
+    } else if (hat === 'hood') {                            // wrapped in black to the eyes
+      const h = add(new THREE.SphereGeometry(.142, 14, 10), toon(look.hood ?? 0x101012), H); h.scale.set(1, 1.06, 1.04);
+      const sl = add(new THREE.BoxGeometry(.17, .034, .03), skin, H); sl.position.set(0, .014, .128);
+      for (const sx of [-1, 1]) { const e = add(new THREE.BoxGeometry(.03, .012, .01), ink, H); e.position.set(sx * .045, .014, .146); }
+      const n = add(new THREE.CylinderGeometry(.07, .1, .12, 8), toon(look.hood ?? 0x101012), H); n.position.y = -.14;
+    }                                                       // 'bald': nothing at all
     if (look.band) { const b = add(GEO.band, flat(look.band), this.headG); b.position.y = .035; b.rotation.x = -.12; }
     this.sword = new THREE.Group(); this.root.add(this.sword);
     this.bladeMat = steel(); this.blade = add(GEO.blade, this.bladeMat, this.sword); this.blade.layers.set(FX); this.blade.renderOrder = 4;
@@ -198,6 +211,10 @@ export class Figure {
     this.elb = [V(), V()]; this.wri = [V(), V()]; this.sleeves = [0, 1].map(() => new Sleeve(toon(look.gi, { side: THREE.DoubleSide })));
     this.breath = Math.random() * 6; this.leanV = 0; this.rollV = 0; this.leanS = 0; this.rollS = 0; this.exert = 0;
     this.legJ = [[V(), V(), V()], [V(), V(), V()]]; this.waist = Array.from({ length: 14 }, () => V()); this.hakama = new Hakama(toonTex(look.hakama, pat('pleat'), { side: THREE.DoubleSide }));
+    // build: height and bulk
+    const [bw, bh] = look.build || [1, 1]; this.root.scale.set(bw, bh, bw); this.hakama.len *= bh; this.hakama.wide = bw;
+    if (look.bareArms) { this.noSleeves = true; for (const k of ['uaL', 'faL', 'uaR', 'faR']) { this.m[k].material = skin; this.m[k].scale.x = this.m[k].scale.z = .82; } }
+    const [bl, bz] = look.blade || [1, 1]; this.bladeLen = bl; for (const o of this.sword.children) if (o.layers.mask !== 1) o.scale.set(1, bl, bz);
   }
   dispose() { scene.remove(this.root); scene.remove(this.trail.mesh); scene.remove(this.glint.mesh); for (const o of this.pieces) scene.remove(o.g); if (this.tails) scene.remove(this.tails.mesh); this.sleeves.forEach(c => scene.remove(c.mesh)); scene.remove(this.hakama.mesh); if (this.coat) scene.remove(this.coat.mesh); }
   setWounds(n) { if (n === this.cutN) return; this.cutN = n; this.cuts.forEach((c, i) => { c.visible = i < n; }); }
@@ -303,7 +320,7 @@ export class Figure {
     // world-space handles for the rules and the effects
     R.updateMatrixWorld(true);
     this.base.copy(grip).addScaledVector(p.d, .1).applyMatrix4(R.matrixWorld);
-    this.tip.copy(grip).addScaledVector(p.d, .86).applyMatrix4(R.matrixWorld);
+    this.tip.copy(grip).addScaledVector(p.d, .1 + .76 * this.bladeLen).applyMatrix4(R.matrixWorld);
     this.chest.set(0, .34, 0).applyQuaternion(qC).add(hip).applyMatrix4(R.matrixWorld);
     this.neckW.copy(neck).applyMatrix4(R.matrixWorld);
     if (this.coat) { for (const q of this.pins) q.applyMatrix4(R.matrixWorld); this.coat.update(dt, this.pins, this.pos, this.yaw); }
@@ -311,7 +328,7 @@ export class Figure {
     if (this.tails) this.tails.update(dt);
     for (const q of this.waist) q.applyMatrix4(R.matrixWorld); for (const L of this.legJ) for (const q of L) q.applyMatrix4(R.matrixWorld);
     this.hakama.update(dt, this.waist, this.legJ, this.vel);
-    for (let i = 0; i < 2; i++) this.sleeves[i].update(dt, this.elb[i].applyMatrix4(R.matrixWorld), this.wri[i].applyMatrix4(R.matrixWorld), !this.armOff[i]);
+    for (let i = 0; i < 2; i++) this.sleeves[i].update(dt, this.elb[i].applyMatrix4(R.matrixWorld), this.wri[i].applyMatrix4(R.matrixWorld), !this.armOff[i] && !this.noSleeves);
     this.bladeMat.uniforms.uFlare.value = this.striking ? 1 : 0;          // steel flares as it moves
     this.trail.push(this.base, this.tip, this.striking, dt);
     this.glint.push(this._g0.lerpVectors(this.base, this.tip, .55), this._g1.lerpVectors(this.base, this.tip, .97), this.striking, dt);
@@ -394,7 +411,7 @@ class Hakama {
     for (let r = 0; r < Rw - 1; r++) for (let c = 0; c < C; c++) { const a = r * (C + 1) + c; idx.push(a, a + C + 1, a + 1, a + 1, a + C + 1, a + C + 2); }
     const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.BufferAttribute(this.pos, 3)); g.setAttribute('uv', new THREE.BufferAttribute(uv, 2)); g.setIndex(idx);
     this.mesh = new THREE.Mesh(g, mat); this.mesh.castShadow = true; this.mesh.frustumCulled = false; scene.add(this.mesh); this.init = false; this.t = 0;
-    this.len = .118; this.hw = r => 2 * Math.PI * (.172 + r * .026) / C;           // drop per row; ring spacing widens toward the hem
+    this.len = .118; this.wide = 1; this.hw = r => 2 * Math.PI * (.172 + r * .026) / C * this.wide;           // drop per row; ring spacing widens toward the hem
   }
   update(dt, waist, legs, vel) {
     dt = Math.min(dt, .033); this.t += dt; const { C, R: Rw, pts: P } = this;

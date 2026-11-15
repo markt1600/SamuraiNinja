@@ -10,21 +10,21 @@ const $ = id => document.getElementById(id);
 const ROMAN = ['I', 'II', 'III', 'IV', 'V'];
 const LADDER = [
   { name: 'Genta', title: 'the Ox', blurb: 'Strong, slow to think. He cuts from where his blade already sits.',
-    look: { gi: 0x9a7436, hakama: 0x3b3230, pattern: 'check', crest: 0x2a1a0c }, bare: true,
+    look: { gi: 0xc28a2a, hakama: 0x4d3524, pattern: 'check', crest: 0x2a1a0c, hat: 'bald', build: [1.3, 1.07], bareArms: true, blade: [1.05, 1.7], obi: 0xe9e2d0, skin: 0xd9b38c }, bare: true,
     ai: { react: .36, block: .34, parry: .02, dodge: 0, aggr: .42, mix: .15, feint: 0, thrust: .08, track: .15, punish: .3 } },
   { name: 'Oharu', title: 'the Reed', blurb: 'She waits for you to miss. Do not swing at air.',
-    look: { gi: 0x5d7050, hakama: 0x2b302a, hat: 'kasa', pattern: 'wave', crest: 0xe9e4d6 },
+    look: { gi: 0x6f9460, hakama: 0xd9d0b8, hat: 'kasa', pattern: 'wave', crest: 0xe9e4d6, build: [.88, .9], obi: 0x2f4a2c },
     ai: { react: .3, block: .56, parry: .14, dodge: .1, aggr: .26, mix: .4, feint: .04, thrust: .14, track: .45, punish: .85 } },
   { name: 'Jubei', title: 'the Crow', blurb: 'Half of what he shows you is a lie. Parry the cut, not the shoulder.',
-    look: { gi: 0x3c4b6b, hakama: 0x20222b, pattern: 'stripe', crest: 0xe9e4d6, obi: 0x8e1c1c },
+    look: { gi: 0x2f55a0, hakama: 0x8e9bb4, pattern: 'stripe', crest: 0xe9e4d6, obi: 0x15120f, hat: 'long', build: [.92, 1.1] },
     ai: { react: .27, block: .55, parry: .12, dodge: .1, aggr: .6, mix: .6, feint: .4, thrust: .18, track: .5, punish: .6 } },
   { name: 'Kaede', title: 'the Needle', blurb: 'She fights from a long measure and her point comes straight.',
-    look: { gi: 0x6f3b58, hakama: 0x2a1f28, hat: 'kasa', pattern: 'dots', crest: 0xe9c46a, obi: 0xe9c46a },
+    look: { gi: 0x9c2f58, hakama: 0x1a1418, hat: 'jingasa', pattern: 'dots', crest: 0xe9c46a, obi: 0xe9c46a, tails: 0xe9c46a, blade: [1.28, .8], build: [.95, 1.02] },
     ai: { react: .23, block: .6, parry: .2, dodge: .2, aggr: .62, mix: .7, feint: .18, thrust: .48, track: .6, punish: .8, range: 2.5 } },
   { name: 'Shiro', title: 'the White Death', blurb: 'The master of this shrine does not fight alone. Kuro, his shadow, circles behind you.',
-    second: { name: 'Kuro', title: 'the Shadow', look: { gi: 0x1d1d22, hakama: 0x0f0f12, hat: 'kasa', saya: 0x111114, coat: 0x17171b, obi: 0x5a1010 },
+    second: { name: 'Kuro', title: 'the Shadow', look: { gi: 0x1d1d22, hakama: 0x0f0f12, hat: 'hood', saya: 0x111114, coat: 0x17171b, obi: 0x5a1010, tails: 0x5a1010, build: [1.06, .98] },
       ai: { react: .33, block: .4, parry: .04, dodge: .05, aggr: .38, mix: .35, feint: .05, thrust: .12, track: .3, punish: .35 } },
-    look: { gi: 0xeae5db, hakama: 0xcdc6b8, hair: 0xd9d9d6, saya: 0x8e1c1c, grip: 0x8e1c1c, pattern: 'bloom', obi: 0x8e1c1c, coat: 0xf3efe6, crest: 0xb3261e },
+    look: { gi: 0xeae5db, hakama: 0xcdc6b8, hair: 0xe4e4e0, hat: 'long', build: [1, 1.12], saya: 0x8e1c1c, grip: 0x8e1c1c, pattern: 'bloom', obi: 0x8e1c1c, coat: 0xf3efe6, crest: 0xb3261e },
     ai: { react: .22, block: .58, parry: .2, dodge: .12, aggr: .6, mix: .75, feint: .25, thrust: .22, track: .65, punish: .8 } },
 ];
 const PLAYER = { name: 'You', look: { gi: 0x24262f, hakama: 0x14151a, band: G.BLOOD, tails: G.BLOOD, crest: 0xe9e4d6, obi: 0x8e1c1c } };
